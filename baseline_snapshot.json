@@ -1,0 +1,92 @@
+{
+ "add_comm_uniform_300": {
+  "edges": 7828,
+  "nodes": 7859,
+  "status": "UNSOLVED",
+  "visits": 2074
+ },
+ "model_seed0_curriculum": {
+  "add_succ_right": {
+   "edges": 399,
+   "nodes": 620,
+   "status": "SOLVED",
+   "visits": 122
+  },
+  "add_zero_right": {
+   "edges": 200,
+   "nodes": 315,
+   "status": "SOLVED",
+   "visits": 62
+  },
+  "n_eq_add_n_zero": {
+   "edges": 10,
+   "nodes": 18,
+   "status": "SOLVED",
+   "visits": 3
+  },
+  "symm": {
+   "edges": 7,
+   "nodes": 7,
+   "status": "SOLVED",
+   "visits": 15
+  },
+  "trans": {
+   "edges": 19,
+   "nodes": 19,
+   "status": "SOLVED",
+   "visits": 41
+  }
+ },
+ "uniform_curriculum": {
+  "add_succ_right": {
+   "edges": 619,
+   "nodes": 869,
+   "status": "SOLVED",
+   "visits": 145
+  },
+  "add_zero_right": {
+   "edges": 246,
+   "nodes": 379,
+   "status": "SOLVED",
+   "visits": 63
+  },
+  "n_eq_add_n_zero": {
+   "edges": 33,
+   "nodes": 52,
+   "status": "SOLVED",
+   "visits": 7
+  },
+  "symm": {
+   "edges": 7,
+   "nodes": 7,
+   "status": "SOLVED",
+   "visits": 15
+  },
+  "trans": {
+   "edges": 17,
+   "nodes": 17,
+   "status": "SOLVED",
+   "visits": 34
+  }
+ },
+ "uniform_heldout": {
+  "add_zero_left": {
+   "edges": 4,
+   "nodes": 6,
+   "status": "SOLVED",
+   "visits": 1
+  },
+  "bool_refl": {
+   "edges": 4,
+   "nodes": 6,
+   "status": "SOLVED",
+   "visits": 1
+  },
+  "cong_add_zero_right_combo": {
+   "edges": 153,
+   "nodes": 180,
+   "status": "SOLVED",
+   "visits": 51
+  }
+ }
+}
