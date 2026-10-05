@@ -1,0 +1,129 @@
+// Bindings for the hybrid-variable kernel (refactor spike S1): terms, NbE, declarations, a small typing fragment and the
+// diagnostics the differential harness needs. Tactics, unification and the full typing core are ported in S2-S4.
+#include <nanobind/nanobind.h>
+#include <nanobind/stl/optional.h>
+#include <nanobind/stl/pair.h>
+#include <nanobind/stl/string.h>
+#include <nanobind/stl/tuple.h>
+#include <nanobind/stl/vector.h>
+#include <functional>
+#include "itp_kernel.hpp"
+
+namespace nb = nanobind;
+using namespace nb::literals;
+
+struct ITPError : std::runtime_error { using std::runtime_error::runtime_error; };
+
+struct KernelWrapper {
+    std::unique_ptr<itp::ExecutionContext> exec = std::make_unique<itp::ExecutionContext>();
+    itp::ContextGuard activate() { return itp::ContextGuard(*exec); }
+
+    itp::NodeId mk_type(uint32_t l) { auto g = activate(); return itp::mk_type(l); }
+    itp::NodeId mk_bvar(uint32_t i) { auto g = activate(); return itp::mk_bvar(i); }
+    itp::NodeId mk_fvar(uint32_t l) { auto g = activate(); return itp::mk_fvar(l); }
+    itp::NodeId mk_app(itp::NodeId f, itp::NodeId a) { auto g = activate(); return itp::mk_app(f, a); }
+    itp::NodeId mk_lambda(itp::NodeId t, itp::NodeId b) { auto g = activate(); return itp::mk_lambda(t, b); }
+    itp::NodeId mk_pi(itp::NodeId d, itp::NodeId c) { auto g = activate(); return itp::mk_pi(d, c); }
+    itp::NodeId mk_let(itp::NodeId t, itp::NodeId v, itp::NodeId b) { auto g = activate(); return itp::mk_let(t, v, b); }
+    itp::NodeId mk_const(uint32_t gid) { auto g = activate(); return itp::mk_const(gid); }
+    itp::NodeId mk_match(itp::NodeId s, itp::NodeId m, std::vector<itp::NodeId> bs) { auto g = activate(); return itp::mk_match(s, m, std::move(bs)); }
+    itp::NodeId mk_fix(itp::NodeId fn_type, uint32_t dec, itp::NodeId body) { auto g = activate(); return itp::mk_fix(fn_type, dec, body); }
+
+    uint32_t reserve_inductive_type(const std::string& name, itp::NodeId sort) { auto g = activate(); return itp::reserve_inductive_type(name, sort); }
+    itp::InductiveHandle finish_inductive(uint32_t tid, std::vector<itp::CtorSpec> ctors) { auto g = activate(); return itp::finish_inductive(tid, std::move(ctors)); }
+    uint32_t reserve_recursive_function(const std::string& name, itp::NodeId type) { auto g = activate(); return itp::reserve_recursive_function(name, type); }
+    void finish_recursive_function(uint32_t gid, uint32_t ind_gid, uint32_t dec, itp::NodeId body) { auto g = activate(); itp::finish_recursive_function(gid, ind_gid, dec, body); }
+    uint32_t declare_unchecked(itp::NodeId type, std::optional<itp::NodeId> value, const std::string& name) { auto g = activate(); return itp::declare_unchecked(type, value, name); }
+
+    itp::Env fresh_env(uint32_t n0) { itp::Env env; for (uint32_t i = 0; i < n0; ++i) env = env.extend(itp::fresh_neutral(i)); return env; }
+    itp::NodeId normalize_open(itp::NodeId t, uint32_t n0) { auto g = activate(); return itp::normalize(t, fresh_env(n0)); }
+    bool conv_open(itp::NodeId a, itp::NodeId b, uint32_t n0) {
+        auto g = activate(); itp::Env env = fresh_env(n0);
+        return itp::conv_value(itp::eval(a, env), itp::eval(b, env), n0);
+    }
+    std::pair<bool, nb::object> tc_infer_open(itp::NodeId t, const std::vector<itp::NodeId>& hyp_types) {
+        auto g = activate(); itp::ElabCtx ec;
+        for (auto h : hyp_types) ec = ec.extend(h);
+        auto r = itp::tc_infer(t, ec);
+        if (r) return {true, nb::cast(*r)};
+        return {false, nb::cast(r.error())};
+    }
+    uint32_t loose_range(itp::NodeId t) { auto g = activate(); return itp::loose_range(t); }
+    itp::NodeId lift(itp::NodeId t, uint32_t d, uint32_t cutoff) { auto g = activate(); return itp::lift(t, d, cutoff); }
+    itp::NodeId instantiate(itp::NodeId t, const std::vector<itp::NodeId>& vals) { auto g = activate(); return itp::instantiate(t, vals); }
+    itp::NodeId abstract_fvars(itp::NodeId t, const std::vector<uint32_t>& fvars) { auto g = activate(); return itp::abstract_fvars(t, fvars); }
+    uint32_t num_globals() { auto g = activate(); return static_cast<uint32_t>(itp::ctx().globals.defs.size()); }
+    std::vector<std::tuple<uint32_t, std::string, itp::NodeId, bool>> list_globals() {
+        auto g = activate(); std::vector<std::tuple<uint32_t, std::string, itp::NodeId, bool>> out;
+        const auto& defs = itp::ctx().globals.defs;
+        for (uint32_t i = 0; i < defs.size(); ++i) out.emplace_back(i, defs[i].name, defs[i].type, defs[i].value.has_value());
+        return out;
+    }
+    // Raw dump with explicit variable kinds: b<i> = bound index, f<l> = context level.
+    std::string dump_raw(itp::NodeId n) {
+        auto g = activate();
+        std::function<std::string(itp::NodeId)> go = [&](itp::NodeId t) -> std::string {
+            return itp::inspect(t,
+                [&](itp::Var v) { return std::string(v.bound ? "b" : "f") + std::to_string(v.n); },
+                [&](itp::App a) { return "(" + go(a.fn_id) + " " + go(a.arg_id) + ")"; },
+                [&](itp::Lambda l) { return "(lam " + go(l.type_id) + ". " + go(l.body_id) + ")"; },
+                [&](itp::Pi p) { return "(pi " + go(p.dom_id) + ". " + go(p.cod_id) + ")"; },
+                [&](itp::Let l) { return "(let " + go(l.type_id) + " := " + go(l.value_id) + " in " + go(l.body_id) + ")"; },
+                [&](itp::Type ty) { return "T" + std::to_string(ty.universe_level); },
+                [&](itp::Const c) { return "C" + std::to_string(c.global_id); },
+                [&](itp::Meta m) { return "?" + std::to_string(m.meta_id); },
+                [&](itp::Match m) {
+                    std::string r = "(match " + go(m.scrutinee_id) + " [" + go(m.motive_id) + "]";
+                    for (auto b : *m.branches) r += " | " + go(b);
+                    return r + ")";
+                },
+                [&](itp::Fix f) { return "(fix<" + std::to_string(f.decreasing_arg) + "> " + go(f.fn_type) + " := " + go(f.body) + ")"; },
+                [&](auto) { return std::string("<other>"); });
+        };
+        return go(n);
+    }
+};
+
+NB_MODULE(itp_env_lnl, m) {
+    nb::exception<ITPError>(m, "ITPError");
+    nb::class_<itp::NodeId>(m, "NodeId")
+        .def("__eq__", [](const itp::NodeId& a, const itp::NodeId& b) { return a == b; })
+        .def("__hash__", [](const itp::NodeId& n) { return std::hash<uint64_t>{}((static_cast<uint64_t>(static_cast<uint32_t>(n.tag)) << 32) | n.index); })
+        .def_prop_ro("tag", [](const itp::NodeId& n) { return static_cast<int>(n.tag); })
+        .def_prop_ro("index", [](const itp::NodeId& n) { return n.index; });
+    nb::class_<itp::CtorSpec>(m, "CtorSpec")
+        .def(nb::init<>())
+        .def("__init__", [](itp::CtorSpec* self, const std::string& name, std::vector<itp::NodeId> arg_types, std::vector<itp::NodeId> result_indices) {
+            new (self) itp::CtorSpec{name, std::move(arg_types), std::move(result_indices)};
+        }, "name"_a, "arg_types"_a, "result_indices"_a = std::vector<itp::NodeId>{});
+    nb::class_<itp::InductiveHandle>(m, "InductiveHandle")
+        .def_ro("type_global_id", &itp::InductiveHandle::type_global_id)
+        .def_ro("ctor_global_ids", &itp::InductiveHandle::ctor_global_ids);
+    nb::class_<KernelWrapper>(m, "Kernel")
+        .def(nb::init<>())
+        .def("mk_type", &KernelWrapper::mk_type, "level"_a)
+        .def("mk_bvar", &KernelWrapper::mk_bvar, "index"_a)
+        .def("mk_fvar", &KernelWrapper::mk_fvar, "level"_a)
+        .def("mk_app", &KernelWrapper::mk_app, "f"_a, "a"_a)
+        .def("mk_lambda", &KernelWrapper::mk_lambda, "type"_a, "body"_a)
+        .def("mk_pi", &KernelWrapper::mk_pi, "dom"_a, "cod"_a)
+        .def("mk_let", &KernelWrapper::mk_let, "type"_a, "value"_a, "body"_a)
+        .def("mk_const", &KernelWrapper::mk_const, "global_id"_a)
+        .def("mk_match", &KernelWrapper::mk_match, "scrutinee"_a, "motive"_a, "branches"_a)
+        .def("mk_fix", &KernelWrapper::mk_fix, "fn_type"_a, "decreasing_arg"_a, "body"_a)
+        .def("reserve_inductive_type", &KernelWrapper::reserve_inductive_type, "name"_a, "sort"_a)
+        .def("finish_inductive", &KernelWrapper::finish_inductive, "type_global_id"_a, "ctors"_a)
+        .def("reserve_recursive_function", &KernelWrapper::reserve_recursive_function, "name"_a, "type"_a)
+        .def("finish_recursive_function", &KernelWrapper::finish_recursive_function, "gid"_a, "ind_gid"_a, "decreasing_arg_level"_a, "body"_a)
+        .def("declare_unchecked", &KernelWrapper::declare_unchecked, "type"_a, "value"_a, "name"_a)
+        .def("normalize_open", &KernelWrapper::normalize_open, "term"_a, "n0"_a)
+        .def("conv_open", &KernelWrapper::conv_open, "a"_a, "b"_a, "n0"_a)
+        .def("tc_infer_open", &KernelWrapper::tc_infer_open, "term"_a, "hyp_types"_a)
+        .def("loose_range", &KernelWrapper::loose_range, "term"_a)
+        .def("lift", &KernelWrapper::lift, "term"_a, "d"_a, "cutoff"_a = 0)
+        .def("instantiate", &KernelWrapper::instantiate, "term"_a, "vals"_a)
+        .def("abstract_fvars", &KernelWrapper::abstract_fvars, "term"_a, "levels"_a)
+        .def("num_globals", &KernelWrapper::num_globals)
+        .def("list_globals", &KernelWrapper::list_globals)
+        .def("dump_raw", &KernelWrapper::dump_raw, "term"_a);
+}
