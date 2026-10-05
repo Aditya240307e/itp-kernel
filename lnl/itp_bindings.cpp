@@ -107,6 +107,13 @@ struct KernelWrapper {
         auto r = itp::unify(a, b, ec, es);
         return {static_cast<bool>(r), r ? std::string("OK") : r.error().message, static_cast<uint32_t>(es.pending.size())};
     }
+    std::tuple<bool, std::string, uint32_t> unify_drain_open(itp::NodeId a, itp::NodeId b, const std::vector<itp::NodeId>& hyp_types) {
+        auto g = activate(); itp::ElabCtx ec; itp::ElabState es;           // the production sequence of apply: unify, then drain in the OUTER context
+        for (auto h : hyp_types) ec = ec.extend(h);
+        auto r = itp::unify(a, b, ec, es);
+        if (r) r = itp::drain_pending(ec, es);
+        return {static_cast<bool>(r), r ? std::string("OK") : r.error().message, static_cast<uint32_t>(es.pending.size())};
+    }
     itp::NodeId close_telescope(const std::string& kind, const std::vector<itp::NodeId>& doms, itp::NodeId body, uint32_t base) {
         auto g = activate();
         return kind == "lam" ? itp::close_lambda_telescope(doms, body, base) : itp::close_pi_telescope(doms, body, base);
@@ -222,6 +229,7 @@ NB_MODULE(itp_env_lnl, m) {
         .def("meta_is_solved", &KernelWrapper::meta_is_solved, "id"_a)
         .def("meta_solution_raw", &KernelWrapper::meta_solution_raw, "id"_a)
         .def("unify_open", &KernelWrapper::unify_open, "a"_a, "b"_a, "hyp_types"_a)
+        .def("unify_drain_open", &KernelWrapper::unify_drain_open, "a"_a, "b"_a, "hyp_types"_a)
         .def("normalize_open", &KernelWrapper::normalize_open, "term"_a, "n0"_a)
         .def("conv_open", &KernelWrapper::conv_open, "a"_a, "b"_a, "n0"_a)
         .def("tc_infer_open", &KernelWrapper::tc_infer_open, "term"_a, "hyp_types"_a)

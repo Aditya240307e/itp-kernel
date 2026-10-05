@@ -186,3 +186,21 @@ and (b) every goal's hypotheses and target are well-formed types. It runs on the
 3. The lockstep no longer compares partial-proof TERMS with the reference (F9 changes them); the evidence is states + the oracle + completed proofs.
 4. The conversion bound (256) is arbitrary and only ever rejects: a legitimate comparison nested deeper would be refused.
 5. M12 (drain_pending) still survives, see the S3 section. M1-M14 re-runs: see the next section if present.
+
+
+## S4 addendum (2026-10-05, later): deferred-constraint context, full mutant inventory, soak test
+* **D9 / F15 (reference algorithm, fixed): a pending unification constraint is re-unified in the context it was deferred IN.** `unify_values` quotes a deferred constraint at the
+  current binder depth, but `drain_pending` re-evaluated it in the OUTER context: a constraint met under a binder mentioned that binder's variable and the process ABORTED
+  (`Env::operator[] OUT OF BOUNDS: level=1 count=1`). Constraints are also shared across the whole proof attempt, so one deferred in an earlier goal was re-unified in whichever goal
+  context the next `apply` happened to use. Now `PendingConstraint` records its context. Regression case in the unifier tests (`unify_drain_open`); mutant M31 reintroduces it and is
+  caught. Reachability from the tactics is rare (it needs a non-pattern meta constraint under a binder), which is why no earlier test hit it; the reference has the identical logic.
+* **Mutant inventory on the final tree: 30 of 31 caught** (M1-M11, M13-M31), each against a baseline the driver verifies is green first. The one survivor is M12 (`apply` skipping
+  `drain_pending`), documented in the S3 section: at the tactic level a deferred constraint essentially cannot become a Miller pattern. The M4 mutant was re-pinned to the Pi
+  closer after S3 introduced a second, textually identical closer.
+* **Soak:** 96,000 random scripts over 16 seeds (alternating variable-index-only and the full mix), fresh kernel per seed, one CPU: no crash, no hang, 0 unattributed oracle
+  failures, 1,152 completed proofs all verified by the kernel, memory flat at ~630 MB. A first attempt with six parallel processes was OOM-killed: the hash-consing tables grow without
+  bound inside one kernel (by design; the search reclaims with rewind), so long runs must recreate the kernel.
+* The statement mix of the oracle changed when `exploit_eq` and `exploit_le` were added (all their hypotheses have concrete indices), so the full-distribution runs now attribute
+  ~1,300 steps per 6,000 scripts to F12 instead of ~180. The variable-index runs are the strict evidence and are unaffected.
+* Full-size gates on the final build: S2 (4,000), main differential (40,000 terms), S3 (2,000 scripts, 19,629 steps, 90 completed proofs verified identically), S4 (3,000 scripts,
+  26,847 steps, 0 divergences), oracle gate: all PASS.

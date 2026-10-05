@@ -3750,9 +3750,13 @@ using TypeResult = std::expected<NodeId, TypeError>; // infer()'s result: succes
 // that looks like it ran (something was compared, something returned
 // success) but didn't actually verify what it claimed to. See unify()
 // below for where constraints get deferred and retried.
+struct ElabCtx;
 struct PendingConstraint {
     NodeId lhs, rhs;      // to be unified once more progress is possible
     uint32_t local_depth; // LocalCtx::size() at the point this was deferred, for diagnostics
+    // The context the constraint was deferred IN. It can be deeper than the context drain_pending is later called with (a constraint met under a
+    // binder mentions that binder's variable); re-unifying it in the outer context used to abort with Env::operator[] out of bounds.
+    std::shared_ptr<const ElabCtx> ctx_at_deferral;
 };
 
 struct ElabState {
@@ -4670,7 +4674,7 @@ inline ElabResult unify_values(const Value& a_in, const Value& b_in, ElabCtx& ec
         return detail::solve_pattern(pat->first, pat->second, quote(a, ec.size()), ec);
     }
     if (is_meta_headed(a) || is_meta_headed(b)) {
-        es.pending.push_back(PendingConstraint{quote(a, ec.size()), quote(b, ec.size()), ec.size()});
+        es.pending.push_back(PendingConstraint{quote(a, ec.size()), quote(b, ec.size()), ec.size(), std::make_shared<const ElabCtx>(ec)});
         return {};
     }
 
@@ -4867,7 +4871,8 @@ inline ElabResult drain_pending(ElabCtx& ec, ElabState& es) {
         current.swap(es.pending);
         std::size_t n_before = current.size();
         for (auto& pc : current) {
-            if (ElabResult r = unify(pc.lhs, pc.rhs, ec, es); !r) return r;
+            ElabCtx local = pc.ctx_at_deferral ? *pc.ctx_at_deferral : ec;
+            if (ElabResult r = unify(pc.lhs, pc.rhs, local, es); !r) return r;
         }
         if (es.pending.size() >= n_before) break; // no net progress this pass
     }

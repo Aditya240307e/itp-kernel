@@ -241,6 +241,13 @@ def test_unifier():
     case('non-linear: ?m a a =?= a (not a pattern: deferred)', 2, f8, True, 1, [False])
     def f9(): m, t = meta(1); return [m], Sx(t), Sx(('fvar', 0))
     case('S (?m a) =?= S a', 1, f9, True, 0, [True])
+    def f_binder():   # a constraint deferred UNDER a binder, then drained in the outer context (used to abort: Env::operator[] out of bounds)
+        f = knew.fresh_meta(NATn, 1); m = knew.fresh_meta(NATn, 1); EQ = ('const', g['Eq'])
+        meta_app = ('app', ('app', ('meta', f), ('fvar', 0)), ('app', ('meta', m), ('fvar', 0)))
+        lhs = ('pi', NAT, app(EQ, NAT, meta_app, ('bvar', 0))); rhs = ('pi', NAT, app(EQ, NAT, Sx(('bvar', 0)), ('bvar', 0)))
+        ok, msg, pending = knew.unify_drain_open(build_new(knew, lhs), build_new(knew, rhs), [NATn])
+        rows.append(('deferred under a binder, drained in the outer context (used to abort)', True, ok, pending, [], ok and pending == 1, msg[:50]))
+    f_binder()
     return rows
 
 if __name__ == '__main__':

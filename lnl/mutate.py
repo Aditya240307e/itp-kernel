@@ -2,6 +2,7 @@
 import os, re, shutil, subprocess, sys, time
 SRC = '/home/claude/itp_py/lnl'
 MUTANTS = {
+ 'M31 drain_pending re-unifies a deferred constraint in the outer context (the abort)': ("ElabCtx local = pc.ctx_at_deferral ? *pc.ctx_at_deferral : ec;", "ElabCtx local = ec;"),
  'M22 cases: scrutinee applied to the field binders (F9 regression)': ("NodeId ctor_app = forced_ctor_app(ctor_gid, n, ctor_arity, inst, forcing);", "NodeId ctor_app = mk_const(ctor_gid); for (uint32_t ai = 0; ai < ctor_arity; ++ai) ctor_app = mk_app(ctor_app, mk_fvar(n + ai));"),
  'M23 induct (goal side): scrutinee applied to the field binders': ("NodeId agent_ctor_app = forced_ctor_app(ctor_gid, n, ctor_arity, inst_agent, forcing_agent, &actual);", "NodeId agent_ctor_app = mk_const(ctor_gid); for (uint32_t fi = 0; fi < ctor_arity; ++fi) agent_ctor_app = mk_app(agent_ctor_app, mk_fvar(actual[fi]));"),
  'M24 induct (runtime side): scrutinee applied to the field binders': ("NodeId true_ctor_app = forced_ctor_app(ctor_gid, body_base, ctor_arity, inst, forcing_body);", "NodeId true_ctor_app = mk_const(ctor_gid); for (uint32_t ai = 0; ai < ctor_arity; ++ai) true_ctor_app = mk_app(true_ctor_app, mk_fvar(body_base + ai));"),
@@ -27,7 +28,7 @@ MUTANTS = {
  'M1 guard disabled (fix_guard_ok always true)': ("    return is_locally_structurally_decreasing(n0, tid, f.decreasing_arg, to_levels(f.body, n0 + 1));", "    (void)tid; return true;"),
  'M2 index forcing is a no-op': ("    std::unordered_map<uint32_t, NodeId> m(forcing.forced.begin(), forcing.forced.end());\n    std::vector<NodeId> out = arg_types;", "    std::unordered_map<uint32_t, NodeId> m;\n    std::vector<NodeId> out = arg_types;"),
  'M3 lambda domain not unified with the expected domain': ("        if (ElabResult r = unify(dom_j, expected_dom, cur_ec, es); !r) return r;\n        Value next", "        (void)expected_dom;\n        Value next"),
- 'M4 closing a Pi telescope off by one (wrong fvar prefix)': ("abstract_fvars(opened_doms[j], std::vector<uint32_t>(fvl.begin(), fvl.begin() + j))", "abstract_fvars(opened_doms[j], std::vector<uint32_t>(fvl.begin(), fvl.begin() + std::min<int>(j + 1, (int)m)))"),
+ 'M4 closing a Pi telescope off by one (wrong fvar prefix)': ("result = mk_pi(abstract_fvars(opened_doms[j], std::vector<uint32_t>(fvl.begin(), fvl.begin() + j))", "result = mk_pi(abstract_fvars(opened_doms[j], std::vector<uint32_t>(fvl.begin(), fvl.begin() + std::min<int>(j + 1, (int)m)))"),
  'M5 application argument not checked': ("            if (ElabResult r = check(a.arg_id, dom_ty, ec, es); !r) return std::unexpected(r.error());\n            return quote(eval(pi->cod_id, pi->env.extend(eval(a.arg_id, ec.values))), ec.size());", "            (void)dom_ty;\n            return quote(eval(pi->cod_id, pi->env.extend(eval(a.arg_id, ec.values))), ec.size());"),
  'M6 admission universe rule disabled': ("if (!parameter_like && field_level[j] > *fam_level) {", "if (!parameter_like && field_level[j] > *fam_level + 1000) {"),
  'M7 strict positivity always true': ("                if (!is_strictly_positive(type_global_id, arg_ty))\n                    throw std::logic_error(\"itp: constructor '\" + ctor.name + \"' fails strict positivity", "                if (false)\n                    throw std::logic_error(\"itp: constructor '\" + ctor.name + \"' fails strict positivity"),
