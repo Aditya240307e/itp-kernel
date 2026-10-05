@@ -1,0 +1,18 @@
+{
+ "B1_pipeline_2x_induct_extract_us": {
+  "median": 303.3,
+  "min": 239.1
+ },
+ "B2_whole_term_check_us": {
+  "median": 43.1,
+  "min": 37.4
+ },
+ "B3_normalize_add_30_30_us": {
+  "median": 276.9,
+  "min": 254.2
+ },
+ "B4_intro_cases_us": {
+  "median": 6.9,
+  "min": 6.5
+ }
+}
