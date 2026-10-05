@@ -1,0 +1,95 @@
+diff --git a/itp_kernel.hpp b/itp_kernel.hpp
+index 05f1c91..c5f306c 100644
+--- a/itp_kernel.hpp
++++ b/itp_kernel.hpp
+@@ -4565,11 +4565,28 @@ inline ElabResult check(NodeId t, NodeId expected_ty, ElabCtx& ec, ElabState& es
+ /// in the kernel first -- explicitly open work, not implemented here,
+ /// tracked as its own item rather than silently assumed to fall out of
+ /// this detection for free.
++/// The first `n` entries of an environment. A hypothesis's stored type is anchored at the depth it was
++/// introduced at (its own index), so it must be evaluated in THAT prefix: a lambda or Pi inside it captures
++/// the environment it is evaluated in, and when later re-quoted its binder is placed at env.size(). Evaluating
++/// in the full environment instead (Finding F5) makes that position too high, so an embedded binder collides
++/// with a later hypothesis (e.g. the `h` in `h : Ex (fun x => x = m)`).
++inline Env env_prefix(const Env& e, uint32_t n) {
++    Env r;
++    for (uint32_t i = 0; i < n; ++i) r = r.extend(e[i]);
++    return r;
++}
++
+ struct CtorIndexForcing {
+     bool ok = true;
+     bool refuted = false;
+     std::string error;
+     std::unordered_map<uint32_t, NodeId> forced; // constructor field level -> its forced concrete value
++    // F5: depths needed to place a forced value correctly. `anchor_depth` is the depth the replacement terms
++    // were quoted at (their internal binders occupy levels >= anchor_depth); `base_depth` is the level of the
++    // constructor's first field and `ctor_arity` its field count. Field i's type lives at depth base_depth + i,
++    // the result indices at base_depth + ctor_arity.
++    bool has_anchor = false;
++    uint32_t anchor_depth = 0, base_depth = 0, ctor_arity = 0;
+     // Populated whenever refuted becomes true, via either path: a
+     // direct, rigid constructor-head mismatch at the top level (Zero
+     // vs Succ _, an ordinary indexed family like Vec) or the
+@@ -5121,8 +5138,11 @@ inline void match_index_pattern(NodeId pat, NodeId conc, uint32_t base_depth, ui
+ 
+ inline CtorIndexForcing unify_ctor_pattern_indices(const detail::InstantiatedCtor& inst,
+                                                     const std::vector<NodeId>& concrete_indices,
+-                                                    uint32_t base_depth, uint32_t ctor_arity, const Env& env) {
++                                                    uint32_t base_depth, uint32_t ctor_arity, const Env& env,
++                                                    uint32_t anchor_depth = 0xFFFFFFFFu) {
+     CtorIndexForcing out;
++    out.has_anchor = true; out.base_depth = base_depth; out.ctor_arity = ctor_arity;
++    out.anchor_depth = (anchor_depth == 0xFFFFFFFFu) ? base_depth : anchor_depth;
+     if (inst.result_indices.size() != concrete_indices.size()) {
+         out.ok = false;
+         out.error = "unify_ctor_pattern_indices: index count mismatch between the constructor's own "
+@@ -5151,7 +5171,15 @@ inline std::vector<NodeId> apply_ctor_index_forcing(const std::vector<NodeId>& a
+                                                       const CtorIndexForcing& forcing) {
+     std::vector<NodeId> out = arg_types;
+     for (auto& [level, replacement] : forcing.forced) {
+-        for (NodeId& ty : out) ty = detail::substitute_var(ty, level, replacement);
++        for (std::size_t i = 0; i < out.size(); ++i) {
++            if (!forcing.has_anchor) { out[i] = detail::substitute_var(out[i], level, replacement); continue; }
++            // F5: field i's type lives at depth base_depth + i, but `replacement` was quoted at anchor_depth.
++            // A replacement carrying binders (a lambda predicate like fun x => x = m) must have them moved up
++            // by that difference (plus the binders it passes inside the type), or they collide with the
++            // constructor's own earlier fields.
++            uint32_t j0 = forcing.base_depth + static_cast<uint32_t>(i) - forcing.anchor_depth;
++            out[i] = detail::substitute_vars_relevel(out[i], {{level, replacement}}, forcing.anchor_depth, j0);
++        }
+     }
+     return out;
+ }
+@@ -5201,7 +5229,12 @@ inline std::vector<NodeId> apply_ctor_index_forcing_to_result_indices(const std:
+     std::vector<NodeId> out = result_indices;
+     for (auto& [level, replacement] : forcing.forced) {
+         if (occurrence_count[level] > 1) continue; // repeated field: keep its own, local identity
+-        for (NodeId& n : out) n = detail::substitute_var(n, level, replacement);
++        for (NodeId& n : out) {
++            if (!forcing.has_anchor) { n = detail::substitute_var(n, level, replacement); continue; }
++            // F5: result indices live at depth base_depth + ctor_arity (after every field).
++            uint32_t j0 = forcing.base_depth + forcing.ctor_arity - forcing.anchor_depth;
++            n = detail::substitute_vars_relevel(n, {{level, replacement}}, forcing.anchor_depth, j0);
++        }
+     }
+     return out;
+ }
+@@ -6614,7 +6647,7 @@ inline ElabResult cases(ProofState& ps, uint32_t hyp_level, std::optional<uint32
+             "not-yet-introduced variable's own body-level reference)"});
+     }
+     NodeId scrut_ty = g.hyps[hyp_level].type;
+-    Value scrut_ty_val = eval(scrut_ty, g.ec.values);
++    Value scrut_ty_val = eval(scrut_ty, env_prefix(g.ec.values, hyp_level)); // F5: evaluate in the type's own prefix
+     auto* scrut_neutral = std::get_if<VNeutral>(&scrut_ty_val);
+     if (!scrut_neutral || scrut_neutral->head.kind != NeutralHead::Kind::GlobalConst) {
+         return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, scrut_ty, std::nullopt,
+@@ -8810,7 +8843,7 @@ inline ElabResult induct(ProofState& ps, uint32_t hyp_level, std::optional<uint3
+             "not-yet-introduced variable's own body-level reference)"});
+     }
+     NodeId scrut_ty = g.hyps[hyp_level].type;
+-    Value scrut_ty_val = eval(scrut_ty, g.ec.values);
++    Value scrut_ty_val = eval(scrut_ty, env_prefix(g.ec.values, hyp_level)); // F5: evaluate in the type's own prefix
+     auto* scrut_neutral = std::get_if<VNeutral>(&scrut_ty_val);
+     if (!scrut_neutral || scrut_neutral->head.kind != NeutralHead::Kind::GlobalConst) {
+         return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, scrut_ty, std::nullopt,
