@@ -14,10 +14,40 @@ using namespace nb::literals;
 
 struct ITPError : std::runtime_error { using std::runtime_error::runtime_error; };
 
+
+struct KernelWrapper;
+template <class R> void raise_if_error(const R& r) { if (!r) throw ITPError(r.error().message); }
+
+// Wraps itp::ProofState; keeps a raw pointer to its Kernel (start_proof binds nb::keep_alive<0,1> so the kernel outlives it).
+struct ProofStateHandle {
+    std::unique_ptr<itp::ProofState> ps = std::make_unique<itp::ProofState>();
+    KernelWrapper* kernel = nullptr;
+    uint32_t root_meta_id = 0;
+    itp::ContextGuard activate();
+    void intro_(const std::string& name, std::optional<uint32_t> tm) { auto g = activate(); raise_if_error(itp::intro(*ps, name, tm)); }
+    void apply_(itp::NodeId term, std::optional<uint32_t> tm) { auto g = activate(); raise_if_error(itp::apply(*ps, term, tm)); }
+    void exact_(itp::NodeId term, std::optional<uint32_t> tm) { auto g = activate(); raise_if_error(itp::exact(*ps, term, tm)); }
+    void rewrite_(itp::NodeId eq_term, itp::NodeId x, itp::NodeId y, uint32_t transport_gid, uint32_t symm_gid, std::optional<uint32_t> tm) {
+        auto g = activate(); raise_if_error(itp::rewrite_eq(*ps, eq_term, x, y, transport_gid, symm_gid, tm));
+    }
+    bool is_complete() { auto g = activate(); return itp::proof_complete(*ps); }
+    itp::NodeId extract() { auto g = activate(); return itp::extract_proof_term(root_meta_id); }
+    std::size_t num_goals() const { return ps->goals.size(); }
+    uint32_t goal_meta_id(std::size_t i) const { return ps->goals.at(i).meta_id; }
+    itp::NodeId goal_target(std::size_t i) const { return ps->goals.at(i).target; }
+    std::size_t goal_num_hyps(std::size_t i) const { return ps->goals.at(i).hyps.size(); }
+    std::string goal_hyp_name(std::size_t i, std::size_t h) const { return ps->goals.at(i).hyps.at(h).name; }
+    itp::NodeId goal_hyp_type(std::size_t i, std::size_t h) const { return ps->goals.at(i).hyps.at(h).type; }
+};
+
 struct KernelWrapper {
     std::unique_ptr<itp::ExecutionContext> exec = std::make_unique<itp::ExecutionContext>();
     itp::ContextGuard activate() { return itp::ContextGuard(*exec); }
 
+    ProofStateHandle start_proof(itp::NodeId goal_type) {
+        auto g = activate(); ProofStateHandle h; h.kernel = this;
+        *h.ps = itp::start_proof(goal_type); h.root_meta_id = h.ps->goals[0].meta_id; return h;
+    }
     itp::NodeId mk_type(uint32_t l) { auto g = activate(); return itp::mk_type(l); }
     itp::NodeId mk_bvar(uint32_t i) { auto g = activate(); return itp::mk_bvar(i); }
     itp::NodeId mk_fvar(uint32_t l) { auto g = activate(); return itp::mk_fvar(l); }
@@ -59,6 +89,24 @@ struct KernelWrapper {
         auto r = itp::check(t, expected, ec, es);
         if (r) return {true, "OK"};
         return {false, r.error().message};
+    }
+    // ---- S3: direct access to metas and unification (used by the unifier unit tests)
+    uint32_t fresh_meta(itp::NodeId type, uint32_t scope) { auto g = activate(); return itp::ctx().meta_ctx.fresh(type, scope); }
+    itp::NodeId mk_meta(uint32_t id) { auto g = activate(); return itp::mk_meta(id); }
+    bool meta_is_solved(uint32_t id) { auto g = activate(); return itp::ctx().meta_ctx.is_solved(id); }
+    std::string meta_solution_raw(uint32_t id) {
+        auto g = activate(); auto sol = itp::ctx().meta_ctx[id].solution;
+        return sol ? dump_raw(*sol) : std::string("");
+    }
+    std::tuple<bool, std::string, uint32_t> unify_open(itp::NodeId a, itp::NodeId b, const std::vector<itp::NodeId>& hyp_types) {
+        auto g = activate(); itp::ElabCtx ec; itp::ElabState es;
+        for (auto h : hyp_types) ec = ec.extend(h);
+        auto r = itp::unify(a, b, ec, es);
+        return {static_cast<bool>(r), r ? std::string("OK") : r.error().message, static_cast<uint32_t>(es.pending.size())};
+    }
+    itp::NodeId close_telescope(const std::string& kind, const std::vector<itp::NodeId>& doms, itp::NodeId body, uint32_t base) {
+        auto g = activate();
+        return kind == "lam" ? itp::close_lambda_telescope(doms, body, base) : itp::close_pi_telescope(doms, body, base);
     }
     itp::Env fresh_env(uint32_t n0) { itp::Env env; for (uint32_t i = 0; i < n0; ++i) env = env.extend(itp::fresh_neutral(i)); return env; }
     itp::NodeId normalize_open(itp::NodeId t, uint32_t n0) { auto g = activate(); return itp::normalize(t, fresh_env(n0)); }
@@ -109,6 +157,8 @@ struct KernelWrapper {
     }
 };
 
+inline itp::ContextGuard ProofStateHandle::activate() { return kernel->activate(); }
+
 NB_MODULE(itp_env_lnl, m) {
     nb::exception<ITPError>(m, "ITPError");
     nb::class_<itp::NodeId>(m, "NodeId")
@@ -124,8 +174,22 @@ NB_MODULE(itp_env_lnl, m) {
     nb::class_<itp::InductiveHandle>(m, "InductiveHandle")
         .def_ro("type_global_id", &itp::InductiveHandle::type_global_id)
         .def_ro("ctor_global_ids", &itp::InductiveHandle::ctor_global_ids);
+    nb::class_<ProofStateHandle>(m, "ProofState")
+        .def("intro", &ProofStateHandle::intro_, "name"_a = "", "target_meta_id"_a = nb::none())
+        .def("apply", &ProofStateHandle::apply_, "term"_a, "target_meta_id"_a = nb::none())
+        .def("exact", &ProofStateHandle::exact_, "term"_a, "target_meta_id"_a = nb::none())
+        .def("rewrite", &ProofStateHandle::rewrite_, "eq_term"_a, "x"_a, "y"_a, "transport_gid"_a, "symm_gid"_a, "target_meta_id"_a = nb::none())
+        .def("is_complete", &ProofStateHandle::is_complete)
+        .def("extract", &ProofStateHandle::extract)
+        .def("num_goals", &ProofStateHandle::num_goals)
+        .def("goal_meta_id", &ProofStateHandle::goal_meta_id, "i"_a)
+        .def("goal_target", &ProofStateHandle::goal_target, "i"_a)
+        .def("goal_num_hyps", &ProofStateHandle::goal_num_hyps, "i"_a)
+        .def("goal_hyp_name", &ProofStateHandle::goal_hyp_name, "i"_a, "h"_a)
+        .def("goal_hyp_type", &ProofStateHandle::goal_hyp_type, "i"_a, "h"_a);
     nb::class_<KernelWrapper>(m, "Kernel")
         .def(nb::init<>())
+        .def("start_proof", &KernelWrapper::start_proof, "goal_type"_a, nb::keep_alive<0, 1>())
         .def("mk_type", &KernelWrapper::mk_type, "level"_a)
         .def("mk_bvar", &KernelWrapper::mk_bvar, "index"_a)
         .def("mk_fvar", &KernelWrapper::mk_fvar, "level"_a)
@@ -146,6 +210,12 @@ NB_MODULE(itp_env_lnl, m) {
         .def("finish_recursive_function_checked", &KernelWrapper::finish_recursive_function_checked, "gid"_a, "ind_gid"_a, "decreasing_arg_level"_a, "body"_a)
         .def("infer_open", &KernelWrapper::infer_open, "term"_a, "hyp_types"_a)
         .def("check_open", &KernelWrapper::check_open, "term"_a, "expected"_a, "hyp_types"_a)
+        .def("close_telescope", &KernelWrapper::close_telescope, "kind"_a, "doms"_a, "body"_a, "base"_a)
+        .def("fresh_meta", &KernelWrapper::fresh_meta, "type"_a, "scope"_a)
+        .def("mk_meta", &KernelWrapper::mk_meta, "id"_a)
+        .def("meta_is_solved", &KernelWrapper::meta_is_solved, "id"_a)
+        .def("meta_solution_raw", &KernelWrapper::meta_solution_raw, "id"_a)
+        .def("unify_open", &KernelWrapper::unify_open, "a"_a, "b"_a, "hyp_types"_a)
         .def("normalize_open", &KernelWrapper::normalize_open, "term"_a, "n0"_a)
         .def("conv_open", &KernelWrapper::conv_open, "a"_a, "b"_a, "n0"_a)
         .def("tc_infer_open", &KernelWrapper::tc_infer_open, "term"_a, "hyp_types"_a)

@@ -3840,7 +3840,6 @@ struct ElabCtx {
     }
 };
 
-#if 0 // not yet ported to the hybrid variable representation: is_miller_pattern
 /// Checks whether `v` is a Miller pattern: a metavariable applied to a
 /// spine of zero or more DISTINCT, locally-bound variables (each a bare
 /// Var, not itself further applied) and nothing else -- no pending Match
@@ -3870,7 +3869,6 @@ inline std::optional<std::pair<uint32_t, std::vector<uint32_t>>> is_miller_patte
     }
     return std::make_pair(neutral->head.id, std::move(levels));
 }
-#endif
 
 
 namespace detail {
@@ -4521,7 +4519,6 @@ inline NodeId shift_levels_from(NodeId t, uint32_t threshold, uint32_t amount) {
 struct DiagnosticTable;
 inline std::string print(NodeId id, const DiagnosticTable* diag);
 
-#if 0 // not yet ported to the hybrid variable representation: resolve_solved_meta_head
 /// If `v` is a VNeutral headed by an ALREADY-SOLVED meta, re-resolves
 /// it: evaluates the meta's own solution (matching eval(Meta)'s own,
 /// established convention of an empty env, since solutions are
@@ -4577,11 +4574,79 @@ inline Value resolve_solved_meta_head(Value v) {
     }
     return resolved;
 }
-#endif
 
 
 
-#if 0 // not yet ported to the hybrid variable representation: unify_values
+// ===========================================================================
+// S3 (early part): helpers the unifier needs. Meta occurrences are  ?m x0 .. x_{n-1}  (applied to every context variable, as
+// context variables); solutions are closed lambdas over the context.
+// ===========================================================================
+inline NodeId close_pi_telescope(const std::vector<NodeId>& opened_doms, NodeId body, uint32_t base);
+
+/// Lambda counterpart of close_pi_telescope.
+inline NodeId close_lambda_telescope(const std::vector<NodeId>& opened_doms, NodeId body, uint32_t base) {
+    const std::size_t m = opened_doms.size();
+    std::vector<uint32_t> fvl(m);
+    for (std::size_t i = 0; i < m; ++i) fvl[i] = base + static_cast<uint32_t>(i);
+    NodeId result = abstract_fvars(body, fvl);
+    for (int j = static_cast<int>(m) - 1; j >= 0; --j)
+        result = mk_lambda(abstract_fvars(opened_doms[j], std::vector<uint32_t>(fvl.begin(), fvl.begin() + j)), result);
+    return result;
+}
+inline NodeId close_over_context(NodeId term, const ElabCtx& ec) {
+    std::vector<NodeId> doms; for (uint32_t i = 0; i < ec.size(); ++i) doms.push_back(ec.types[i]);
+    return close_lambda_telescope(doms, term, 0);
+}
+inline NodeId close_pi_over_context(NodeId ty, const ElabCtx& ec) {
+    std::vector<NodeId> doms; for (uint32_t i = 0; i < ec.size(); ++i) doms.push_back(ec.types[i]);
+    return close_pi_telescope(doms, ty, 0);
+}
+
+/// Replaces every occurrence of a closed (no loose bound variable) term by its replacement. Both sides are position independent, so
+/// no binder bookkeeping is needed.
+inline NodeId replace_terms(NodeId t, const std::vector<std::pair<NodeId, NodeId>>& subs) {
+    for (auto& [from, to] : subs) if (t == from) return to;
+    return map_children(t, [&](NodeId c, uint32_t) { return replace_terms(c, subs); });
+}
+
+namespace detail {
+inline void collect_fvars(NodeId t, std::unordered_set<uint32_t>& out) {
+    if (t.tag == NodeType::VAR) { Var v = ctx().vars[t.index]; if (!v.bound) out.insert(v.n); return; }
+    any_child(t, [&](NodeId c) { collect_fvars(c, out); return false; });
+}
+inline bool occurs_meta(uint32_t meta_id, NodeId t) {
+    if (t.tag == NodeType::META) return ctx().metas[t.index].meta_id == meta_id;
+    return any_child(t, [&](NodeId c) { return occurs_meta(meta_id, c); });
+}
+/// ?m x_{l0} .. x_{lk} =?= other  (distinct context variables): the solution is the closed lambda over the spine variables.
+/// The spine must be in dependency order (a spine variable's type may mention only EARLIER spine variables); the reference
+/// silently assumed this, here it is checked.
+inline ElabResult solve_pattern(uint32_t meta_id, const std::vector<uint32_t>& var_levels, NodeId other_id, ElabCtx& ec) {
+    if (occurs_meta(meta_id, other_id))
+        return std::unexpected(TypeError{TypeErrorKind::OccursCheckFailure, other_id, std::nullopt, "metavariable occurs in its own proposed solution"});
+    std::unordered_set<uint32_t> allowed(var_levels.begin(), var_levels.end()), free_in_solution;
+    collect_fvars(other_id, free_in_solution);
+    for (uint32_t lvl : var_levels) collect_fvars(ec.types[lvl], free_in_solution);
+    for (uint32_t lvl : free_in_solution)
+        if (!allowed.count(lvl))
+            return std::unexpected(TypeError{TypeErrorKind::OccursCheckFailure, other_id, std::nullopt, "solution depends on a variable outside the metavariable's pattern spine"});
+    // rename the spine variables to a fresh telescope of context variables B, B+1, ... (beyond the context), then close over it
+    const uint32_t B = ec.size();
+    std::unordered_map<uint32_t, NodeId> ren;
+    for (uint32_t i = 0; i < var_levels.size(); ++i) ren[var_levels[i]] = mk_fvar(B + i);
+    std::vector<NodeId> doms;
+    for (uint32_t i = 0; i < var_levels.size(); ++i) {
+        NodeId d = replace_fvars(ec.types[var_levels[i]], ren);
+        if (references_level_at_or_above(d, B + i))
+            return std::unexpected(TypeError{TypeErrorKind::Other, other_id, std::nullopt, "metavariable pattern spine is not in dependency order"});
+        doms.push_back(d);
+    }
+    ctx().meta_ctx.solve(meta_id, close_lambda_telescope(doms, replace_fvars(other_id, ren), B));
+    return {};
+}
+} // namespace detail
+
+
 inline ElabResult unify_values(const Value& a_in, const Value& b_in, ElabCtx& ec, ElabState& es) {
     Value a = resolve_solved_meta_head(a_in);
     Value b = resolve_solved_meta_head(b_in);
@@ -4775,17 +4840,13 @@ inline ElabResult unify_values(const Value& a_in, const Value& b_in, ElabCtx& ec
         [&](const auto&, const auto&) -> ElabResult { return mismatch("mismatched value shapes"); }
     );
 }
-#endif
 
 
-#if 0 // not yet ported to the hybrid variable representation: unify
 inline ElabResult unify(NodeId a_id, NodeId b_id, ElabCtx& ec, ElabState& es) {
     return unify_values(eval(a_id, ec.values), eval(b_id, ec.values), ec, es);
 }
-#endif
 
 
-#if 0 // not yet ported to the hybrid variable representation: drain_pending
 /// Repeatedly re-attempts every deferred non-pattern constraint until a
 /// full pass makes no further progress (either the queue empties, or
 /// what's left is genuinely stuck -- left for the caller's acceptance-
@@ -4803,7 +4864,6 @@ inline ElabResult drain_pending(ElabCtx& ec, ElabState& es) {
     }
     return {};
 }
-#endif
 
 
 // Forward declarations: infer and check are mutually recursive (infer's
@@ -6229,7 +6289,6 @@ struct ProofState {
                   // scoped to a single Goal
 };
 
-#if 0 // not yet ported to the hybrid variable representation: find_goal_index
 /// Locates which entry of ps.goals a tactic should operate on: the goal
 /// whose own meta_id matches target_meta_id if one is given, otherwise
 /// ps.goals.front()'s own meta_id -- preserving every existing call
@@ -6268,7 +6327,6 @@ inline std::optional<std::size_t> find_goal_index(const ProofState& ps, std::opt
     }
     return std::nullopt;
 }
-#endif
 
 
 #if 0 // not yet ported to the hybrid variable representation: close_over_context
@@ -10469,11 +10527,6 @@ inline TcResult tc_infer(NodeId t, const ElabCtx& ec) {
 //   * infer(Fix) runs the structural-recursion guard itself: the kernel does not trust the tactic that built the Fix.
 // unify is pure conversion here (no metas); S3 replaces it with real unification.
 // ===========================================================================
-inline ElabResult unify(NodeId a, NodeId b, ElabCtx& ec, ElabState&) {
-    if (a == b) return {};
-    if (conv_value(eval(a, ec.values), eval(b, ec.values), ec.size())) return {};
-    return std::unexpected(TypeError{TypeErrorKind::Mismatch, a, b, "type mismatch"});
-}
 
 /// Closes an opened Pi telescope (domains mention earlier fields as context variables base, base+1, ...) around `body`.
 inline NodeId close_pi_telescope(const std::vector<NodeId>& opened_doms, NodeId body, uint32_t base) {
@@ -10713,12 +10766,29 @@ inline ElabResult check_match(NodeId t, NodeId expected_ty, ElabCtx& ec, ElabSta
         if (!af) return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, m.scrutinee_id, expected_ty, "scrutinee's type has a non-application eliminator frame; cannot enumerate its indices"});
         concrete_indices.push_back(quote(af->arg, ec.size()));
     }
-    if (m.motive_id.tag == NodeType::META && !ctx().meta_ctx.is_solved(ctx().metas[m.motive_id.index].meta_id))
-        return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, t, expected_ty, "motive inference needs metavariables (ported in S3); supply an explicit motive"});
-    if (ElabResult r = verify_motive_shape(m.motive_id, static_cast<uint32_t>(concrete_indices.size()), ec, es); !r) return r;
-    NodeId applied = mk_app(apply_all(m.motive_id, concrete_indices), m.scrutinee_id);
-    if (ElabResult r = unify(applied, expected_ty, ec, es); !r) return r;
-    return check_match_branches(type_global_id, m.motive_id, *m.branches, concrete_indices, ec, es);
+    NodeId motive = m.motive_id;
+    if (m.motive_id.tag == NodeType::META && !ctx().meta_ctx.is_solved(ctx().metas[m.motive_id.index].meta_id)) {
+        // The motive is a hole: build it by abstracting the indices and the scrutinee out of the expected type.
+        const uint32_t hole_meta_id = ctx().metas[m.motive_id.index].meta_id, n = ec.size(), arity = static_cast<uint32_t>(concrete_indices.size());
+        std::vector<NodeId> index_types = detail::instantiate_type_telescope(type_global_id, n);
+        if (index_types.size() != arity)
+            return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, t, expected_ty, "index count mismatch between the scrutinee's type application and the inductive's own declared arity"});
+        std::vector<std::pair<NodeId, NodeId>> subs; std::vector<NodeId> idx_vars;
+        for (uint32_t i = 0; i < arity; ++i) { subs.push_back({concrete_indices[i], mk_fvar(n + i)}); idx_vars.push_back(mk_fvar(n + i)); }
+        subs.push_back({m.scrutinee_id, mk_fvar(n + arity)});
+        std::vector<NodeId> doms = index_types; doms.push_back(apply_all(mk_const(type_global_id), idx_vars));
+        NodeId built = close_lambda_telescope(doms, replace_terms(expected_ty, subs), n);
+        if (!infer(built, ec, es))
+            return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, t, expected_ty,
+                "constructed motive failed to type-check -- the goal likely depends on the scrutinee in a way that cannot be abstracted cleanly; supply an explicit motive_id instead"});
+        ctx().meta_ctx.solve(hole_meta_id, built);
+        motive = built;
+    } else {
+        if (ElabResult r = verify_motive_shape(m.motive_id, static_cast<uint32_t>(concrete_indices.size()), ec, es); !r) return r;
+        NodeId applied = mk_app(apply_all(motive, concrete_indices), m.scrutinee_id);
+        if (ElabResult r = unify(applied, expected_ty, ec, es); !r) return r;
+    }
+    return check_match_branches(type_global_id, motive, *m.branches, concrete_indices, ec, es);
 }
 
 inline ElabResult check(NodeId t, NodeId expected_ty, ElabCtx& ec, ElabState& es) {
@@ -10739,6 +10809,136 @@ inline InductiveHandle finish_inductive(uint32_t type_global_id, std::vector<Cto
         check_inductive_admission(type_global_id, ctors);
     }
     return finish_inductive_unchecked(type_global_id, std::move(ctors));
+}
+
+
+// ===========================================================================
+// S3 (tail part): proof states and the first tactics on the hybrid representation.
+// ===========================================================================
+inline ProofState start_proof(NodeId goal_type) {
+    uint32_t root_meta = ctx().meta_ctx.fresh(goal_type, 0);
+    ProofState ps;
+    ps.goals.push_back(Goal{root_meta, ElabCtx{}, {}, goal_type});
+    return ps;
+}
+inline bool proof_complete(const ProofState& ps) { return ps.goals.empty() && ps.es.all_constraints_resolved(); }
+inline NodeId extract_proof_term(uint32_t root_meta_id) {
+    NoDeltaScope keep_constants_folded; // F2a: do not inline library theorems/definitions into the proof
+    return quote(eval(mk_meta(root_meta_id), {}), 0);
+}
+inline NodeId meta_applied_to_context(uint32_t meta_id, uint32_t n) {
+    NodeId r = mk_meta(meta_id);
+    for (uint32_t i = 0; i < n; ++i) r = mk_app(r, mk_fvar(i));
+    return r;
+}
+inline std::unexpected<TypeError> no_goal_error(const char* tactic, std::optional<uint32_t> target_meta_id) {
+    return std::unexpected(TypeError{TypeErrorKind::Other, NodeId{}, std::nullopt,
+        std::string(tactic) + (target_meta_id ? ": no goal with the given meta_id (already solved or superseded)" : ": no open goals")});
+}
+
+inline ElabResult intro(ProofState& ps, const std::string& name = "", std::optional<uint32_t> target_meta_id = std::nullopt) {
+    auto idx_opt = find_goal_index(ps, target_meta_id);
+    if (!idx_opt) return no_goal_error("intro", target_meta_id);
+    Goal& g = ps.goals[*idx_opt];
+    const uint32_t n = g.ec.size();
+    NodeId dom_ty, new_target;
+    if (g.target.tag == NodeType::PI) { // the common case stays purely syntactic, so the goal keeps its flat (folded) shape
+        Pi p = ctx().pis[g.target.index];
+        dom_ty = p.dom_id; new_target = instantiate1(p.cod_id, mk_fvar(n));
+    } else {
+        Value target_val = eval(g.target, g.ec.values);
+        auto* pi = std::get_if<VPi>(&target_val);
+        if (!pi) return std::unexpected(TypeError{TypeErrorKind::Mismatch, g.target, std::nullopt, "intro: goal is not a Pi type, nothing to introduce"});
+        dom_ty = quote(eval(pi->dom_id, pi->env), n);
+        new_target = quote(eval(pi->cod_id, pi->env.extend(fresh_neutral(n))), n + 1);
+    }
+    ElabCtx new_ec = g.ec.extend(dom_ty);
+    std::vector<Hypothesis> new_hyps = g.hyps;
+    new_hyps.push_back(Hypothesis{name, dom_ty});
+    uint32_t new_meta = ctx().meta_ctx.fresh(new_target, new_ec.size());
+    NodeId inner = mk_lambda(dom_ty, abstract_fvars(meta_applied_to_context(new_meta, new_ec.size()), std::vector<uint32_t>{n}));
+    ctx().meta_ctx.solve(g.meta_id, close_over_context(inner, g.ec));
+    ps.goals[*idx_opt] = Goal{new_meta, new_ec, std::move(new_hyps), new_target};
+    return {};
+}
+
+inline ElabResult exact(ProofState& ps, NodeId term, std::optional<uint32_t> target_meta_id = std::nullopt) {
+    auto idx_opt = find_goal_index(ps, target_meta_id);
+    if (!idx_opt) return no_goal_error("exact", target_meta_id);
+    Goal& g = ps.goals[*idx_opt];
+    if (ElabResult r = check(term, g.target, g.ec, ps.es); !r) return r;
+    if (!ctx().meta_ctx.is_solved(g.meta_id)) ctx().meta_ctx.solve(g.meta_id, close_over_context(term, g.ec));
+    ps.goals.erase(ps.goals.begin() + *idx_opt);
+    return {};
+}
+
+inline ElabResult apply(ProofState& ps, NodeId candidate, std::optional<uint32_t> target_meta_id = std::nullopt) {
+    auto idx_opt = find_goal_index(ps, target_meta_id);
+    if (!idx_opt) return no_goal_error("apply", target_meta_id);
+    Goal g = ps.goals[*idx_opt]; // copy: only committed to ps.goals on success
+    TypeResult cand_ty_r = infer(candidate, g.ec, ps.es);
+    if (!cand_ty_r) return std::unexpected(cand_ty_r.error());
+    NodeId applied = candidate;
+    Value cur_ty_val = eval(*cand_ty_r, g.ec.values);
+    std::vector<std::pair<uint32_t, NodeId>> arg_metas; // (reference meta id, its own unwrapped arg type)
+    while (true) {
+        auto* pi = std::get_if<VPi>(&cur_ty_val);
+        if (!pi) break;
+        NodeId arg_ty = quote(eval(pi->dom_id, pi->env), g.ec.size());
+        uint32_t m = ctx().meta_ctx.fresh(close_pi_over_context(arg_ty, g.ec), g.ec.size());
+        arg_metas.push_back({m, arg_ty});
+        NodeId meta_ref = meta_applied_to_context(m, g.ec.size());
+        applied = mk_app(applied, meta_ref);
+        Value next = eval(pi->cod_id, pi->env.extend(eval(meta_ref, g.ec.values)));
+        cur_ty_val = std::move(next);
+    }
+    NodeId concl_ty = quote(cur_ty_val, g.ec.size());
+    if (ElabResult r = unify(concl_ty, g.target, g.ec, ps.es); !r) return r;
+    if (ElabResult r = drain_pending(g.ec, ps.es); !r) return r;
+    std::vector<Goal> new_goals;
+    for (auto& [m, arg_ty] : arg_metas) {
+        if (ctx().meta_ctx.is_solved(m)) continue;
+        uint32_t subgoal_meta = ctx().meta_ctx.fresh(arg_ty, g.ec.size());
+        ctx().meta_ctx.solve(m, close_over_context(meta_applied_to_context(subgoal_meta, g.ec.size()), g.ec));
+        new_goals.push_back(Goal{subgoal_meta, g.ec, g.hyps, arg_ty});
+    }
+    ctx().meta_ctx.solve(g.meta_id, close_over_context(applied, g.ec));
+    ps.goals.erase(ps.goals.begin() + *idx_opt);
+    ps.goals.insert(ps.goals.begin() + *idx_opt, new_goals.begin(), new_goals.end());
+    return {};
+}
+
+/// Rewrites occurrences of `x` in the goal by `y`, given eq_term : Eq A x y.  goal[x] <-- transport A (fun z => goal[z]) y x (symm eq) goal[y]
+inline ElabResult rewrite_eq(ProofState& ps, NodeId eq_term, NodeId x, NodeId y, uint32_t transport_gid, uint32_t symm_gid,
+                              std::optional<uint32_t> target_meta_id = std::nullopt) {
+    auto idx_opt = find_goal_index(ps, target_meta_id);
+    if (!idx_opt) return no_goal_error("rewrite_eq", target_meta_id);
+    Goal g = ps.goals[*idx_opt]; // copy: only committed to ps.goals on success
+    TypeResult eq_ty_r = infer(eq_term, g.ec, ps.es);
+    if (!eq_ty_r) return std::unexpected(eq_ty_r.error());
+    Value eq_ty_val = eval(*eq_ty_r, g.ec.values);
+    auto* eq_neutral = std::get_if<VNeutral>(&eq_ty_val);
+    if (!eq_neutral || eq_neutral->head.kind != NeutralHead::Kind::GlobalConst || eq_neutral->spine.size() != 3)
+        return std::unexpected(TypeError{TypeErrorKind::Mismatch, *eq_ty_r, std::nullopt,
+            "rewrite_eq: eq_term's own type is not a 3-argument (A, x, y) relation application -- expected Eq A x y"});
+    std::vector<NodeId> parts;
+    for (auto& frame : eq_neutral->spine) {
+        auto* af = std::get_if<ApplyFrame>(&frame);
+        if (!af) return std::unexpected(TypeError{TypeErrorKind::Mismatch, *eq_ty_r, std::nullopt, "rewrite_eq: eq_term's own type has a non-application eliminator frame"});
+        parts.push_back(quote(af->arg, g.ec.size()));
+    }
+    const uint32_t n = g.ec.size();
+    NodeId A = parts[0];
+    NodeId body_open = replace_terms(g.target, {{x, mk_fvar(n)}});            // goal with x abstracted into a context variable z = n
+    NodeId motive = mk_lambda(A, abstract_fvars(body_open, std::vector<uint32_t>{n}));
+    NodeId new_target = replace_fvars(body_open, {{n, y}});                  // goal[x := y]
+    uint32_t new_meta = ctx().meta_ctx.fresh(new_target, n);
+    NodeId new_meta_ref = meta_applied_to_context(new_meta, n);
+    NodeId symm_term = mk_app(mk_app(mk_app(mk_app(mk_const(symm_gid), A), x), y), eq_term);
+    NodeId wrapped = mk_app(mk_app(mk_app(mk_app(mk_app(mk_app(mk_const(transport_gid), A), motive), y), x), symm_term), new_meta_ref);
+    ctx().meta_ctx.solve(g.meta_id, close_over_context(wrapped, g.ec));
+    ps.goals[*idx_opt] = Goal{new_meta, g.ec, g.hyps, new_target};
+    return {};
 }
 
 } // namespace itp

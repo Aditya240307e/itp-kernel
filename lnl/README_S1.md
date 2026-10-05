@@ -84,3 +84,44 @@ unchecked, M6 admission universe rule off, M7 strict positivity off, M8 Match br
 Two lessons: (a) M3 first looked like a survivor because my detector missed one output format -- the suite now exits non-zero on
 any failure instead of being scraped; (b) M8 exposed a real gap in the ill-typed generator (it never produced an over-long match);
 fixed. Run: `python3 lnl/mutate.py [M1 M2 ...]`.
+
+
+---
+# S3: metavariables, unification, proof states, intro / apply / rewrite / exact (status 2026-10-05) -- gate G3a PASSED
+
+## What is ported
+`unify_values` (verbatim: it works on Values), `resolve_solved_meta_head`, `is_miller_pattern`, `drain_pending`, a new `solve_pattern`
+(spine variables are renamed to a fresh telescope and closed with one abstract), `start_proof`, `intro`, `exact`, `apply`,
+`rewrite_eq`, Match-motive inference in `check` (indices and scrutinee abstracted with `replace_terms`), and the Python proof-state API
+(`start_proof`, `intro`, `apply`, `exact`, `rewrite`, goal accessors, `extract`).
+Meta occurrences are `?m x0 .. x_{n-1}` (applied to every context variable); solutions are closed lambdas over the goal context.
+
+## Deliberate differences / preserved quirks
+1. `intro` on a literal Pi stays syntactic (`instantiate1` on the codomain, goals keep their folded shape). The reference took
+   `pi->dom_id/cod_id` even when the Pi only appeared after unfolding a definition, i.e. with ids belonging to another
+   environment; the hybrid kernel routes that case through NbE.
+2. `solve_pattern` now CHECKS that the spine is in dependency order (the reference silently assumed it).
+3. PRESERVED quirk: `?m =?= ?m` is rejected (an unapplied meta is a Miller pattern, so the occurs check fires on itself). Reflexive
+   unification should succeed; this will be fixed deliberately later, not silently during a behaviour-preserving port.
+4. NOT YET PORTED: the library index (`index_library`, `apply_candidates`, the discrimination tree) -- moved to the start of S5 together
+   with the search integration; `cases`, `induct` (S4).
+
+## Evidence (all against the frozen reference)
+| check | volume | result |
+|---|---|---|
+| scripted proofs in lockstep (refl, symm, trans, cong_succ, le_trans, le_refl, le_succ, rewrite2, add_zero_l) | 9 | states identical after every step; all proofs verify in both; identical normal forms |
+| higher-order script (`apply cong`: pending constraints) | 1 | states identical, open in both |
+| random tactic scripts (intro / apply const or hypothesis / rewrite) | 16,000 scripts, ~157,000 steps | 0 divergences (58k steps succeeded, 99k failed identically), 828 completed proofs verified identically |
+| unifier unit tests (occurs check, Miller spine, scope escape, constructor clash, non-linear deferral, decomposition) | 9 | all as expected |
+| telescope closers vs an independent right-fold on random DEPENDENT telescopes | 4,000 | 0 mismatches |
+| S2 gate and the main differential re-run after S3 | | still pass |
+
+## Mutation testing of the S3 rules
+M9 occurs check off, M10 intro does not instantiate, M11 rewrite substitutes x for y, M12 apply skips drain_pending, M13 telescope closer
+off by one, M14 meta applied to all but the last context variable.
+**5/6 caught.** Two survivors needed work: M9 (nothing produced `?m =?= S ?m`) -> direct unifier unit tests; M13 (wrong lambda domains are
+invisible in extracted proofs because contextual lambdas are beta-reduced away) -> property test of the closer on dependent telescopes.
+**M12 SURVIVES and is documented rather than hidden:** `drain_pending` can only make progress when a deferred constraint becomes a Miller
+pattern after a sibling meta is solved, but every meta `apply` creates is applied to ALL context variables, so the re-unified spine repeats
+a variable. An axiom `Q : forall f x, f x = x` built to force this still stays open in both kernels. The path is effectively dead at the
+tactic level; its unifier-level behaviour is unverified.

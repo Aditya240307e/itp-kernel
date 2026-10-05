@@ -74,6 +74,7 @@ def build_new(k, t):
     if g == 'let': return k.mk_let(build_new(k, t[1]), build_new(k, t[2]), build_new(k, t[3]))
     if g == 'match': return k.mk_match(build_new(k, t[1]), build_new(k, t[2]), [build_new(k, b) for b in t[3]])
     if g == 'fix': return k.mk_fix(build_new(k, t[2]), t[1], build_new(k, t[3]))
+    if g == 'meta': return k.mk_meta(t[1])
     raise ValueError(g)
 
 def build_ref(k, t):
