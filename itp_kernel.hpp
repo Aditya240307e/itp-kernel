@@ -7605,6 +7605,91 @@ inline NodeId build_ctor_type(uint32_t type_global_id, const CtorSpec& ctor) {
     return ctor_ty;
 }
 
+/// Admission checks for an inductive declaration (Finding F1). Run by finish_inductive and
+/// finish_mutual_inductive_block unless the explicit unsafe flag is passed.
+///
+/// Before this existed, admission checked strict positivity and NOTHING else: the family's own
+/// declared type, every constructor argument type and every result index were taken on trust.
+/// That is how a Girard-style paradox gets in: an inductive living in the impredicative universe 0
+/// with a constructor field that is itself a large type (e.g. `mk : Type0 -> U`) lets `U` encode
+/// "Type0 embeds into a member of Type0".
+///
+/// Checks, per constructor, in a telescope context that grows one field at a time:
+///   (1) the family's declared type is well-typed and is a Pi telescope ending in a sort `Type l`;
+///   (2) every constructor argument type is a type (infer yields a sort), well-typed in the context
+///       of the earlier fields;
+///   (3) the family applied to result_indices is well-typed and FULLY applied (right arity, each
+///       index of the right type);
+///   (4) universe rule: every field that is not parameter-like must have a type living in a
+///       universe <= the family's own universe `l`. A field is parameter-like iff it occurs as a
+///       bare variable among the constructor's result indices -- this kernel encodes a parameter
+///       as a leading field forced by the result indices (Eq's A, Ex's P), and a parameter is not
+///       a constructor argument in Coq/Lean, so it is exempt from the constraint.
+/// With this rule the impredicative universe 0 behaves like Coq's impredicative Set: strong
+/// elimination is fine, but classical axioms must not be added to a system that conflates Prop and
+/// data in universe 0 (see FINDINGS notes).
+inline void check_inductive_admission(uint32_t type_gid, const std::vector<CtorSpec>& ctors) {
+    ExecutionContext& c = ctx();
+    const std::string fam = c.globals.defs[type_gid].name;
+    NodeId declared = c.globals.defs[type_gid].type;
+    {
+        ElabState es0; ElabCtx ec0;
+        auto r = infer(declared, ec0, es0);
+        bool ok = false;
+        if (r) { Value v = eval(*r, ec0.values); ok = std::get_if<VType>(&v) != nullptr; }
+        if (!ok) throw std::logic_error("itp: inductive '" + fam + "': its declared type is ill-typed or is not a type");
+    }
+    NodeId cur = declared;
+    for (bool go = true; go;) {
+        go = inspect(cur, [&](Pi p) { cur = p.cod_id; return true; }, [&](auto) { return false; });
+    }
+    std::optional<uint32_t> fam_level = inspect(cur,
+        [&](Type t) -> std::optional<uint32_t> { return t.universe_level; },
+        [&](auto) -> std::optional<uint32_t> { return std::nullopt; });
+    if (!fam_level) {
+        throw std::logic_error("itp: inductive '" + fam + "': its declared type must be a Pi telescope ending in a sort");
+    }
+    for (const auto& ctor : ctors) {
+        ElabState es; ElabCtx ec;
+        std::vector<uint32_t> field_level;
+        for (std::size_t j = 0; j < ctor.arg_types.size(); ++j) {
+            auto sr = infer(ctor.arg_types[j], ec, es);
+            if (!sr) {
+                throw std::logic_error("itp: constructor '" + ctor.name + "' of '" + fam + "': field " +
+                                       std::to_string(j) + " is ill-typed (" + sr.error().message + ")");
+            }
+            Value sv = eval(*sr, ec.values);
+            auto* vt = std::get_if<VType>(&sv);
+            if (!vt) {
+                throw std::logic_error("itp: constructor '" + ctor.name + "' of '" + fam + "': field " +
+                                       std::to_string(j) + "'s declared type is not a type");
+            }
+            field_level.push_back(vt->universe_level);
+            ec = ec.extend(ctor.arg_types[j]);
+        }
+        NodeId applied = apply_all(mk_const(type_gid), ctor.result_indices);
+        auto rr = infer(applied, ec, es);
+        bool applied_ok = false;
+        if (rr) { Value rv = eval(*rr, ec.values); applied_ok = std::get_if<VType>(&rv) != nullptr; }
+        if (!applied_ok) {
+            throw std::logic_error("itp: constructor '" + ctor.name + "' of '" + fam + "': its result indices are "
+                                   "ill-typed, or do not fully apply the family (wrong number of indices)");
+        }
+        for (std::size_t j = 0; j < field_level.size(); ++j) {
+            bool parameter_like = false;
+            for (NodeId ri : ctor.result_indices) {
+                if (inspect(ri, [&](Var v) { return v.level == j; }, [&](auto) { return false; })) { parameter_like = true; break; }
+            }
+            if (!parameter_like && field_level[j] > *fam_level) {
+                throw std::logic_error("itp: constructor '" + ctor.name + "' of '" + fam + "': field " + std::to_string(j) +
+                                       " lives in universe " + std::to_string(field_level[j]) + ", larger than the family's own "
+                                       "universe " + std::to_string(*fam_level) + " (a large field in a small inductive is "
+                                       "inconsistent with an impredicative universe)");
+            }
+        }
+    }
+}
+
 /// Declares the constructors of a previously reserved inductive type,
 /// after checking each constructor argument for strict positivity (unless
 /// explicitly bypassed, which should be reserved for experimentation).
@@ -7621,6 +7706,7 @@ inline InductiveHandle finish_inductive(uint32_t type_global_id, std::vector<Cto
             }
         }
     }
+    if (!allow_unsafe_skip_positivity) check_inductive_admission(type_global_id, ctors);
     ExecutionContext& c = ctx();
     InductiveHandle handle;
     handle.type_global_id = type_global_id;
@@ -7804,6 +7890,9 @@ inline std::vector<InductiveHandle> finish_mutual_inductive_block(
                 }
             }
         }
+    }
+    if (!allow_unsafe_skip_positivity) {
+        for (const auto& spec : specs) check_inductive_admission(spec.type_global_id, spec.ctors);
     }
     ExecutionContext& c = ctx();
     std::vector<InductiveHandle> handles;
