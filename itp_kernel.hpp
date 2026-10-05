@@ -1077,11 +1077,37 @@ struct ExecutionContext {
         };
     }
 
+    // Derived globals are the ones the kernel itself synthesises on demand, deterministically and
+    // idempotently, for refutation exploitation (get_or_build_same_ctor / _unit_type / _empty_type):
+    // `__same_ctor_<family>`, `__Unit` with its constructor `__tt`, and `__Empty`.
+    static bool is_derived_global_name(const std::string& nm) {
+        return nm.rfind("__same_ctor_", 0) == 0 || nm == "__Unit" || nm == "__tt" || nm == "__Empty";
+    }
+
     void rewind(const Checkpoint& cp) {
         if (globals.defs.size() != cp.globals_n) {
-            throw std::logic_error("ExecutionContext::rewind: a global was declared since this "
-                "checkpoint -- rewinding would silently orphan the nodes its type/value reference. "
-                "Do not call rewind() for an episode whose result is being kept.");
+            // A probe may be the first thing to need a derived global (cases() builds `same_ctor` lazily
+            // the first time it exploits a refutation; since cases() can now succeed in more situations,
+            // this happens inside probes). Dropping such a global together with the probe is safe: it is
+            // reconstructed identically on next use, and anything that referenced it was itself created
+            // during the probe and is being rewound. Anything ELSE declared since the checkpoint is a
+            // genuine kept result, so the original refusal stands.
+            bool all_derived = globals.defs.size() > cp.globals_n;
+            for (std::size_t g = cp.globals_n; all_derived && g < globals.defs.size(); ++g)
+                all_derived = is_derived_global_name(globals.defs[g].name);
+            if (!all_derived) {
+                throw std::logic_error("ExecutionContext::rewind: a global was declared since this "
+                    "checkpoint -- rewinding would silently orphan the nodes its type/value reference. "
+                    "Do not call rewind() for an episode whose result is being kept.");
+            }
+            const uint32_t keep = static_cast<uint32_t>(cp.globals_n);
+            globals.defs.erase(globals.defs.begin() + keep, globals.defs.end());
+            for (auto it = globals.ctors_by_family.begin(); it != globals.ctors_by_family.end();)
+                it = (it->first >= keep) ? globals.ctors_by_family.erase(it) : std::next(it);
+            for (auto it = same_ctor_gid_by_family.begin(); it != same_ctor_gid_by_family.end();)
+                it = (it->first >= keep || it->second >= keep) ? same_ctor_gid_by_family.erase(it) : std::next(it);
+            if (unit_type_gid && *unit_type_gid >= keep) { unit_type_gid.reset(); unit_ctor_gid.reset(); }
+            if (empty_type_gid && *empty_type_gid >= keep) empty_type_gid.reset();
         }
         vars.rewind(cp.vars_n);
         apps.rewind(cp.apps_n);
@@ -6964,6 +6990,18 @@ inline ElabResult cases(ProofState& ps, uint32_t hyp_level, std::optional<uint32
             }
             uint32_t final_depth = g.ec.size() + static_cast<uint32_t>(arg_types.size()) + static_cast<uint32_t>(reverted_js.size());
             branch_expected = quote(cur_val, final_depth);
+        } else {
+            // F4: with nothing reverted, branch_expected used to be left as the raw motive application
+            // `(motive idx...) ctor_app` -- an unreduced beta-redex whose embedded lambda is "embedded bound
+            // structure", so a later induct() on a field of this branch was refused by its has_internal_binder_ref
+            // guard (cases -> induct failed even though cases -> cases and induct -> induct were fine).
+            // Reduce it. NoDeltaScope: beta/iota only; global constants stay folded, so the goal keeps its
+            // flat shape (a full NbE round-trip would delta-unfold every definition it can reach -- see
+            // intro()'s own long comment on why that is unacceptable for a stored goal).
+            NoDeltaScope keep_constants_folded;
+            Env be_env = g.ec.values;
+            for (uint32_t ai = 0; ai < ctor_arity; ++ai) be_env = be_env.extend(fresh_neutral(g.ec.size() + ai));
+            branch_expected = quote(eval(branch_expected, be_env), g.ec.size() + static_cast<uint32_t>(arg_types.size()));
         }
 
         if (exploit_ci && ci == *exploit_ci) {

@@ -42,6 +42,12 @@ for perm in [(0, 1, 2, 3), (3, 2, 1, 0), (2, 0, 3, 1), (1, 3, 0, 2), (3, 0, 2, 1
     spec = ['I:%d' % i for i in perm]; r = run(spec, 4); assert r == 'OK', (spec, r)
 print('PASS  5 induction orders of 4 variables (including fully reversed)')
 
+# F4: cases followed by induct (branch targets must be reduced, not left as motive redexes)
+for spec, nv in [(['C:0', 'I:last'], 2), (['C:0', 'I:1'], 2), (['C:0', 'I:last', 'I:last'], 3), (['C:0', 'C:1', 'I:2'], 3),
+                 (['I:2', 'C:0', 'I:1'], 3), (['C:1', 'I:0', 'C:2'], 3), (['C:2', 'I:1', 'I:0'], 3), (['C:0', 'I:last', 'C:last', 'I:last'], 3)]:
+    r = run(spec, nv); assert r == 'OK', (spec, r)
+print('PASS  8 mixed cases/induct orderings (F4: cases -> induct)')
+
 # isolated: induction on a variable that a hypothesis depends on (the reverted-domain specialisation bug)
 k, refs = cur.build_base_kernel(); nat = refs['nat_ty']; V = k.mk_var
 E = lambda a, b: cur.eq_app(k, refs, nat, a, b)
