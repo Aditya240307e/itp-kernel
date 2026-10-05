@@ -1,4 +1,4 @@
-# Hybrid-variable kernel: spike S0 + S1 (status 2026-10-05)
+# Hybrid-variable kernel: spike S0 + S1 (status 2026-10-05) -- GO
 
 Bound variables are de Bruijn **indices**, context variables (hypotheses) stay **levels**. See the refactor plan for the design
 rationale. This directory is a separate build (`itp_env_lnl`); the reference kernel (`itp_env_ref`) is the frozen baseline commit.
@@ -35,10 +35,12 @@ Two nanobind modules only coexist in one process with `ITP_NB_DOMAIN` (own type 
 ## Performance (single thread, same terms both kernels)
 * normalisation: hybrid 0.74-0.84x of reference (faster).
 * typing, random terms depth 4-9: 0.93-1.19x.
-* typing, adversarial chain of n nested binders (`lambda x1..xn. x1`): n=10 1.6x, 25 2.2x, 50 3.6x, 100 5.4x, 200 8.3x, 400 16x.
-  QUADRATIC: each binder runs `instantiate` over the nested spine. **S2 requirement**: open Lambda/Pi chains as a telescope (one
-  instantiate for the whole chain, abstract once) and add a free-variable-range cache so `abstract_fvars` skips unrelated subterms.
-  Target: <= 1.5x at n <= 100 and linear scaling. Until then the 1.5x gate is met for typical (shallow) terms only.
+* typing, adversarial chain of n nested binders (`lambda x1..xn. x1`):
+  - first version (one `instantiate` per binder): QUADRATIC, 1.6x at n=10, 3.6x at 50, 8.3x at 200, 16x at 400.
+  - after telescope opening (peel the whole Lambda/Pi chain, ONE instantiate, type the body once, close with one abstract per
+    domain): 0.79x at n=10, 0.75x at 100, 0.72x at 400, 0.60x at 800 -- linear, faster than the reference.
+  The differential suite was re-run after this change (90,000 terms + proof corpus + 5,000 property cases): 0 disagreements.
+  S2 must keep this discipline for the full typing core (Match branches, Fix bodies, constructor telescopes).
 
 ## Harness limitations (so the evidence is not over-read)
 Reference has no `mk_fix`, so Fix is covered only through extracted proofs, not synthetic terms. Generated types are

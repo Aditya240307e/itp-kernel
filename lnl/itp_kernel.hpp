@@ -10400,16 +10400,38 @@ inline TcResult tc_infer(NodeId t, const ElabCtx& ec) {
         case NodeType::TYPE: return mk_type(ctx().types[t.index].universe_level + 1);
         case NodeType::CONST: return ctx().globals[ctx().consts[t.index].global_id].type;
         case NodeType::PI: {
-            Pi p = ctx().pis[t.index];
-            auto s1 = tc_sort(p.dom_id, ec); if (!s1) return std::unexpected(s1.error());
-            auto s2 = tc_sort(instantiate1(p.cod_id, mk_fvar(ec.size())), ec.extend(p.dom_id)); if (!s2) return std::unexpected(s2.error());
-            return mk_type(*s2 == 0 ? 0 : std::max(*s1, *s2));
+            // Telescope: open the whole chain of directly nested Pis with fresh context variables in ONE pass (per-binder instantiate
+            // would be quadratic in the chain length), type every domain and the final codomain, then fold the universe rule.
+            std::vector<NodeId> doms; NodeId cod = t;
+            while (cod.tag == NodeType::PI) { Pi p = ctx().pis[cod.index]; doms.push_back(p.dom_id); cod = p.cod_id; }
+            const uint32_t m = static_cast<uint32_t>(doms.size()), n = ec.size();
+            ElabCtx cur = ec; std::vector<NodeId> fv_rev; std::vector<uint32_t> sorts;
+            for (uint32_t j = 0; j < m; ++j) {
+                NodeId dj = instantiate(doms[j], fv_rev);
+                auto s = tc_sort(dj, cur); if (!s) return std::unexpected(s.error());
+                sorts.push_back(*s); cur = cur.extend(dj); fv_rev.insert(fv_rev.begin(), mk_fvar(n + j));
+            }
+            auto sc = tc_sort(instantiate(cod, fv_rev), cur); if (!sc) return std::unexpected(sc.error());
+            uint32_t level = *sc;
+            for (int j = static_cast<int>(m) - 1; j >= 0; --j) level = (level == 0) ? 0 : std::max(sorts[j], level);
+            return mk_type(level);
         }
         case NodeType::LAMBDA: {
-            Lambda l = ctx().lambdas[t.index];
-            auto s = tc_sort(l.type_id, ec); if (!s) return std::unexpected(s.error());
-            auto bt = tc_infer(instantiate1(l.body_id, mk_fvar(ec.size())), ec.extend(l.type_id)); if (!bt) return bt;
-            return mk_pi(l.type_id, abstract_fvars(*bt, std::vector<uint32_t>{ec.size()}));
+            // Telescope (see PI): open all nested lambdas at once, type the body once, close with one abstract per domain.
+            std::vector<NodeId> doms; NodeId body = t;
+            while (body.tag == NodeType::LAMBDA) { Lambda l = ctx().lambdas[body.index]; doms.push_back(l.type_id); body = l.body_id; }
+            const uint32_t m = static_cast<uint32_t>(doms.size()), n = ec.size();
+            ElabCtx cur = ec; std::vector<NodeId> fv_rev, opened; std::vector<uint32_t> fvl;
+            for (uint32_t j = 0; j < m; ++j) {
+                NodeId dj = instantiate(doms[j], fv_rev);
+                auto s = tc_sort(dj, cur); if (!s) return std::unexpected(s.error());
+                opened.push_back(dj); cur = cur.extend(dj); fv_rev.insert(fv_rev.begin(), mk_fvar(n + j)); fvl.push_back(n + j);
+            }
+            auto bt = tc_infer(instantiate(body, fv_rev), cur); if (!bt) return bt;
+            NodeId result = abstract_fvars(*bt, fvl);
+            for (int j = static_cast<int>(m) - 1; j >= 0; --j)
+                result = mk_pi(abstract_fvars(opened[j], std::vector<uint32_t>(fvl.begin(), fvl.begin() + j)), result);
+            return result;
         }
         case NodeType::APP: {
             App a = ctx().apps[t.index];
