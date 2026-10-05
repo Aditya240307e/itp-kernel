@@ -1869,6 +1869,7 @@ namespace detail {
 NodeId substitute_var(NodeId g, uint32_t target_level, NodeId replacement);
 NodeId substitute_vars(NodeId g, const std::unordered_map<uint32_t, NodeId>& replacements);
 NodeId shift_levels_from(NodeId t, uint32_t threshold, uint32_t amount);
+NodeId substitute_vars_relevel(NodeId g, const std::unordered_map<uint32_t, NodeId>& replacements, uint32_t base, uint32_t j);
 }
 // eval, quote, and conv_value recurse without any explicit stack-depth
 // protection -- unrelated to the environment representation above, and
@@ -2395,6 +2396,86 @@ inline NodeId resolve_metas(NodeId term) {
     );
 }
 
+/// Depth-aware metavariable resolution (Finding F3, cause 3). `depth` is the number of binders in
+/// scope at `term`'s position in the FINAL numbering. Unlike resolve_metas above, a spliced solution
+/// is first re-anchored to the real embedding depth (its internal binders move from the solution's
+/// own closed size n to `depth`, via the same two-hop SAFE_OFFSET shift requote_captured_syntax
+/// uses) and the arguments are substituted; only THEN are metas nested inside the result resolved,
+/// in the final numbering, at their own true depth.
+/// Why: resolve_metas resolves a nested solution before the enclosing splice has fixed any anchor,
+/// leaving it anchored at its own closed size; the enclosing re-anchoring then shifts it uniformly.
+/// That is right only when every nested closed size happens to equal the nested term's local depth.
+/// With induct() inside induct() it does at two levels but not at three (agent-only slots such as
+/// an induction hypothesis make the closed size exceed the real depth), leaving the innermost fix
+/// one level off.
+inline NodeId resolve_metas_at(NodeId term, uint32_t depth) {
+    return inspect(term,
+        [&](App a) -> NodeId {
+            std::vector<NodeId> args;
+            NodeId head = term;
+            while (true) {
+                bool matched = false;
+                inspect(head, [&](App inner) { args.push_back(inner.arg_id); head = inner.fn_id; matched = true; },
+                              [&](auto) {});
+                if (!matched) break;
+            }
+            std::reverse(args.begin(), args.end());
+            bool head_is_meta = false;
+            uint32_t head_meta_id = 0;
+            inspect(head, [&](Meta m) { head_is_meta = true; head_meta_id = m.meta_id; }, [&](auto) {});
+            if (head_is_meta) {
+                const MetaEntry& e = ctx().meta_ctx[head_meta_id];
+                if (e.solution) {
+                    NodeId result = *e.solution; // raw: nested metas are resolved AFTER anchoring, below
+                    uint32_t n = static_cast<uint32_t>(args.size());
+                    constexpr uint32_t SAFE_OFFSET = 1'000'000;
+                    result = detail::shift_levels_from(result, n, SAFE_OFFSET);
+                    std::unordered_map<uint32_t, NodeId> sub;
+                    uint32_t i = 0;
+                    for (; i < n; ++i) {
+                        bool result_is_lambda = false;
+                        NodeId lam_body{};
+                        inspect(result, [&](Lambda l) { result_is_lambda = true; lam_body = l.body_id; },
+                                        [&](auto) {});
+                        if (!result_is_lambda) break;
+                        sub[i] = resolve_metas_at(args[i], depth);
+                        result = lam_body;
+                    }
+                    result = detail::substitute_vars_relevel(result, sub, depth, 0);
+                    for (; i < n; ++i) result = mk_app(result, resolve_metas_at(args[i], depth));
+                    result = shift_levels_down_from(result, n + SAFE_OFFSET, n + SAFE_OFFSET - depth);
+                    return resolve_metas_at(result, depth);
+                }
+            }
+            return mk_app(resolve_metas_at(a.fn_id, depth), resolve_metas_at(a.arg_id, depth));
+        },
+        [&](Lambda l) -> NodeId { return mk_lambda(resolve_metas_at(l.type_id, depth), resolve_metas_at(l.body_id, depth + 1)); },
+        [&](Let l) -> NodeId {
+            return mk_let(resolve_metas_at(l.type_id, depth), resolve_metas_at(l.value_id, depth), resolve_metas_at(l.body_id, depth + 1));
+        },
+        [&](Pi p) -> NodeId { return mk_pi(resolve_metas_at(p.dom_id, depth), resolve_metas_at(p.cod_id, depth + 1)); },
+        [&](Match m) -> NodeId {
+            std::vector<NodeId> branches;
+            branches.reserve(m.branches->size());
+            for (NodeId b : *m.branches) branches.push_back(resolve_metas_at(b, depth));
+            return mk_match(resolve_metas_at(m.scrutinee_id, depth), resolve_metas_at(m.motive_id, depth), std::move(branches));
+        },
+        [&](Meta meta) -> NodeId {
+            const MetaEntry& e = ctx().meta_ctx[meta.meta_id];
+            if (e.solution) return resolve_metas(*e.solution); // bare reference: same convention as resolve_metas
+            return mk_meta(meta.meta_id);
+        },
+        [&](QuotType q) -> NodeId { return mk_quot_type(resolve_metas_at(q.relation, depth)); },
+        [&](QuotMk q) -> NodeId { return mk_quot_mk(resolve_metas_at(q.relation, depth), resolve_metas_at(q.elem, depth)); },
+        [&](QuotLift q) -> NodeId {
+            return mk_quot_lift(resolve_metas_at(q.relation, depth), resolve_metas_at(q.codomain, depth), resolve_metas_at(q.f, depth),
+                                 resolve_metas_at(q.respects_proof, depth), resolve_metas_at(q.quotient_elem, depth));
+        },
+        [&](Fix f) -> NodeId { return mk_fix(resolve_metas_at(f.fn_type, depth), f.decreasing_arg, resolve_metas_at(f.body, depth + 1)); },
+        [&](auto) -> NodeId { return term; } // Var, Type, Const, TypeUniv
+    );
+}
+
 inline NodeId requote_captured_syntax(NodeId term, const Env& env, uint32_t depth) {
     // Two distinct counters, deliberately not conflated (an earlier
     // version of this fix used a single incrementing counter for both
@@ -2487,7 +2568,7 @@ inline NodeId requote_captured_syntax(NodeId term, const Env& env, uint32_t dept
                 if (head_is_meta) {
                     const MetaEntry& e = ctx().meta_ctx[head_meta_id];
                     if (e.solution) {
-                        NodeId result = resolve_metas(*e.solution);
+                        NodeId result = *e.solution; // F3 cause 3: raw -- nested metas are resolved after anchoring (resolve_metas_at)
                         uint32_t n = static_cast<uint32_t>(args.size());
                         // Re-anchor any GENUINELY NEW binder the
                         // solution's own body introduces beyond its own
@@ -2555,10 +2636,10 @@ inline NodeId requote_captured_syntax(NodeId term, const Env& env, uint32_t dept
                             sub[i] = go(args[i], cur_depth);
                             result = lam_body;
                         }
-                        result = detail::substitute_vars(result, sub);
+                        result = detail::substitute_vars_relevel(result, sub, cur_depth, 0);
                         for (; i < n; ++i) result = mk_app(result, go(args[i], cur_depth));
                         result = shift_levels_down_from(result, n + SAFE_OFFSET, n + SAFE_OFFSET - cur_depth);
-                        return result;
+                        return resolve_metas_at(result, cur_depth);
                     }
                 }
                 return mk_app(go(a.fn_id, cur_depth), go(a.arg_id, cur_depth));
@@ -3889,6 +3970,43 @@ inline NodeId substitute_vars(NodeId g, const std::unordered_map<uint32_t, NodeI
                            substitute_vars(f.body, replacements));
         },
         [&](auto) { return g; } // Var (non-matching level), Type, Const, Meta, TypeUniv: no children
+    );
+}
+
+/// substitute_vars for replacements that may themselves CONTAIN BINDERS (Finding F3, cause 4).
+/// A replacement was built at depth `base` (free variables < base; its internal binders occupy
+/// levels >= base). When it lands at a site that is `j` binders deep inside `g`, those internal
+/// binders must move up by j, otherwise they collide with the j enclosing binders of `g` (levels
+/// are absolute, so a binder-carrying term is NOT position independent). Plain substitute_vars is
+/// correct only for binder-free replacements (variables, constants, applications of them); the
+/// meta-solution splice substitutes arguments such as a re-embedded Fix copy (an induction
+/// hypothesis's recursive-call value), which do carry binders.
+inline NodeId substitute_vars_relevel(NodeId g, const std::unordered_map<uint32_t, NodeId>& replacements, uint32_t base, uint32_t j) {
+    if (replacements.empty()) return g;
+    auto rec = [&](NodeId t, uint32_t jj) { return substitute_vars_relevel(t, replacements, base, jj); };
+    return inspect(g,
+        [&](Var v) -> NodeId {
+            auto it = replacements.find(v.level);
+            if (it == replacements.end()) return g;
+            return j == 0 ? it->second : shift_levels_from(it->second, base, j);
+        },
+        [&](App a) -> NodeId { return mk_app(rec(a.fn_id, j), rec(a.arg_id, j)); },
+        [&](Lambda l) -> NodeId { return mk_lambda(rec(l.type_id, j), rec(l.body_id, j + 1)); },
+        [&](Let l) -> NodeId { return mk_let(rec(l.type_id, j), rec(l.value_id, j), rec(l.body_id, j + 1)); },
+        [&](Pi p) -> NodeId { return mk_pi(rec(p.dom_id, j), rec(p.cod_id, j + 1)); },
+        [&](Match m) -> NodeId {
+            std::vector<NodeId> branches;
+            branches.reserve(m.branches->size());
+            for (NodeId b : *m.branches) branches.push_back(rec(b, j));
+            return mk_match(rec(m.scrutinee_id, j), rec(m.motive_id, j), std::move(branches));
+        },
+        [&](QuotType q) -> NodeId { return mk_quot_type(rec(q.relation, j)); },
+        [&](QuotMk q) -> NodeId { return mk_quot_mk(rec(q.relation, j), rec(q.elem, j)); },
+        [&](QuotLift q) -> NodeId {
+            return mk_quot_lift(rec(q.relation, j), rec(q.codomain, j), rec(q.f, j), rec(q.respects_proof, j), rec(q.quotient_elem, j));
+        },
+        [&](Fix f) -> NodeId { return mk_fix(rec(f.fn_type, j), f.decreasing_arg, rec(f.body, j + 1)); },
+        [&](auto) -> NodeId { return g; }
     );
 }
 
@@ -9589,7 +9707,18 @@ inline ElabResult induct(ProofState& ps, uint32_t hyp_level, std::optional<uint3
                 }
                 uint32_t target_level = body_base + ctor_arity + static_cast<uint32_t>(ri);
                 uint32_t shared_marker = body_base + static_cast<uint32_t>(ri);
-                reverted_body_types.push_back(pi_opt->dom_id);
+                // F3 (cause 2): a reverted hypothesis may mention the induction variable ITSELF
+                // (e.g. h : Eq n n while inducting on n). Its binder domain in this branch must then
+                // be specialised to THIS constructor (Eq Zero Zero / Eq (Succ x) (Succ x)) -- the
+                // agent-facing side already does this via branch_replacements[scrutinee] =
+                // agent_ctor_app, but this true-runtime side only replaced the INDEX markers, so the
+                // branch lambda bound h at type (Eq n' n') and whole_term_check then compared a stuck
+                // `n'` against the constructor ("spine comparison differs"). Done per domain, AFTER it
+                // is peeled (not up front in body_idx_replacements): this scheme's constructor-field
+                // levels (body_base+k) are numerically the same range as its reverted-hyp markers
+                // (body_base+ri), so substituting first would let the marker replacement below
+                // clobber the constructor's own field references.
+                reverted_body_types.push_back(detail::substitute_var(pi_opt->dom_id, scrutinee_level, true_ctor_app));
                 remaining_body = detail::substitute_var(pi_opt->cod_id, shared_marker, mk_var(target_level));
             }
             for (auto it = reverted_body_types.rbegin(); it != reverted_body_types.rend(); ++it) branch = mk_lambda(*it, branch);
