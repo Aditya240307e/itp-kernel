@@ -24,6 +24,7 @@
 // independent of how many Kernel objects exist or in what order they
 // get destroyed.
 
+#include <functional>
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
@@ -449,6 +450,39 @@ struct KernelWrapper {
         return itp::print(n, nullptr);
     }
 
+    // Diagnostic: prints a term with ABSOLUTE de Bruijn levels (#k for Var k), unlike print_node, which names
+    // binders by printing depth and so cannot reveal a mis-levelled reference. Permanent: used to root-cause F3.
+    std::string dump_raw(itp::NodeId n) {
+        auto g = activate();
+        return dump_raw_unlocked(n);
+    }
+    std::string dump_raw_unlocked(itp::NodeId n) {
+        std::function<std::string(itp::NodeId)> go = [&](itp::NodeId t) -> std::string {
+            return itp::inspect(t,
+                [&](itp::Var v) { return "#" + std::to_string(v.level); },
+                [&](itp::App a) { return "(" + go(a.fn_id) + " " + go(a.arg_id) + ")"; },
+                [&](itp::Lambda l) { return "(lam " + go(l.type_id) + ". " + go(l.body_id) + ")"; },
+                [&](itp::Pi p) { return "(pi " + go(p.dom_id) + ". " + go(p.cod_id) + ")"; },
+                [&](itp::Type ty) { return "T" + std::to_string(ty.universe_level); },
+                [&](itp::Const c) { return "C" + std::to_string(c.global_id); },
+                [&](itp::Meta m) { return "?" + std::to_string(m.meta_id); },
+                [&](itp::Match m) {
+                    std::string r = "(match " + go(m.scrutinee_id) + " [" + go(m.motive_id) + "]";
+                    for (auto b : *m.branches) r += " | " + go(b);
+                    return r + ")";
+                },
+                [&](itp::Fix f) { return "(fix<" + std::to_string(f.decreasing_arg) + "> " + go(f.fn_type) + " := " + go(f.body) + ")"; },
+                [&](auto) { return std::string("<other>"); });
+        };
+        return go(n);
+    }
+
+    std::optional<itp::NodeId> meta_solution(uint32_t meta_id) {
+        auto g = activate();
+        const itp::MetaEntry& e = itp::ctx().meta_ctx[meta_id];
+        return e.solution;
+    }
+
     ProofStateHandle start_proof(itp::NodeId goal_type) {
         auto g = activate();
         ProofStateHandle h;
@@ -827,6 +861,19 @@ struct KernelWrapper {
         itp::ElabCtx ec;
         raise_if_error(itp::check(term, goal_type, ec, es));
     }
+
+    // Diagnostic variant: like whole_term_check but on failure returns the kernel's message together with the
+    // offending subterm and (if any) the expected type, both printed with absolute levels (dump_raw style).
+    std::string whole_term_check_detailed(itp::NodeId term, itp::NodeId goal_type) {
+        auto g = activate();
+        itp::ElabState es;
+        itp::ElabCtx ec;
+        auto r = itp::check(term, goal_type, ec, es);
+        if (r) return "OK";
+        std::string out = r.error().message + "\n  offending: " + dump_raw_unlocked(r.error().offending);
+        if (r.error().expected) out += "\n  expected:  " + dump_raw_unlocked(*r.error().expected);
+        return out;
+    }
     itp::NodeId normalize_node(itp::NodeId term) {
         auto g = activate();
         return itp::normalize(term, {});
@@ -1126,6 +1173,9 @@ NB_MODULE(itp_env, m) {
              "fn_gid"_a, "ind_type_global_id"_a, "decreasing_arg_level"_a, "body"_a,
              "allow_unsafe_skip_guard_check"_a = false)
         .def("print_node", &KernelWrapper::print_node, "n"_a)
+        .def("dump_raw", &KernelWrapper::dump_raw, "n"_a)
+        .def("whole_term_check_detailed", &KernelWrapper::whole_term_check_detailed, "term"_a, "goal_type"_a)
+        .def("meta_solution", &KernelWrapper::meta_solution, "meta_id"_a)
         .def("start_proof", &KernelWrapper::start_proof, "goal_type"_a, nb::keep_alive<0, 1>())
         .def("fork_single_goal", &KernelWrapper::fork_single_goal, "source"_a, "target_meta_id"_a, nb::keep_alive<0, 1>())
         .def("materialize_from_node", &KernelWrapper::materialize_from_node, "target"_a, "hyp_types"_a, "hyp_names"_a, nb::keep_alive<0, 1>(), nb::call_guard<nb::gil_scoped_release>())

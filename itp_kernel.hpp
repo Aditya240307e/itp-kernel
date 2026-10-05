@@ -1944,6 +1944,23 @@ inline Value apply(Value fn, Value arg) {
     );
 }
 
+/// No-delta evaluation scope (Findings F2a/F4/F5). While a NoDeltaScope is alive on this thread,
+/// eval() leaves global constants FOLDED (a neutral GlobalConst) instead of delta-unfolding their
+/// bodies, while beta, iota (Match on a constructor) and local Fix behaviour are unchanged.
+/// Use ONLY for normalisation whose output is stored or displayed (proof extraction, goal and
+/// hypothesis normalisation). Never around conversion checking: definitional equality needs delta.
+/// Why it exists: quote(eval(t)) unfolds every definition it can reach, so an extracted proof
+/// inlined library theorems such as `transport` (whose bodies carry binders that then no longer
+/// line up), and a normalised goal lost its flat shape (see intro()'s own long comment).
+inline bool& no_delta_flag() { static thread_local bool f = false; return f; }
+struct NoDeltaScope {
+    bool prev;
+    NoDeltaScope() : prev(no_delta_flag()) { no_delta_flag() = true; }
+    ~NoDeltaScope() { no_delta_flag() = prev; }
+    NoDeltaScope(const NoDeltaScope&) = delete;
+    NoDeltaScope& operator=(const NoDeltaScope&) = delete;
+};
+
 inline Value eval(NodeId term, const Env& env) {
     return inspect(term,
         [&](Var v) -> Value {
@@ -1970,10 +1987,11 @@ inline Value eval(NodeId term, const Env& env) {
                 // A nullary constructor is already saturated.
                 return Value{VCtor{def.ctor_info->ind_type_global_id, def.ctor_info->ctor_idx, {}}};
             }
-            if (def.value) {
+            if (def.value && !no_delta_flag()) {
                 // Delta-reduction: definitions unfold transparently.
                 // Definitions are required to be closed, so they are
-                // evaluated in an empty environment.
+                // evaluated in an empty environment. (Skipped inside a
+                // NoDeltaScope: the constant then stays a folded neutral.)
                 return eval(*def.value, Env{});
             }
             return Value{VNeutral{NeutralHead{NeutralHead::Kind::GlobalConst, c.global_id}, {}}};
@@ -3485,6 +3503,7 @@ inline bool occurs_meta(uint32_t meta_id, NodeId t) {
                    occurs_meta(meta_id, q.f) || occurs_meta(meta_id, q.respects_proof) ||
                    occurs_meta(meta_id, q.quotient_elem);
         },
+        [&](Fix f) { return occurs_meta(meta_id, f.fn_type) || occurs_meta(meta_id, f.body); },
         [&](auto) { return false; } // Var, Type, Const, TypeUniv: no children, never a Meta
     );
 }
@@ -3544,6 +3563,7 @@ inline void collect_free_levels(NodeId t, uint32_t depth, std::unordered_set<uin
             collect_free_levels(q.respects_proof, depth, out);
             collect_free_levels(q.quotient_elem, depth, out);
         },
+        [&](Fix f) { collect_free_levels(f.fn_type, depth, out); collect_free_levels(f.body, depth, out); },
         [&](auto) {} // Var handled above; Type/Const/TypeUniv/Meta: no Var children
     );
 }
@@ -3596,6 +3616,7 @@ inline NodeId substitute_levels(NodeId t, uint32_t depth, const std::unordered_m
                                  substitute_levels(q.f, depth, mapping), substitute_levels(q.respects_proof, depth, mapping),
                                  substitute_levels(q.quotient_elem, depth, mapping));
         },
+        [&](Fix f) -> NodeId { return mk_fix(substitute_levels(f.fn_type, depth, mapping), f.decreasing_arg, substitute_levels(f.body, depth + 1, mapping)); },
         [&](auto) -> NodeId { return t; } // Type, Const, TypeUniv, Meta: no children, unchanged
     );
 }
@@ -3757,6 +3778,7 @@ inline NodeId generalize(NodeId g, const std::vector<std::pair<NodeId, uint32_t>
             return mk_quot_lift(generalize(q.relation, targets), generalize(q.codomain, targets), generalize(q.f, targets),
                                  generalize(q.respects_proof, targets), generalize(q.quotient_elem, targets));
         },
+        [&](Fix f) { return mk_fix(generalize(f.fn_type, targets), f.decreasing_arg, generalize(f.body, targets)); },
         [&](auto) { return g; } // Var, Type, Const, Meta, TypeUniv: no children, already checked above
     );
 }
@@ -3949,6 +3971,7 @@ inline NodeId shift_all_levels(NodeId t, uint32_t amount) {
                                  shift_all_levels(q.f, amount), shift_all_levels(q.respects_proof, amount),
                                  shift_all_levels(q.quotient_elem, amount));
         },
+        [&](Fix f) -> NodeId { return mk_fix(shift_all_levels(f.fn_type, amount), f.decreasing_arg, shift_all_levels(f.body, amount)); },
         [&](auto) -> NodeId { return t; } // Type, Const, Meta, TypeUniv: no children
     );
 }
@@ -4009,6 +4032,7 @@ inline NodeId shift_levels_from(NodeId t, uint32_t threshold, uint32_t amount) {
                                  shift_levels_from(q.f, threshold, amount), shift_levels_from(q.respects_proof, threshold, amount),
                                  shift_levels_from(q.quotient_elem, threshold, amount));
         },
+        [&](Fix f) -> NodeId { return mk_fix(shift_levels_from(f.fn_type, threshold, amount), f.decreasing_arg, shift_levels_from(f.body, threshold, amount)); },
         [&](auto) -> NodeId { return t; }
     );
 }
@@ -4602,6 +4626,7 @@ inline bool check_well_scoped(NodeId t, uint32_t depth) {
                    check_well_scoped(q.f, depth) && check_well_scoped(q.respects_proof, depth) &&
                    check_well_scoped(q.quotient_elem, depth);
         },
+        [&](Fix f) { return check_well_scoped(f.fn_type, depth) && check_well_scoped(f.body, depth + 1); },
         [&](auto) { return true; } // Type/Const/TypeUniv/Meta: no Var children, never a problem
     );
 }
@@ -5786,6 +5811,7 @@ inline bool proof_complete(const ProofState& ps) {
 /// every OTHER meta's solution must be produced via close_over_context
 /// before extraction would make sense for it too.
 inline NodeId extract_proof_term(uint32_t root_meta_id) {
+    NoDeltaScope keep_constants_folded; // F2a: do not inline library theorems/definitions into the proof
     return quote(eval(mk_meta(root_meta_id), {}), 0);
 }
 
