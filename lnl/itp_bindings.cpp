@@ -35,6 +35,31 @@ struct KernelWrapper {
     void finish_recursive_function(uint32_t gid, uint32_t ind_gid, uint32_t dec, itp::NodeId body) { auto g = activate(); itp::finish_recursive_function(gid, ind_gid, dec, body); }
     uint32_t declare_unchecked(itp::NodeId type, std::optional<itp::NodeId> value, const std::string& name) { auto g = activate(); return itp::declare_unchecked(type, value, name); }
 
+    // ---- S2: checked declarations and the full typing core
+    itp::InductiveHandle finish_inductive_unchecked(uint32_t tid, std::vector<itp::CtorSpec> ctors) { auto g = activate(); return itp::finish_inductive_unchecked(tid, std::move(ctors)); }
+    uint32_t declare_checked(itp::NodeId type, itp::NodeId value, const std::string& name) {
+        auto g = activate(); auto r = itp::declare_checked(type, value, name);
+        if (!r) throw ITPError(r.error().message);
+        return *r;
+    }
+    void finish_recursive_function_checked(uint32_t gid, uint32_t ind_gid, uint32_t dec, itp::NodeId body) {
+        auto g = activate(); auto r = itp::finish_recursive_function_checked(gid, ind_gid, dec, body);
+        if (!r) throw ITPError(r.error().message);
+    }
+    std::pair<bool, nb::object> infer_open(itp::NodeId t, const std::vector<itp::NodeId>& hyp_types) {
+        auto g = activate(); itp::ElabCtx ec; itp::ElabState es;
+        for (auto h : hyp_types) ec = ec.extend(h);
+        auto r = itp::infer(t, ec, es);
+        if (r) return {true, nb::cast(*r)};
+        return {false, nb::cast(r.error().message)};
+    }
+    std::pair<bool, std::string> check_open(itp::NodeId t, itp::NodeId expected, const std::vector<itp::NodeId>& hyp_types) {
+        auto g = activate(); itp::ElabCtx ec; itp::ElabState es;
+        for (auto h : hyp_types) ec = ec.extend(h);
+        auto r = itp::check(t, expected, ec, es);
+        if (r) return {true, "OK"};
+        return {false, r.error().message};
+    }
     itp::Env fresh_env(uint32_t n0) { itp::Env env; for (uint32_t i = 0; i < n0; ++i) env = env.extend(itp::fresh_neutral(i)); return env; }
     itp::NodeId normalize_open(itp::NodeId t, uint32_t n0) { auto g = activate(); return itp::normalize(t, fresh_env(n0)); }
     bool conv_open(itp::NodeId a, itp::NodeId b, uint32_t n0) {
@@ -116,6 +141,11 @@ NB_MODULE(itp_env_lnl, m) {
         .def("reserve_recursive_function", &KernelWrapper::reserve_recursive_function, "name"_a, "type"_a)
         .def("finish_recursive_function", &KernelWrapper::finish_recursive_function, "gid"_a, "ind_gid"_a, "decreasing_arg_level"_a, "body"_a)
         .def("declare_unchecked", &KernelWrapper::declare_unchecked, "type"_a, "value"_a, "name"_a)
+        .def("finish_inductive_unchecked", &KernelWrapper::finish_inductive_unchecked, "type_global_id"_a, "ctors"_a)
+        .def("declare_checked", &KernelWrapper::declare_checked, "type"_a, "value"_a, "name"_a)
+        .def("finish_recursive_function_checked", &KernelWrapper::finish_recursive_function_checked, "gid"_a, "ind_gid"_a, "decreasing_arg_level"_a, "body"_a)
+        .def("infer_open", &KernelWrapper::infer_open, "term"_a, "hyp_types"_a)
+        .def("check_open", &KernelWrapper::check_open, "term"_a, "expected"_a, "hyp_types"_a)
         .def("normalize_open", &KernelWrapper::normalize_open, "term"_a, "n0"_a)
         .def("conv_open", &KernelWrapper::conv_open, "a"_a, "b"_a, "n0"_a)
         .def("tc_infer_open", &KernelWrapper::tc_infer_open, "term"_a, "hyp_types"_a)

@@ -46,3 +46,41 @@ Two nanobind modules only coexist in one process with `ITP_NB_DOMAIN` (own type 
 Reference has no `mk_fix`, so Fix is covered only through extracted proofs, not synthetic terms. Generated types are
 non-dependent (Nat, Bool, arrows); dependent typing is exercised only by library types. Typing excludes Match/Fix.
 The converter was validated by comparing every library global's type, and semantically by the differential runs.
+
+
+---
+# S2: the typing core (status 2026-10-05) -- gate G2 PASSED
+
+## What is ported
+`infer`/`check` for every node kind (Match and Fix included); `check_match_branches` with index forcing as a simultaneous
+`replace_fvars` (forced values may carry binders -- the case that broke the old syntactic substitution, F5); checked inductive
+declaration (strict positivity + admission: typed fields/indices, universe rule); checked recursive-function declaration;
+`declare_checked`. Lambda/Pi chains are opened as telescopes (one instantiate per chain), constructor branch types are closed with
+one abstract per field. The legacy structural-recursion analyses are reused through an all-levels bridge (`to_levels`).
+
+## Deliberate differences from the reference
+1. **`infer(Fix)` runs the structural-recursion guard.** The reference only checked it inside the `induct` tactic, so
+   `whole_term_check` trusted the tactic for every local Fix. The hybrid kernel does not.
+2. `Let` is typed with the value substituted (zeta); the reference typed the body with an opaque variable.
+3. `unify` is pure conversion for now; motive *inference* for a Match with an unresolved motive, universe polymorphism, mutual
+   recursion guards and the derived Unit/Empty/same_ctor types are not ported yet (S3/S4).
+
+## Evidence (all against the frozen reference)
+| check | volume | result |
+|---|---|---|
+| library re-declared through the CHECKED path (Nat, Bool, Eq, Le, add, cong, lt, transport, le_trans) | 9 events | all accepted, 16/16 global types equal |
+| inductive admission corpus (paradox, large fields, bad indices, positivity, impredicative/param-like/Vec accepted) | 12 | ref == new == expected, reasons match |
+| structural-recursion guard corpus | 6 + 4 hand-built Fix | ref == new == expected |
+| Match typing, random typed terms / ill-typed matches (too few, too many, wrong type, non-inductive scrutinee, wrong lambda domain) | 40,000 / 20,000 | 0 disagreements |
+| dependent typing: `refl a : Eq a b` needing delta/iota/beta in the type | 40,003 | 0 disagreements |
+| proof corpus: real nested induct/cases proofs (31 Fix nodes) accepted at their statements | 12 | 12 accepted |
+| the same proofs checked against FALSE statements | 12 | 12 rejected |
+| main differential (normalise/open/conv/typing/reject) with the full typing core | 60,000 | 0 disagreements |
+| typing speed vs reference | | 0.98-1.03x |
+
+## Mutation testing of the typing core (each mutant re-breaks one rule in an isolated build; the suite must fail)
+M1 guard disabled, M2 index forcing no-op, M3 lambda domain not unified, M4 Pi-telescope closing off by one, M5 application argument
+unchecked, M6 admission universe rule off, M7 strict positivity off, M8 Match branch count unchecked: **8/8 caught.**
+Two lessons: (a) M3 first looked like a survivor because my detector missed one output format -- the suite now exits non-zero on
+any failure instead of being scraped; (b) M8 exposed a real gap in the ill-typed generator (it never produced an over-long match);
+fixed. Run: `python3 lnl/mutate.py [M1 M2 ...]`.

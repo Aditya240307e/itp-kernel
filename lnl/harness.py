@@ -1,6 +1,8 @@
 """Differential harness: reference kernel (absolute levels) vs hybrid kernel (bound = index, context = level)."""
 import re, sys, time, random
-sys.path[:0] = ['/home/claude/itp_ref', '/home/claude/itp_py/lnl', '/home/claude/itp_py']
+import os
+LNL_DIR = os.environ.get('LNL_DIR', '/home/claude/itp_py/lnl')   # which build of the hybrid kernel to test (mutation runs use copies)
+sys.path[:0] = ['/home/claude/itp_ref', LNL_DIR, '/home/claude/itp_py']
 import itp_env_ref as R
 import itp_env_lnl as H
 sys.modules['itp_env'] = R            # curriculum builds its kernels through `itp_env`: alias it to the REFERENCE module
@@ -40,7 +42,7 @@ def parse_raw(s, new):
         raise ValueError(t)
     r = term(); assert pos[0] == len(toks), (s[:80], pos[0], len(toks)); return r
 
-def l2h(t, n0, d=None, ph=()):
+def l2h(t, n0, d=None, ph=(), lenient=False):
     """level tree -> hybrid tree. n0 = context size; d = ref depth; ph = ref slots that do not exist in hybrid numbering
     (the self slot of an enclosing Fix, while converting that Fix's fn_type: the old convention anchors fn_type one above)."""
     if d is None: d = n0
@@ -50,13 +52,14 @@ def l2h(t, n0, d=None, ph=()):
         assert L not in ph, "reference to a phantom slot"
         hl = L - sum(1 for p in ph if p < L); dh = d - len(ph)
         if hl < n0: return ('fvar', hl)
+        if hl >= dh and lenient: return ('fvar', hl)
         assert hl < dh, ("dangling level", L, d, ph)
         return ('bvar', dh - 1 - hl)
     if k in ('type', 'const', 'meta', 'other'): return t
-    if k == 'app': return ('app', l2h(t[1], n0, d, ph), l2h(t[2], n0, d, ph))
-    if k in ('lam', 'pi'): return (k, l2h(t[1], n0, d, ph), l2h(t[2], n0, d + 1, ph))
-    if k == 'match': return ('match', l2h(t[1], n0, d, ph), l2h(t[2], n0, d, ph), tuple(l2h(b, n0, d, ph) for b in t[3]))
-    if k == 'fix': return ('fix', t[1], l2h(t[2], n0, d + 1, ph + (d,)), l2h(t[3], n0, d + 1, ph))
+    if k == 'app': return ('app', l2h(t[1], n0, d, ph, lenient), l2h(t[2], n0, d, ph, lenient))
+    if k in ('lam', 'pi'): return (k, l2h(t[1], n0, d, ph, lenient), l2h(t[2], n0, d + 1, ph, lenient))
+    if k == 'match': return ('match', l2h(t[1], n0, d, ph, lenient), l2h(t[2], n0, d, ph, lenient), tuple(l2h(b, n0, d, ph, lenient) for b in t[3]))
+    if k == 'fix': return ('fix', t[1], l2h(t[2], n0, d + 1, ph + (d,), lenient), l2h(t[3], n0, d + 1, ph, lenient))
     raise ValueError(k)
 
 def build_new(k, t):
@@ -308,10 +311,10 @@ def differential(N, seed, depth=4):
             if want != got or knew.loose_range(nn) != 0: res['norm'][1].append((term, want, got, 'loose=%d' % knew.loose_range(nn)))
         except Exception as e: res['norm'][1].append((term, 'EXC', repr(e)[:120]))
         # typing: Match-free closed terms must be accepted at their type by both
-        tt = G2.gen(T, [], depth); ttr, ttn = build_ref(kref, tt), build_new(knew, l2h(tt, 0))
+        tt = G.gen(T, [], depth); ttr, ttn = build_ref(kref, tt), build_new(knew, l2h(tt, 0))
         try:
             exp_new = build_new(knew, l2h(G.ty(T), 0)); a = time.perf_counter()
-            kref.whole_term_check(ttr, build_ref(kref, G.ty(T))); b = time.perf_counter(); ok, ty = knew.tc_infer_open(ttn, []); c = time.perf_counter()
+            kref.whole_term_check(ttr, build_ref(kref, G.ty(T))); b = time.perf_counter(); ok, ty = knew.infer_open(ttn, []); c = time.perf_counter()
             tc_ref += b - a; tc_new += c - b; res['typing'][0] += 1
             if not ok or not knew.conv_open(ty, exp_new, 0): res['typing'][1].append((tt, T, ok, ty if not ok else knew.dump_raw(ty)))
         except Exception as e: res['typing'][1].append((tt, T, 'EXC', repr(e)[:120]))
@@ -333,9 +336,9 @@ def differential(N, seed, depth=4):
             if want != got or knew.loose_range(nn) != 0: res['norm_open'][1].append((ot, ctx, want, got, 'loose=%d' % knew.loose_range(nn)))
             cov['stuck_match_in_nf'] = cov.get('stuck_match_in_nf', 0) + (1 if 'match' in str(got) else 0)
         except Exception as e: res['norm_open'][1].append((ot, ctx, 'EXC', repr(e)[:120]))
-        ot2 = G2.gen(T2, ctx, depth)
+        ot2 = G.gen(T2, ctx, depth)
         try:
-            ok, ty = knew.tc_infer_open(build_new(knew, l2h(ot2, nf_)), hn_); res['typing_open'][0] += 1
+            ok, ty = knew.infer_open(build_new(knew, l2h(ot2, nf_)), hn_); res['typing_open'][0] += 1
             if not ok or not knew.conv_open(ty, build_new(knew, l2h(G.ty(T2), 0)), nf_): res['typing_open'][1].append((ot2, ctx, T2, ok, ty if not ok else knew.dump_raw(ty)))
         except Exception as e: res['typing_open'][1].append((ot2, ctx, T2, 'EXC', repr(e)[:120]))
         if i % 3 == 0:   # ill-typed terms must be rejected by both
@@ -343,7 +346,7 @@ def differential(N, seed, depth=4):
             try:
                 try: kref.whole_term_check(build_ref(kref, bt), build_ref(kref, G.ty(T))); ref_rejects = False
                 except Exception: ref_rejects = True
-                ok, ty = knew.tc_infer_open(build_new(knew, l2h(bt, 0)), [])
+                ok, ty = knew.infer_open(build_new(knew, l2h(bt, 0)), [])
                 new_rejects = (not ok) or (not knew.conv_open(ty, build_new(knew, l2h(G.ty(T), 0)), 0)); res['reject'][0] += 1
                 if not (ref_rejects and new_rejects): res['reject'][1].append((bt, T, ref_rejects, new_rejects))
             except Exception as e: res['reject'][1].append((bt, T, 'EXC', repr(e)[:100]))

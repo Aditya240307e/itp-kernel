@@ -3281,6 +3281,33 @@ inline NodeId quote_at(const Value& v, uint32_t n0, uint32_t depth) {
 /// Quote a value living in a context of size `depth`.
 inline NodeId quote(const Value& v, uint32_t depth) { return quote_at(v, depth, depth); }
 
+/// True iff some immediate child satisfies pred. Total over node kinds (like map_children, read-only).
+template <class P>
+inline bool any_child(NodeId t, P&& pred) {
+    return inspect(t,
+        [&](App a) -> bool { return pred(a.fn_id) || pred(a.arg_id); },
+        [&](Lambda l) -> bool { return pred(l.type_id) || pred(l.body_id); },
+        [&](Let l) -> bool { return pred(l.type_id) || pred(l.value_id) || pred(l.body_id); },
+        [&](Pi p) -> bool { return pred(p.dom_id) || pred(p.cod_id); },
+        [&](Match m) -> bool {
+            if (pred(m.scrutinee_id) || pred(m.motive_id)) return true;
+            for (NodeId b : *m.branches) if (pred(b)) return true;
+            return false;
+        },
+        [&](Fix x) -> bool { return pred(x.fn_type) || pred(x.body); },
+        [&](QuotType q) -> bool { return pred(q.relation); },
+        [&](QuotMk q) -> bool { return pred(q.relation) || pred(q.elem); },
+        [&](QuotLift q) -> bool { return pred(q.relation) || pred(q.codomain) || pred(q.f) || pred(q.respects_proof) || pred(q.quotient_elem); },
+        [&](auto) -> bool { return false; });
+}
+namespace detail {
+/// Does t mention a context variable of level >= `level`? (bound variables never count)
+inline bool references_level_at_or_above(NodeId t, uint32_t level) {
+    if (t.tag == NodeType::VAR) { Var v = ctx().vars[t.index]; return !v.bound && v.n >= level; }
+    return any_child(t, [&](NodeId c) { return references_level_at_or_above(c, level); });
+}
+} // namespace detail
+
 
 /// Evaluates and re-quotes a term, deriving quote's depth argument
 /// automatically. Prefer this over calling eval and quote separately.
@@ -4916,7 +4943,6 @@ struct AppSpine {
     NodeId head;
     std::vector<NodeId> args;
 };
-#if 0 // not yet ported to the hybrid variable representation: decompose_app_spine
 inline AppSpine decompose_app_spine(NodeId t) {
     std::vector<NodeId> rev_args;
     NodeId cur = t;
@@ -4930,7 +4956,6 @@ inline AppSpine decompose_app_spine(NodeId t) {
     s.args.assign(rev_args.rbegin(), rev_args.rend());
     return s;
 }
-#endif
 
 
 #if 0 // not yet ported to the hybrid variable representation: has_internal_binder_ref
@@ -5318,7 +5343,6 @@ inline bool references_level(NodeId t, uint32_t level) {
 #endif
 
 
-#if 0 // not yet ported to the hybrid variable representation: match_index_pattern
 /// Matches a constructor's own index pattern (`pat`, e.g. refl's bare
 /// field `x`, or a STRUCTURED pattern like Vec's cons `Succ(n_field)`)
 /// against the scrutinee's actual, concrete index (`conc`) at one index
@@ -5349,7 +5373,7 @@ inline void match_index_pattern(NodeId pat, NodeId conc, uint32_t base_depth, ui
     bool pat_is_own_field = false;
     uint32_t pat_level = 0;
     inspect(pat,
-        [&](Var v) { if (v.level >= base_depth && v.level < base_depth + ctor_arity) { pat_is_own_field = true; pat_level = v.level; } },
+        [&](Var v) { if (!v.bound && v.n >= base_depth && v.n < base_depth + ctor_arity) { pat_is_own_field = true; pat_level = v.n; } },
         [](auto) {});
     if (pat_is_own_field) {
         // First occurrence of this field wins for FORCING purposes (see
@@ -5457,11 +5481,9 @@ inline void match_index_pattern(NodeId pat, NodeId conc, uint32_t base_depth, ui
     // (non-concrete-index) induction through by hand, not by any test
     // failing first.
 }
-#endif
 
 
 
-#if 0 // not yet ported to the hybrid variable representation: unify_ctor_pattern_indices
 inline CtorIndexForcing unify_ctor_pattern_indices(const detail::InstantiatedCtor& inst,
                                                     const std::vector<NodeId>& concrete_indices,
                                                     uint32_t base_depth, uint32_t ctor_arity, const Env& env) {
@@ -5479,7 +5501,6 @@ inline CtorIndexForcing unify_ctor_pattern_indices(const detail::InstantiatedCto
     }
     return out;
 }
-#endif
 
 
 #if 0 // not yet ported to the hybrid variable representation: apply_ctor_index_forcing
@@ -5587,6 +5608,11 @@ inline ElabResult check_match_branches(uint32_t type_global_id, NodeId motive, c
 /// this check existed.
 inline ElabResult verify_motive_shape(NodeId motive_id, uint32_t arity, ElabCtx& ec, ElabState& es);
 
+// ---- forward declarations for the S2 typing core (defined at the end of this file)
+inline TypeResult infer(NodeId t, ElabCtx& ec, ElabState& es);
+inline ElabResult check(NodeId t, NodeId expected_ty, ElabCtx& ec, ElabState& es);
+inline ElabResult unify(NodeId a, NodeId b, ElabCtx& ec, ElabState& es);
+inline NodeId to_levels(NodeId t, uint32_t depth);
 #if 0 // not yet ported to the hybrid variable representation: infer
 /// Bidirectional type synthesis. Covers every node kind except Match
 /// (dependent elimination fundamentally needs a checking-mode target to
@@ -6340,7 +6366,6 @@ inline NodeId extract_proof_term(uint32_t root_meta_id) {
 #endif
 
 
-#if 0 // not yet ported to the hybrid variable representation: declare_checked
 /// GlobalEnv::declare() is, by itself, a TRUSTED registration: it never
 /// calls check(value, type, ...) -- confirmed directly this session by
 /// reading its own implementation, and confirmed to matter in practice
@@ -6378,7 +6403,6 @@ inline std::expected<uint32_t, TypeError> declare_checked(NodeId type, NodeId va
     if (!r) return std::unexpected(r.error());
     return ctx().globals.declare(type, std::move(value), std::move(name));
 }
-#endif
 
 
 #if 0 // not yet ported to the hybrid variable representation: intro
@@ -8123,8 +8147,10 @@ struct InductiveHandle {
     uint32_t type_global_id;
     std::vector<uint32_t> ctor_global_ids;
 };
+inline NodeId build_ctor_type(uint32_t type_global_id, const CtorSpec& ctor);
+inline InductiveHandle finish_inductive_unchecked(uint32_t type_global_id, std::vector<CtorSpec> ctors);
+inline InductiveHandle finish_inductive(uint32_t type_global_id, std::vector<CtorSpec> ctors, bool allow_unsafe_skip_positivity = false);
 
-#if 0 // not yet ported to the hybrid variable representation: occurs
 /// Whether `ind_type_global_id` occurs anywhere within `term`, without
 /// regard to position. Used as a building block by is_strictly_positive,
 /// which is where position (positive vs. negative) is taken into account.
@@ -8168,10 +8194,8 @@ inline bool occurs(uint32_t ind_type_global_id, NodeId term) {
         }
     );
 }
-#endif
 
 
-#if 0 // not yet ported to the hybrid variable representation: is_strictly_positive
 /// Restricted strict positivity check for a single, non-mutual inductive.
 ///
 /// `ind_type_global_id` may occur in `arg_type` directly, or in a positive
@@ -8222,7 +8246,6 @@ inline bool is_strictly_positive(uint32_t ind_type_global_id, NodeId arg_type) {
         }
     );
 }
-#endif
 
 
 /// Reserves a global id for an inductive type before its constructors are
@@ -8248,7 +8271,6 @@ inline NodeId build_ctor_type(uint32_t type_global_id, const CtorSpec& ctor) {
 #endif
 
 
-#if 0 // not yet ported to the hybrid variable representation: check_inductive_admission
 /// Admission checks for an inductive declaration (Finding F1). Run by finish_inductive and
 /// finish_mutual_inductive_block unless the explicit unsafe flag is passed.
 ///
@@ -8322,7 +8344,7 @@ inline void check_inductive_admission(uint32_t type_gid, const std::vector<CtorS
         for (std::size_t j = 0; j < field_level.size(); ++j) {
             bool parameter_like = false;
             for (NodeId ri : ctor.result_indices) {
-                if (inspect(ri, [&](Var v) { return v.level == j; }, [&](auto) { return false; })) { parameter_like = true; break; }
+                if (inspect(ri, [&](Var v) { return !v.bound && v.n == j; }, [&](auto) { return false; })) { parameter_like = true; break; }
             }
             if (!parameter_like && field_level[j] > *fam_level) {
                 throw std::logic_error("itp: constructor '" + ctor.name + "' of '" + fam + "': field " + std::to_string(j) +
@@ -8333,7 +8355,6 @@ inline void check_inductive_admission(uint32_t type_gid, const std::vector<CtorS
         }
     }
 }
-#endif
 
 
 #if 0 // not yet ported to the hybrid variable representation: finish_inductive
@@ -8498,7 +8519,6 @@ inline uint32_t get_or_build_same_ctor(uint32_t family_gid) {
 #endif
 
 
-#if 0 // not yet ported to the hybrid variable representation: declare_inductive
 /// Convenience wrapper combining reserve_inductive_type and
 /// finish_inductive, for inductives whose constructors do not need to
 /// reference the type's own global id ahead of time.
@@ -8507,7 +8527,6 @@ inline InductiveHandle declare_inductive(const std::string& name, NodeId sort, s
     uint32_t type_id = reserve_inductive_type(name, sort);
     return finish_inductive(type_id, std::move(ctors), allow_unsafe_skip_positivity);
 }
-#endif
 
 
 // ---------------------------------------------------------------------------
@@ -8534,7 +8553,6 @@ struct MutualIndSpec {
     std::vector<CtorSpec> ctors;
 };
 
-#if 0 // not yet ported to the hybrid variable representation: finish_mutual_inductive_block
 inline std::vector<InductiveHandle> finish_mutual_inductive_block(
     const std::vector<uint32_t>& all_type_ids, std::vector<MutualIndSpec> specs,
     bool allow_unsafe_skip_positivity = false) {
@@ -8571,7 +8589,6 @@ inline std::vector<InductiveHandle> finish_mutual_inductive_block(
     }
     return handles;
 }
-#endif
 
 
 // ---------------------------------------------------------------------------
@@ -8620,7 +8637,6 @@ struct BetaRedex {
     NodeId arg_id;
 };
 
-#if 0 // not yet ported to the hybrid variable representation: match_beta_redex
 /// Recognizes a beta redex by its literal syntactic shape. Given
 /// `id_fun := \x. x` and the term `id_fun y`, this returns nullopt: the
 /// function position is a Const, not a Lambda, even though id_fun unfolds
@@ -8637,10 +8653,8 @@ inline std::optional<BetaRedex> match_beta_redex(NodeId t) {
         });
     });
 }
-#endif
 
 
-#if 0 // not yet ported to the hybrid variable representation: unfold_head_delta
 /// Repeatedly unfolds a Const with a definition (delta-reduction) until
 /// reaching a node that is either not a Const, or is a Const with no
 /// definition (an axiom or a constructor). This is purely syntactic
@@ -8665,10 +8679,8 @@ inline NodeId unfold_head_delta(NodeId t) {
     }
     return t;
 }
-#endif
 
 
-#if 0 // not yet ported to the hybrid variable representation: match_beta_redex_whnf
 /// The delta-aware counterpart of match_beta_redex: unfolds any chain of
 /// definitions at the function position before checking for a lambda, so
 /// that `id_fun y` is correctly recognized as a redex when
@@ -8683,7 +8695,6 @@ inline std::optional<BetaRedex> match_beta_redex_whnf(NodeId t) {
         });
     });
 }
-#endif
 
 
 /// Converts an optional into an expected, for bridging try_match's
@@ -8737,7 +8748,6 @@ inline std::vector<bool> recursive_field_mask(uint32_t ind_type_global_id, uint3
 }
 
 
-#if 0 // not yet ported to the hybrid variable representation: is_structurally_decreasing
 /// Checks that `body` -- the full definition of `fn_gid`, including its own
 /// leading Lambdas -- is structurally decreasing on the parameter at
 /// absolute level `decreasing_arg_level`, for a single-clause, non-mutual
@@ -8763,7 +8773,7 @@ inline bool is_structurally_decreasing(uint32_t fn_gid, uint32_t ind_type_global
             for (NodeId a : args) args_ok = walk(a, depth) && args_ok;
             if (args.size() <= decreasing_arg_level) return false; // not applied far enough to verify
             auto v = try_match<Var>(args[decreasing_arg_level]);
-            bool call_ok = v.has_value() && smaller.count(v->level) > 0;
+            bool call_ok = v.has_value() && smaller.count(v->n) > 0;
             return call_ok && args_ok;
         }
 
@@ -8793,7 +8803,7 @@ inline bool is_structurally_decreasing(uint32_t fn_gid, uint32_t ind_type_global
                 // actually decreases and diverges for any non-Zero input.
                 bool value_is_smaller = false;
                 if (auto v = try_match<Var>(l.value_id)) {
-                    value_is_smaller = smaller.count(v->level) > 0;
+                    value_is_smaller = smaller.count(v->n) > 0;
                 }
                 if (value_is_smaller) smaller.insert(depth);
                 bool ok = walk(l.body_id, depth + 1);
@@ -8807,7 +8817,7 @@ inline bool is_structurally_decreasing(uint32_t fn_gid, uint32_t ind_type_global
                 if (!walk(m.scrutinee_id, depth) || !walk(m.motive_id, depth)) return false;
                 bool scrutinee_is_smaller = false;
                 if (auto v = try_match<Var>(m.scrutinee_id)) {
-                    scrutinee_is_smaller = (v->level == decreasing_arg_level) || smaller.count(v->level) > 0;
+                    scrutinee_is_smaller = (v->n == decreasing_arg_level) || smaller.count(v->n) > 0;
                 }
                 for (std::size_t ci = 0; ci < m.branches->size(); ++ci) {
                     std::vector<bool> mask;
@@ -8869,10 +8879,8 @@ inline bool is_structurally_decreasing(uint32_t fn_gid, uint32_t ind_type_global
 
     return walk(body, 0);
 }
-#endif
 
 
-#if 0 // not yet ported to the hybrid variable representation: is_locally_structurally_decreasing
 /// The LOCAL counterpart of is_structurally_decreasing, for a Fix's own
 /// body rather than a global recursive definition's. A near-verbatim
 /// copy with exactly one structural change: the self-call is a bound
@@ -8900,20 +8908,20 @@ inline bool is_locally_structurally_decreasing(uint32_t self_ref_level, uint32_t
         std::vector<NodeId> args;
         while (auto a = try_match<App>(head)) { args.push_back(a->arg_id); head = a->fn_id; }
         std::reverse(args.begin(), args.end());
-        if (auto v0 = try_match<Var>(head); v0 && v0->level == self_ref_level) {
+        if (auto v0 = try_match<Var>(head); v0 && v0->n == self_ref_level) {
             bool args_ok = true;
             for (NodeId a : args) args_ok = walk(a, depth) && args_ok;
             if (args.size() <= decreasing_arg) {
                 return false;
             }
             auto v = try_match<Var>(args[decreasing_arg]);
-            bool call_ok = v.has_value() && smaller.count(v->level) > 0;
+            bool call_ok = v.has_value() && smaller.count(v->n) > 0;
             return call_ok && args_ok;
         }
 
         return inspect(t,
             [&](Var v) {
-                return v.level != self_ref_level;
+                return v.n != self_ref_level;
             },
             [&](App a) { return walk(a.fn_id, depth) && walk(a.arg_id, depth); },
             [&](Lambda l) { return walk(l.type_id, depth) && walk(l.body_id, depth + 1); },
@@ -8921,7 +8929,7 @@ inline bool is_locally_structurally_decreasing(uint32_t self_ref_level, uint32_t
                 if (!walk(l.type_id, depth) || !walk(l.value_id, depth)) return false;
                 bool value_is_smaller = false;
                 if (auto v = try_match<Var>(l.value_id)) {
-                    value_is_smaller = smaller.count(v->level) > 0;
+                    value_is_smaller = smaller.count(v->n) > 0;
                 }
                 if (value_is_smaller) smaller.insert(depth);
                 bool ok = walk(l.body_id, depth + 1);
@@ -8954,8 +8962,8 @@ inline bool is_locally_structurally_decreasing(uint32_t self_ref_level, uint32_t
                     // correctly left untouched, since THAT usage really
                     // is a positional index, unaffected by self's
                     // extra level.
-                    scrutinee_is_smaller = (v->level == self_ref_level + 1 + decreasing_arg) ||
-                                           smaller.count(v->level) > 0;
+                    scrutinee_is_smaller = (v->n == self_ref_level + 1 + decreasing_arg) ||
+                                           smaller.count(v->n) > 0;
                 }
                 for (std::size_t ci = 0; ci < m.branches->size(); ++ci) {
                     std::vector<bool> mask;
@@ -9011,7 +9019,6 @@ inline bool is_locally_structurally_decreasing(uint32_t self_ref_level, uint32_t
     // scrutinee-level conversion just above relies on).
     return walk(body, self_ref_level + 1);
 }
-#endif
 
 
 /// One function's identity and decreasing-argument position within a
@@ -9053,7 +9060,7 @@ inline bool is_structurally_decreasing_mutual(const std::vector<MutualFnTarget>&
                 for (NodeId a : args) args_ok = walk(a, depth) && args_ok;
                 if (args.size() <= *pos) return false;
                 auto v = try_match<Var>(args[*pos]);
-                bool call_ok = v.has_value() && smaller.count(v->level) > 0;
+                bool call_ok = v.has_value() && smaller.count(v->n) > 0;
                 return call_ok && args_ok;
             }
         }
@@ -9069,7 +9076,7 @@ inline bool is_structurally_decreasing_mutual(const std::vector<MutualFnTarget>&
                 // parameter does not count as smaller here either.
                 bool value_is_smaller = false;
                 if (auto v = try_match<Var>(l.value_id)) {
-                    value_is_smaller = smaller.count(v->level) > 0;
+                    value_is_smaller = smaller.count(v->n) > 0;
                 }
                 if (value_is_smaller) smaller.insert(depth);
                 bool ok = walk(l.body_id, depth + 1);
@@ -9083,7 +9090,7 @@ inline bool is_structurally_decreasing_mutual(const std::vector<MutualFnTarget>&
                 if (!walk(m.scrutinee_id, depth) || !walk(m.motive_id, depth)) return false;
                 bool scrutinee_is_smaller = false;
                 if (auto v = try_match<Var>(m.scrutinee_id)) {
-                    scrutinee_is_smaller = (v->level == own_decreasing_arg_level) || smaller.count(v->level) > 0;
+                    scrutinee_is_smaller = (v->n == own_decreasing_arg_level) || smaller.count(v->n) > 0;
                 }
                 for (std::size_t ci = 0; ci < m.branches->size(); ++ci) {
                     std::vector<bool> mask;
@@ -9159,7 +9166,6 @@ inline void finish_recursive_function(uint32_t fn_gid, uint32_t ind_type_global_
 #endif
 
 
-#if 0 // not yet ported to the hybrid variable representation: finish_recursive_function_checked
 /// Checked counterpart of finish_recursive_function: guardedness alone
 /// only proves termination, never that `body` actually has the type
 /// `fn_gid` was reserved with (finish_recursive_function never checks
@@ -9174,7 +9180,7 @@ inline std::expected<void, TypeError> finish_recursive_function_checked(
         uint32_t fn_gid, uint32_t ind_type_global_id, uint32_t decreasing_arg_level, NodeId body,
         bool allow_unsafe_skip_guard_check = false) {
     if (!allow_unsafe_skip_guard_check) {
-        if (!is_structurally_decreasing(fn_gid, ind_type_global_id, decreasing_arg_level, body)) {
+        if (!is_structurally_decreasing(fn_gid, ind_type_global_id, decreasing_arg_level, to_levels(body, 0))) {
             return std::unexpected(TypeError{TypeErrorKind::Other, body, std::nullopt,
                 "function '" + ctx().globals[fn_gid].name + "' failed the structural recursion check"});
         }
@@ -9191,7 +9197,6 @@ inline std::expected<void, TypeError> finish_recursive_function_checked(
         RecursiveFnInfo{ind_type_global_id, decreasing_arg_level, allow_unsafe_skip_guard_check};
     return {};
 }
-#endif
 
 
 // ---------------------------------------------------------------------------
@@ -10354,7 +10359,7 @@ inline NodeId build_ctor_type(uint32_t type_global_id, const CtorSpec& ctor) {
         t = mk_pi(ctor.arg_types[j], abstract_fvars(t, std::vector<uint32_t>{static_cast<uint32_t>(j)}));
     return t;
 }
-inline InductiveHandle finish_inductive(uint32_t type_global_id, std::vector<CtorSpec> ctors, bool = false) {
+inline InductiveHandle finish_inductive_unchecked(uint32_t type_global_id, std::vector<CtorSpec> ctors) {
     ExecutionContext& c = ctx();
     InductiveHandle handle; handle.type_global_id = type_global_id;
     for (std::size_t idx = 0; idx < ctors.size(); ++idx) {
@@ -10450,6 +10455,290 @@ inline TcResult tc_infer(NodeId t, const ElabCtx& ec) {
         }
         default: return std::unexpected(std::string("tc_infer: node kind not supported by the S1 typing fragment"));
     }
+}
+
+
+// ===========================================================================
+// S2: the typing core on the hybrid representation.
+//   * binders are opened with fresh context variables and closed with abstract, ALWAYS as telescopes (one instantiate for a
+//     whole chain of lambdas/Pis -- per-binder instantiate was measured quadratic);
+//   * infer(Const)/infer(Var) need no shifting or re-anchoring: global types are closed, hypothesis types are valid in any
+//     extension of their context;
+//   * index forcing is a simultaneous replace_fvars: forced values may carry binders (lambda predicates) and are position
+//     independent, which is exactly what the old syntactic substitution could not do;
+//   * infer(Fix) runs the structural-recursion guard itself: the kernel does not trust the tactic that built the Fix.
+// unify is pure conversion here (no metas); S3 replaces it with real unification.
+// ===========================================================================
+inline ElabResult unify(NodeId a, NodeId b, ElabCtx& ec, ElabState&) {
+    if (a == b) return {};
+    if (conv_value(eval(a, ec.values), eval(b, ec.values), ec.size())) return {};
+    return std::unexpected(TypeError{TypeErrorKind::Mismatch, a, b, "type mismatch"});
+}
+
+/// Closes an opened Pi telescope (domains mention earlier fields as context variables base, base+1, ...) around `body`.
+inline NodeId close_pi_telescope(const std::vector<NodeId>& opened_doms, NodeId body, uint32_t base) {
+    const std::size_t m = opened_doms.size();
+    std::vector<uint32_t> fvl(m);
+    for (std::size_t i = 0; i < m; ++i) fvl[i] = base + static_cast<uint32_t>(i);
+    NodeId result = abstract_fvars(body, fvl);
+    for (int j = static_cast<int>(m) - 1; j >= 0; --j)
+        result = mk_pi(abstract_fvars(opened_doms[j], std::vector<uint32_t>(fvl.begin(), fvl.begin() + j)), result);
+    return result;
+}
+
+/// All-levels form of a term, for the legacy structural-recursion analyses: every bound variable becomes the context variable
+/// whose level is its absolute binder number (depth counts binders from the start of the context).
+inline NodeId to_levels(NodeId t, uint32_t depth) {
+    if (t.tag == NodeType::VAR) {
+        Var v = ctx().vars[t.index];
+        return v.bound ? mk_fvar(depth - 1 - v.n) : t;
+    }
+    return map_children(t, [&](NodeId c, uint32_t extra) { return to_levels(c, depth + extra); });
+}
+
+/// Structural-recursion guard for a Fix node living in a context of size n0 (self = context variable n0 inside the body).
+inline bool fix_guard_ok(const Fix& f, uint32_t n0) {
+    NodeId cur = f.fn_type;
+    for (uint32_t i = 0; i < f.decreasing_arg; ++i) { if (cur.tag != NodeType::PI) return false; cur = ctx().pis[cur.index].cod_id; }
+    if (cur.tag != NodeType::PI) return false;
+    detail::AppSpine sp = detail::decompose_app_spine(ctx().pis[cur.index].dom_id);
+    if (sp.head.tag != NodeType::CONST) return false;
+    const uint32_t tid = ctx().consts[sp.head.index].global_id;
+    if (ctx().globals.ctors_of(tid).empty()) return false;
+    return is_locally_structurally_decreasing(n0, tid, f.decreasing_arg, to_levels(f.body, n0 + 1));
+}
+
+inline std::expected<uint32_t, TypeError> sort_level_of(NodeId t, ElabCtx& ec, ElabState& es, const char* what) {
+    TypeResult r = infer(t, ec, es);
+    if (!r) return std::unexpected(r.error());
+    Value v = eval(*r, ec.values);
+    if (auto* vt = std::get_if<VType>(&v)) return vt->universe_level;
+    return std::unexpected(TypeError{TypeErrorKind::UniverseError, t, std::nullopt, what});
+}
+
+inline std::vector<NodeId> reversed(const std::vector<NodeId>& v) { return std::vector<NodeId>(v.rbegin(), v.rend()); }
+
+inline ElabResult verify_motive_shape(NodeId motive_id, uint32_t arity, ElabCtx& ec, ElabState& es) {
+    TypeResult motive_ty_r = infer(motive_id, ec, es);
+    if (!motive_ty_r) return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, motive_id, std::nullopt, "explicit motive_id is not well-typed"});
+    Value motive_ty_val = eval(*motive_ty_r, ec.values);
+    for (uint32_t i = 0; i <= arity; ++i) {
+        auto* mpi = std::get_if<VPi>(&motive_ty_val);
+        if (!mpi) return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, motive_id, std::nullopt,
+            "explicit motive_id is not shaped like a valid motive -- expected a Pi chain of (index count + 1) arguments, ending in a sort"});
+        Value next = eval(mpi->cod_id, mpi->env.extend(fresh_neutral(ec.size())));
+        motive_ty_val = std::move(next);
+    }
+    return {};
+}
+
+/// Forced field values replace the field variables SIMULTANEOUSLY (a forced value may itself carry binders).
+inline std::vector<NodeId> apply_ctor_index_forcing(const std::vector<NodeId>& arg_types, const CtorIndexForcing& forcing) {
+    std::unordered_map<uint32_t, NodeId> m(forcing.forced.begin(), forcing.forced.end());
+    std::vector<NodeId> out = arg_types;
+    for (NodeId& ty : out) ty = replace_fvars(ty, m);
+    return out;
+}
+inline std::vector<NodeId> apply_ctor_index_forcing_to_result_indices(const std::vector<NodeId>& result_indices, const CtorIndexForcing& forcing) {
+    std::unordered_map<uint32_t, uint32_t> occurrence_count;
+    for (NodeId n : result_indices) if (n.tag == NodeType::VAR) { Var v = ctx().vars[n.index]; if (!v.bound) occurrence_count[v.n]++; }
+    std::unordered_map<uint32_t, NodeId> m;
+    for (auto& [level, replacement] : forcing.forced) if (occurrence_count[level] <= 1) m[level] = replacement; // repeated field keeps its own identity
+    std::vector<NodeId> out = result_indices;
+    for (NodeId& n : out) n = replace_fvars(n, m);
+    return out;
+}
+
+inline ElabResult check_match_branches(uint32_t type_global_id, NodeId motive, const std::vector<NodeId>& branches,
+                                        const std::vector<NodeId>& concrete_indices, ElabCtx& ec, ElabState& es) {
+    std::vector<uint32_t> ctor_gids = detail::ctor_gids_for_type(type_global_id);
+    if (ctor_gids.size() != branches.size())
+        return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, motive, std::nullopt,
+            "Match branch count does not match the scrutinee's inductive type's constructor count (non-exhaustive or over-long match)"});
+    for (std::size_t ci = 0; ci < ctor_gids.size(); ++ci) {
+        detail::InstantiatedCtor inst = detail::instantiate_ctor_telescope(ctor_gids[ci], ec.size());
+        const uint32_t arity = static_cast<uint32_t>(inst.arg_types.size());
+        CtorIndexForcing forcing = unify_ctor_pattern_indices(inst, concrete_indices, ec.size(), arity, ec.values);
+        if (!forcing.ok) return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, branches[ci], std::nullopt, forcing.error});
+        std::vector<NodeId> arg_types = apply_ctor_index_forcing(inst.arg_types, forcing);
+        NodeId ctor_app = mk_const(ctor_gids[ci]);
+        for (uint32_t ai = 0; ai < arity; ++ai) ctor_app = mk_app(ctor_app, mk_fvar(ec.size() + ai));
+        std::vector<NodeId> forced_result_indices = apply_ctor_index_forcing_to_result_indices(inst.result_indices, forcing);
+        NodeId branch_expected = mk_app(apply_all(motive, forced_result_indices), ctor_app);
+        branch_expected = close_pi_telescope(arg_types, branch_expected, ec.size());
+        if (ElabResult r = check(branches[ci], branch_expected, ec, es); !r) return r;
+    }
+    return {};
+}
+
+inline TypeResult infer(NodeId t, ElabCtx& ec, ElabState& es) {
+    auto err = [&](TypeErrorKind k, NodeId at, const char* msg) { return std::unexpected(TypeError{k, at, std::nullopt, msg}); };
+    switch (t.tag) {
+        case NodeType::VAR: {
+            Var v = ctx().vars[t.index];
+            if (v.bound) return err(TypeErrorKind::UnboundVariable, t, "loose bound variable: a term reached the kernel with an unclosed binder");
+            if (v.n >= ec.size()) return err(TypeErrorKind::UnboundVariable, t, "unbound local variable");
+            return ec.types[v.n];
+        }
+        case NodeType::CONST: return ctx().globals[ctx().consts[t.index].global_id].type;
+        case NodeType::TYPE: return mk_type(ctx().types[t.index].universe_level + 1);
+        case NodeType::META: return ctx().meta_ctx[ctx().metas[t.index].meta_id].type;
+        case NodeType::TYPE_UNIV: return err(TypeErrorKind::Other, t, "TypeUniv is elaborator-internal and not meaningful as a standalone infer target");
+        case NodeType::APP: {
+            App a = ctx().apps[t.index];
+            ITP_TRY(NodeId fn_ty, infer(a.fn_id, ec, es));
+            Value fn_ty_val = eval(fn_ty, ec.values);
+            auto* pi = std::get_if<VPi>(&fn_ty_val);
+            if (!pi) return err(TypeErrorKind::NotAFunction, a.fn_id, "applying a term that is not a function");
+            NodeId dom_ty = quote(eval(pi->dom_id, pi->env), ec.size());
+            if (ElabResult r = check(a.arg_id, dom_ty, ec, es); !r) return std::unexpected(r.error());
+            return quote(eval(pi->cod_id, pi->env.extend(eval(a.arg_id, ec.values))), ec.size());
+        }
+        case NodeType::LAMBDA: {
+            std::vector<NodeId> doms; NodeId body = t;
+            while (body.tag == NodeType::LAMBDA) { Lambda l = ctx().lambdas[body.index]; doms.push_back(l.type_id); body = l.body_id; }
+            const uint32_t m = static_cast<uint32_t>(doms.size()), n = ec.size();
+            ElabCtx cur = ec; std::vector<NodeId> fv_rev, opened;
+            for (uint32_t j = 0; j < m; ++j) {
+                NodeId dj = instantiate(doms[j], fv_rev);
+                auto s = sort_level_of(dj, cur, es, "Lambda domain must be a type"); if (!s) return std::unexpected(s.error());
+                opened.push_back(dj); cur = cur.extend(dj); fv_rev.insert(fv_rev.begin(), mk_fvar(n + j));
+            }
+            ITP_TRY(NodeId bt, infer(instantiate(body, fv_rev), cur, es));
+            return close_pi_telescope(opened, bt, n);
+        }
+        case NodeType::PI: {
+            std::vector<NodeId> doms; NodeId cod = t;
+            while (cod.tag == NodeType::PI) { Pi p = ctx().pis[cod.index]; doms.push_back(p.dom_id); cod = p.cod_id; }
+            const uint32_t m = static_cast<uint32_t>(doms.size()), n = ec.size();
+            ElabCtx cur = ec; std::vector<NodeId> fv_rev; std::vector<uint32_t> sorts;
+            for (uint32_t j = 0; j < m; ++j) {
+                NodeId dj = instantiate(doms[j], fv_rev);
+                auto s = sort_level_of(dj, cur, es, "Pi domain must be a type"); if (!s) return std::unexpected(s.error());
+                sorts.push_back(*s); cur = cur.extend(dj); fv_rev.insert(fv_rev.begin(), mk_fvar(n + j));
+            }
+            auto sc = sort_level_of(instantiate(cod, fv_rev), cur, es, "Pi codomain must be a type"); if (!sc) return std::unexpected(sc.error());
+            uint32_t level = *sc;
+            for (int j = static_cast<int>(m) - 1; j >= 0; --j) level = (level == 0) ? 0 : std::max(sorts[j], level);
+            return mk_type(level);
+        }
+        case NodeType::LET: {
+            Let l = ctx().lets[t.index];
+            auto s = sort_level_of(l.type_id, ec, es, "Let type must be a type"); if (!s) return std::unexpected(s.error());
+            if (ElabResult r = check(l.value_id, l.type_id, ec, es); !r) return std::unexpected(r.error());
+            return infer(instantiate1(l.body_id, l.value_id), ec, es); // zeta: the body is typed with the value substituted
+        }
+        case NodeType::MATCH: {
+            Match m = ctx().matches[t.index];
+            if (m.motive_id.tag == NodeType::META && !ctx().meta_ctx.is_solved(ctx().metas[m.motive_id.index].meta_id))
+                return err(TypeErrorKind::MotiveInferenceFailure, t, "infer(Match) requires an already-concrete motive; use check() against a goal type to have one constructed automatically");
+            ITP_TRY(NodeId scrut_ty, infer(m.scrutinee_id, ec, es));
+            Value scrut_ty_val = eval(scrut_ty, ec.values);
+            auto* scrut_neutral = std::get_if<VNeutral>(&scrut_ty_val);
+            if (!scrut_neutral || scrut_neutral->head.kind != NeutralHead::Kind::GlobalConst)
+                return err(TypeErrorKind::MotiveInferenceFailure, m.scrutinee_id, "scrutinee's type is not an inductive type application");
+            const uint32_t type_global_id = scrut_neutral->head.id;
+            std::vector<NodeId> concrete_indices;
+            for (auto& frame : scrut_neutral->spine) {
+                auto* af = std::get_if<ApplyFrame>(&frame);
+                if (!af) return err(TypeErrorKind::MotiveInferenceFailure, m.scrutinee_id, "scrutinee's type has a non-application eliminator frame; cannot enumerate its indices");
+                concrete_indices.push_back(quote(af->arg, ec.size()));
+            }
+            if (ElabResult r = verify_motive_shape(m.motive_id, static_cast<uint32_t>(concrete_indices.size()), ec, es); !r) return std::unexpected(r.error());
+            if (ElabResult r = check_match_branches(type_global_id, m.motive_id, *m.branches, concrete_indices, ec, es); !r) return std::unexpected(r.error());
+            return quote(eval(mk_app(apply_all(m.motive_id, concrete_indices), m.scrutinee_id), ec.values), ec.size());
+        }
+        case NodeType::FIX: {
+            Fix f = ctx().fixes[t.index];
+            auto s = sort_level_of(f.fn_type, ec, es, "Fix's own fn_type must be a type"); if (!s) return std::unexpected(s.error());
+            ElabCtx ec2 = ec.extend(f.fn_type); // the self reference: a context variable of type fn_type (valid here by weakening)
+            if (ElabResult r = check(instantiate1(f.body, mk_fvar(ec.size())), f.fn_type, ec2, es); !r) return std::unexpected(r.error());
+            if (!fix_guard_ok(f, ec.size())) return err(TypeErrorKind::Other, t, "Fix failed the structural recursion check: some recursive call is not on a structurally smaller instance of the decreasing argument");
+            return f.fn_type;
+        }
+        case NodeType::QUOT_TYPE: case NodeType::QUOT_MK: {
+            NodeId rel = (t.tag == NodeType::QUOT_TYPE) ? ctx().quot_types[t.index].relation : ctx().quot_mks[t.index].relation;
+            ITP_TRY(NodeId rel_ty, infer(rel, ec, es));
+            Value rel_ty_val = eval(rel_ty, ec.values);
+            auto* outer_pi = std::get_if<VPi>(&rel_ty_val);
+            if (!outer_pi) return err(TypeErrorKind::NotAFunction, rel, "Quot's relation must be a binary relation A -> A -> Sort");
+            NodeId elem_ty = quote(eval(outer_pi->dom_id, outer_pi->env), ec.size());
+            if (t.tag == NodeType::QUOT_TYPE) return infer(elem_ty, ec, es); // the quotient lives in the same sort as the underlying type
+            if (ElabResult r = check(ctx().quot_mks[t.index].elem, elem_ty, ec, es); !r) return std::unexpected(r.error());
+            return mk_quot_type(rel);
+        }
+        case NodeType::QUOT_LIFT: {
+            QuotLift q = ctx().quot_lifts[t.index];
+            if (ElabResult r = check(q.quotient_elem, mk_quot_type(q.relation), ec, es); !r) return std::unexpected(r.error());
+            return q.codomain;
+        }
+    }
+    std::unreachable();
+}
+
+/// Checks a chain of lambdas against a Pi telescope in ONE pass (one instantiate for the body, not one per binder).
+inline ElabResult check_lambda(NodeId t, NodeId expected_ty, ElabCtx& ec, ElabState& es) {
+    Value cur = eval(expected_ty, ec.values);
+    ElabCtx cur_ec = ec; std::vector<NodeId> fv_rev; NodeId body = t;
+    const uint32_t n = ec.size(); uint32_t j = 0;
+    while (body.tag == NodeType::LAMBDA) {
+        auto* pi = std::get_if<VPi>(&cur);
+        if (!pi) {
+            if (j == 0) return std::unexpected(TypeError{TypeErrorKind::Mismatch, t, expected_ty, "checking a lambda against a non-function expected type"});
+            break;
+        }
+        Lambda l = ctx().lambdas[body.index];
+        NodeId dom_j = instantiate(l.type_id, fv_rev);
+        NodeId expected_dom = quote(eval(pi->dom_id, pi->env), n + j);
+        if (ElabResult r = unify(dom_j, expected_dom, cur_ec, es); !r) return r;
+        Value next = eval(pi->cod_id, pi->env.extend(fresh_neutral(n + j)));
+        cur = std::move(next);
+        cur_ec = cur_ec.extend(dom_j); fv_rev.insert(fv_rev.begin(), mk_fvar(n + j)); body = l.body_id; ++j;
+    }
+    return check(instantiate(body, fv_rev), quote(cur, n + j), cur_ec, es);
+}
+
+inline ElabResult check_match(NodeId t, NodeId expected_ty, ElabCtx& ec, ElabState& es) {
+    Match m = ctx().matches[t.index];
+    TypeResult scrut_ty_r = infer(m.scrutinee_id, ec, es);
+    if (!scrut_ty_r) return std::unexpected(scrut_ty_r.error());
+    Value scrut_ty_val = eval(*scrut_ty_r, ec.values);
+    auto* scrut_neutral = std::get_if<VNeutral>(&scrut_ty_val);
+    if (!scrut_neutral || scrut_neutral->head.kind != NeutralHead::Kind::GlobalConst)
+        return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, m.scrutinee_id, expected_ty, "scrutinee's type is not an inductive type application"});
+    const uint32_t type_global_id = scrut_neutral->head.id;
+    std::vector<NodeId> concrete_indices;
+    for (auto& frame : scrut_neutral->spine) {
+        auto* af = std::get_if<ApplyFrame>(&frame);
+        if (!af) return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, m.scrutinee_id, expected_ty, "scrutinee's type has a non-application eliminator frame; cannot enumerate its indices"});
+        concrete_indices.push_back(quote(af->arg, ec.size()));
+    }
+    if (m.motive_id.tag == NodeType::META && !ctx().meta_ctx.is_solved(ctx().metas[m.motive_id.index].meta_id))
+        return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, t, expected_ty, "motive inference needs metavariables (ported in S3); supply an explicit motive"});
+    if (ElabResult r = verify_motive_shape(m.motive_id, static_cast<uint32_t>(concrete_indices.size()), ec, es); !r) return r;
+    NodeId applied = mk_app(apply_all(m.motive_id, concrete_indices), m.scrutinee_id);
+    if (ElabResult r = unify(applied, expected_ty, ec, es); !r) return r;
+    return check_match_branches(type_global_id, m.motive_id, *m.branches, concrete_indices, ec, es);
+}
+
+inline ElabResult check(NodeId t, NodeId expected_ty, ElabCtx& ec, ElabState& es) {
+    if (t.tag == NodeType::LAMBDA) return check_lambda(t, expected_ty, ec, es);
+    if (t.tag == NodeType::MATCH) return check_match(t, expected_ty, ec, es);
+    TypeResult inferred = infer(t, ec, es);
+    if (!inferred) return std::unexpected(inferred.error());
+    return unify(*inferred, expected_ty, ec, es);
+}
+
+/// Checked inductive declaration: strict positivity + admission (typed fields/indices, universe rule), then constructors.
+inline InductiveHandle finish_inductive(uint32_t type_global_id, std::vector<CtorSpec> ctors, bool allow_unsafe_skip_positivity) {
+    if (!allow_unsafe_skip_positivity) {
+        for (const auto& ctor : ctors)
+            for (NodeId arg_ty : ctor.arg_types)
+                if (!is_strictly_positive(type_global_id, arg_ty))
+                    throw std::logic_error("itp: constructor '" + ctor.name + "' fails strict positivity -- the inductive being defined appears to the left of an arrow in an argument type");
+        check_inductive_admission(type_global_id, ctors);
+    }
+    return finish_inductive_unchecked(type_global_id, std::move(ctors));
 }
 
 } // namespace itp
