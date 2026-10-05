@@ -26,6 +26,8 @@ struct ProofStateHandle {
     itp::ContextGuard activate();
     void intro_(const std::string& name, std::optional<uint32_t> tm) { auto g = activate(); raise_if_error(itp::intro(*ps, name, tm)); }
     void apply_(itp::NodeId term, std::optional<uint32_t> tm) { auto g = activate(); raise_if_error(itp::apply(*ps, term, tm)); }
+    void cases_(uint32_t hyp_level, std::optional<uint32_t> tm) { auto g = activate(); raise_if_error(itp::cases(*ps, hyp_level, tm)); }
+    void induct_(uint32_t hyp_level, std::optional<uint32_t> tm) { auto g = activate(); raise_if_error(itp::induct(*ps, hyp_level, tm)); }
     void exact_(itp::NodeId term, std::optional<uint32_t> tm) { auto g = activate(); raise_if_error(itp::exact(*ps, term, tm)); }
     void rewrite_(itp::NodeId eq_term, itp::NodeId x, itp::NodeId y, uint32_t transport_gid, uint32_t symm_gid, std::optional<uint32_t> tm) {
         auto g = activate(); raise_if_error(itp::rewrite_eq(*ps, eq_term, x, y, transport_gid, symm_gid, tm));
@@ -33,6 +35,7 @@ struct ProofStateHandle {
     bool is_complete() { auto g = activate(); return itp::proof_complete(*ps); }
     itp::NodeId extract() { auto g = activate(); return itp::extract_proof_term(root_meta_id); }
     std::size_t num_goals() const { return ps->goals.size(); }
+    std::size_t num_pending() const { return ps->es.pending.size(); }   // deferred unification constraints
     uint32_t goal_meta_id(std::size_t i) const { return ps->goals.at(i).meta_id; }
     itp::NodeId goal_target(std::size_t i) const { return ps->goals.at(i).target; }
     std::size_t goal_num_hyps(std::size_t i) const { return ps->goals.at(i).hyps.size(); }
@@ -177,11 +180,14 @@ NB_MODULE(itp_env_lnl, m) {
     nb::class_<ProofStateHandle>(m, "ProofState")
         .def("intro", &ProofStateHandle::intro_, "name"_a = "", "target_meta_id"_a = nb::none())
         .def("apply", &ProofStateHandle::apply_, "term"_a, "target_meta_id"_a = nb::none())
+        .def("cases", &ProofStateHandle::cases_, "hyp_level"_a, "target_meta_id"_a = nb::none())
+        .def("induct", &ProofStateHandle::induct_, "hyp_level"_a, "target_meta_id"_a = nb::none())
         .def("exact", &ProofStateHandle::exact_, "term"_a, "target_meta_id"_a = nb::none())
         .def("rewrite", &ProofStateHandle::rewrite_, "eq_term"_a, "x"_a, "y"_a, "transport_gid"_a, "symm_gid"_a, "target_meta_id"_a = nb::none())
         .def("is_complete", &ProofStateHandle::is_complete)
         .def("extract", &ProofStateHandle::extract)
         .def("num_goals", &ProofStateHandle::num_goals)
+        .def("num_pending", &ProofStateHandle::num_pending)
         .def("goal_meta_id", &ProofStateHandle::goal_meta_id, "i"_a)
         .def("goal_target", &ProofStateHandle::goal_target, "i"_a)
         .def("goal_num_hyps", &ProofStateHandle::goal_num_hyps, "i"_a)

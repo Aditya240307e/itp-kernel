@@ -125,3 +125,64 @@ invisible in extracted proofs because contextual lambdas are beta-reduced away) 
 pattern after a sibling meta is solved, but every meta `apply` creates is applied to ALL context variables, so the re-unified spine repeats
 a variable. An axiom `Q : forall f x, f x = x` built to force this still stays open in both kernels. The path is effectively dead at the
 tactic level; its unifier-level behaviour is unverified.
+
+
+---
+# S4: cases and induct, plus the hardening the oracle forced (status 2026-10-05) -- gates G3b and the self-consistency oracle PASS
+
+## What is ported
+`cases` and `induct` as a clean rewrite: ONE construction (the generalised goal G over context variables n..n+arity; the motive is its lambda closure and the Fix
+type its Pi closure) instead of the reference's "agent" and "runtime" numberings; reverted hypotheses are Pi binders of G peeled with the next context variable;
+the derived types `__Unit`, `__Empty`, `__same_ctor_*` for refutation exploitation (`same_ctor` rebuilt for the new representation).
+Python API: `ProofState.cases(hyp, target_meta_id)`, `.induct(hyp, target_meta_id)`, plus `.exact`, `.num_pending`.
+
+## Deliberate differences from the reference (each has a test that fails without it)
+| id | difference | why |
+|---|---|---|
+| D1 | every goal meta gets the closed Pi-over-context type it is applied at | makes every partial proof type-checkable; no observable effect on states |
+| D2 | `induct` requires a recursive constructor field | the reference never accepted induct on Eq (1,869 rejections, 0 acceptances in ~8,300 attempts; Nat and Le agreed 6,475/6,475); its rejection was an accident of a marker/self-level collision |
+| D3 | no `has_internal_binder_ref` guards | embedded binders cannot collide with context variables any more |
+| D4 (F11) | constructor field types are mapped to their ACTUAL context levels | `induct` interleaves an IH after each recursive field; the reference assumed consecutive levels |
+| D5 (F9) | the scrutinee's constructor application uses the FORCED field values (le_S a m h', le_n n, refl Nat x) -- in the kernel's Match typing AND in both tactics | the reference applied the constructor to the field binders: ill-typed against the forced field types |
+| D6 (F13) | `rewrite` instantiates solved metas first and type-checks its motive | the reference rewrote inside meta spines (ill-formed goals) and accepted ill-typed motives |
+| D7 | conversion of stuck Matches has a nesting bound (256) that FAILS CLOSED | found by the oracle: a native segfault (unbounded recursion between conv_value and branches_convertible on two stuck recursive definitions) |
+| D8 (F14) | the surviving sibling of an exploited refutation is wrapped well-typed | the reference duplicated the field lambdas |
+
+## Findings in the reference (F9-F14)
+* F9 forced fields applied as dummy binders (see D5). Before the fix 84 of 1,427 induct partial proofs with terms IDENTICAL to the reference's failed to type-check.
+* F10 sequential marker substitution collides when two reverted hypotheses are re-introduced (`(v7 v7)` where `(v7 v6)` is right). Seen in meta spines and in
+  hypotheses (golden test `transitive_revert`). Every F10 event is validated: the reference's state is checked to be genuinely ill-formed when it is meta-free.
+* F11 field after a recursive field (see D4); direct test with a custom family.
+* F13 rewrite (see D6). F13b is verified directly: the reference accepts `a := b` in `Eq (Le a a) p p` and leaves an ill-formed goal. F13a (apply symm; rewrite h) leaves
+  an ill-formed INTERMEDIATE goal in the pre-fix port, but the reference's final proof there verifies, so it is not a visible failure.
+* F14 exploited sibling (see D8): `exploit_le` verifies in the hybrid kernel and FAILS verification in the reference.
+* Refutation exploitation never fires for Eq (a repeated index is not compared against its forced value): the known F2 limitation, unchanged.
+* Quirk preserved: any Nat-typed hypothesis counts as dependent on Eq's first index (`Nat`), so it is reverted and exploitation is disabled.
+
+## Evidence (all on the final tree)
+| check | volume | result |
+|---|---|---|
+| S2 gate | 4,000 | PASS |
+| main differential | 60,000 terms, seed 77 | 0 disagreements (norm, open norm, 120k conversions, typing, open typing, 20k rejections, proof corpus) |
+| S3 lockstep | 2,000 scripts, 19,629 steps | 0 divergences; 90 completed proofs verified identically |
+| S4 lockstep | 5 seeds x 3,000 scripts (~134k steps) | 0 hard divergences |
+| S4 completed proofs | 184 | 174 identical; 10 where ONLY the reference's proof fails verification (never the reverse) |
+| S4 explained categories | per seed ~32-41 F10, 1-4 F13, 0-2 relaxed-guard | F10 validated against the reference's ill-formed state (seed 5: 32 validated, 1 meta-bearing so unvalidated); relaxed-guard events: hybrid state consistent in every case |
+| oracle, strict fragment (variable indices only) | 4 seeds x 6,000 scripts | 0 failures of any kind; 92 completed proofs, all verify in the kernel |
+| oracle, full distribution | seeds 1,2 x 6,000 | 0 unattributed failures; ~190 per run attributed to F12 |
+| scripted: add_zero_r, zero_le, symm_cases, le_succ_ind, exploit_le | 5 complete Fix-based proofs | verify in the hybrid kernel; the first four also in the reference with identical normal forms |
+| mutants M15-M30 | 16, against a baseline the driver now checks is green | all caught (M19-M21 re-validated after the baseline was fixed; M20 needed the exploit scripts; M22-M26 are F9 regressions; M27/M28 F13; M29 the segfault; M30 the induct rule) |
+
+The oracle: after every successful tactic, in states with no unsolved meta behind a goal and no pending constraint, (a) the partial proof type-checks against the statement
+and (b) every goal's hypotheses and target are well-formed types. It runs on the hybrid kernel alone, so reference divergences cannot truncate its coverage.
+
+## Contracts and known limitations (read these)
+1. **F12, NOT fixed: `induct` on a hypothesis with a concrete or repeated index** (e.g. `IH : Le Zero x`). The runtime Fix is generic over its indices but the user-facing branch goals
+   are specialised, so `?sub` is applied to arguments whose types do not match its binder types. Completed proofs are valid only when the proof does not use the specialised
+   hypotheses. I decided NOT to reject these: the kernel does not distinguish parameters from indices, so `induct` on `l : List Nat` has a "concrete index" `Nat` too (my reading of the
+   code, not tested). The proper fix is a parameter/index distinction plus index generalisation with equations; it changes the branch goals, so it belongs with F2b.
+   The oracle attributes later failures to F12 coarsely ("any earlier concrete-index induct in the script"); the strict-fragment runs are the real evidence.
+2. A failed tactic may leave side effects (solved metas, queued constraints). Same as the reference; the search already works on fresh forks (hypergraph.py header). Not made atomic.
+3. The lockstep no longer compares partial-proof TERMS with the reference (F9 changes them); the evidence is states + the oracle + completed proofs.
+4. The conversion bound (256) is arbitrary and only ever rejects: a legitimate comparison nested deeper would be refused.
+5. M12 (drain_pending) still survives, see the S3 section. M1-M14 re-runs: see the next section if present.

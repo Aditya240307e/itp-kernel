@@ -74,11 +74,29 @@ def shift_meta(t, off):
         return tuple(shift_meta(x, off) if isinstance(x, tuple) else x for x in t)
     return t
 
+def canon_metas(struct):
+    """meta ids are opaque handles (the reference allocates metas on paths where the hybrid kernel fails earlier): rename by rank"""
+    ids = set()
+    def collect(x):
+        if isinstance(x, tuple):
+            if len(x) == 2 and x[0] == 'meta' and isinstance(x[1], int): ids.add(x[1]); return
+            for y in x: collect(y)
+        elif isinstance(x, list):
+            for y in x: collect(y)
+    collect(struct); m = {i: r for r, i in enumerate(sorted(ids))}
+    def ren(x):
+        if isinstance(x, tuple):
+            if len(x) == 2 and x[0] == 'meta' and isinstance(x[1], int): return ('meta', m[x[1]])
+            return tuple(ren(y) for y in x)
+        if isinstance(x, list): return [ren(y) for y in x]
+        return x
+    return ren(struct)
+
 class Lockstep:
     def __init__(self, kref, knew, g, stmt):
         self.kref, self.knew, self.g = kref, knew, g
         self.psr = kref.start_proof(build_ref(kref, stmt)); self.psn = knew.start_proof(build_new(knew, l2h(stmt, 0)))
-        self.log = []; self.off = self.psr.goal_meta_id(0) - self.psn.goal_meta_id(0)
+        self.m1 = False; self.stopped = False; self.ops = []; self.log = []; self.off = self.psr.goal_meta_id(0) - self.psn.goal_meta_id(0)
     def state(self):
         out = []
         for ps, k, new in ((self.psr, self.kref, False), (self.psn, self.knew, True)):
@@ -86,23 +104,37 @@ class Lockstep:
             for i in range(ps.num_goals()):
                 nh = ps.goal_num_hyps(i); tgt = parse_raw(k.dump_raw(ps.goal_target(i)), new); hy = [parse_raw(k.dump_raw(ps.goal_hyp_type(i, j)), new) for j in range(nh)]
                 if not new: tgt = l2h(tgt, nh, lenient=True); hy = [l2h(h, j, lenient=True) for j, h in enumerate(hy)]
-                else: tgt = shift_meta(tgt, self.off); hy = [shift_meta(h, self.off) for h in hy]
-                st.append((ps.goal_meta_id(i) + (self.off if new else 0), nh, tgt, tuple(hy)))
-            out.append((st, ps.is_complete()))
+                st.append((('meta', ps.goal_meta_id(i)), nh, tgt, tuple(hy)))
+            out.append((canon_metas(st), ps.is_complete()))
         return out
     def step(self, op):
-        nh = self.psn.goal_num_hyps(0) if self.psn.num_goals() else 0; res = []
+        self.ops.append(op)
+        from oracle_lib import is_mode2, goals_wellformed
+        meta_bearing = mode1 = False
+        if self.psr.num_goals():
+            if op[0] == 'rewrite': meta_bearing = "'meta'" in str(parse_raw(self.kref.dump_raw(self.psr.goal_target(0)), False))
+            if op[0] == 'induct' and op[1] < self.psn.goal_num_hyps(0): mode1 = not is_mode2(parse_raw(self.knew.dump_raw(self.psn.goal_hyp_type(0, op[1])), True), self.g)
+        nh = self.psn.goal_num_hyps(0) if self.psn.num_goals() else 0; res = []; self.last_msgs = []
         for ps, k, bld, conv in ((self.psr, self.kref, build_ref, lambda t, n: t), (self.psn, self.knew, build_new, lambda t, n: l2h(t, n, lenient=True))):
             try:
                 if op[0] == 'intro': ps.intro('x')
                 elif op[0] == 'apply': ps.apply(bld(k, conv(op[1], nh)))
+                elif op[0] == 'cases': ps.cases(op[1])
+                elif op[0] == 'induct': ps.induct(op[1])
                 elif op[0] == 'rewrite':
                     _, j, x, y = op
                     ps.rewrite(bld(k, conv(V(j), nh)), bld(k, conv(x, nh)), bld(k, conv(y, nh)), self.g['transport'], self.g['symm'])
                 res.append(True)
-            except Exception as e: res.append(False)
+            except Exception as e: res.append(False); self.last_msgs.append(str(e))
+            else: self.last_msgs.append('')
         sr, sn = self.state()
         same = res[0] == res[1] and sr == sn
+        if mode1 and res[0] and res[1]: self.m1 = True
+        if op[0] == 'rewrite' and meta_bearing and res[0] and not same:
+            # F13: the hybrid rewrite instantiates solved metas first (and checks its motive); the reference rewrites inside meta spines.
+            # Explained only if the hybrid state is well-formed; the script cannot continue in lockstep.
+            if res[1] and not goals_wellformed(self.knew, self.psn): pass          # a real problem: stays a divergence
+            else: self.stopped = True; self.f13 = getattr(self, 'f13', 0) + 1; same = True
         self.log.append((op[0], res[0], res[1], same))
         return res[0], same, (sr, sn)
 
@@ -143,6 +175,7 @@ def random_script(kref, knew, g, stmt, rng, max_steps=10):
         else: op = ('apply', ('const', rng.choice(consts)))
         ok, same, st = L.step(op)
         if not same: return L, (op, st)
+        if L.stopped: break
     return L, None
 
 def run_random(N, seed):

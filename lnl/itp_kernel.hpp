@@ -3356,7 +3356,16 @@ inline NodeId normalize(NodeId term, const Env& env) {
 /// same inductive type and therefore necessarily share the same arity
 /// -- but defended against regardless rather than assumed away with an
 /// unchecked variant access.
+/// Conversion of two stuck Matches descends into their branches under fresh variables. If those branches contain a recursive Fix call on a
+/// fresh neutral, every level opens a new stuck Match and the descent never ends (comparing two different-but-equivalent stuck recursive
+/// definitions). A nesting bound that FAILS CLOSED -- "not convertible" -- keeps the kernel total: it can only cause a rejection, never an
+/// unsound acceptance, and differs from the reference only on inputs that overflow the reference's stack.
+inline int& conv_nesting() { static thread_local int n = 0; return n; }
+inline constexpr int kMaxConvNesting = 256;
+struct ConvNestingGuard { ConvNestingGuard() { ++conv_nesting(); } ~ConvNestingGuard() { --conv_nesting(); } };
 inline bool branches_convertible(NodeId ba, const Env& env_a, NodeId bb, const Env& env_b, uint32_t depth) {
+    ConvNestingGuard nesting_guard;
+    if (conv_nesting() > kMaxConvNesting) return false;
     bool a_is_lambda = ba.tag == NodeType::LAMBDA;
     bool b_is_lambda = bb.tag == NodeType::LAMBDA;
     if (a_is_lambda != b_is_lambda) return false; // arity mismatch: genuinely different shapes
@@ -8447,7 +8456,6 @@ inline InductiveHandle finish_inductive(uint32_t type_global_id, std::vector<Cto
 #endif
 
 
-#if 0 // not yet ported to the hybrid variable representation: get_or_build_unit_type
 /// Step 3 (design spec, section on refutation exploitation): lazily
 /// builds and caches this context's own canonical Unit type (one
 /// constructor, `__tt`) -- used as the "same constructor head" case of
@@ -8462,10 +8470,8 @@ inline std::pair<uint32_t, uint32_t> get_or_build_unit_type() {
     ctx().unit_ctor_gid = h.ctor_global_ids[0];
     return {tid, h.ctor_global_ids[0]};
 }
-#endif
 
 
-#if 0 // not yet ported to the hybrid variable representation: get_or_build_empty_type
 /// Lazily builds and caches this context's own canonical Empty type
 /// (zero constructors) -- eliminating a value of this type (an ordinary
 /// Match with zero branches, already fully supported by
@@ -8479,7 +8485,6 @@ inline uint32_t get_or_build_empty_type() {
     ctx().empty_type_gid = tid;
     return tid;
 }
-#endif
 
 
 #if 0 // not yet ported to the hybrid variable representation: get_or_build_same_ctor
@@ -10602,6 +10607,25 @@ inline std::vector<NodeId> apply_ctor_index_forcing_to_result_indices(const std:
     return out;
 }
 
+/// F9: the constructor application a branch sees for the scrutinee. A field whose forced value was substituted into the result indices
+/// (n := a in le_S, occurring once) is applied to that value -- le_S a m h' -- every other field to its own binder (le_n n, refl Nat x).
+/// It uses EXACTLY the substitution map of apply_ctor_index_forcing_to_result_indices, so the application's type is the motive's own
+/// index/scrutinee-type arguments. (The reference applied the constructor to the field binders, which is ill-typed against the forced field
+/// types: le_S n m h' with h' : Le a m. Invisible unless the goal or a reverted hypothesis mentions the scrutinee.)
+/// `actual`, when given, maps field position -> the context level of that field's binder (induct interleaves IH hypotheses).
+inline NodeId forced_ctor_app(uint32_t ctor_gid, uint32_t base, uint32_t arity, const detail::InstantiatedCtor& inst,
+                               const CtorIndexForcing& forcing, const std::vector<uint32_t>* actual = nullptr) {
+    std::unordered_map<uint32_t, uint32_t> occurrence_count;
+    for (NodeId n : inst.result_indices) if (n.tag == NodeType::VAR) { Var v = ctx().vars[n.index]; if (!v.bound) occurrence_count[v.n]++; }
+    NodeId app = mk_const(ctor_gid);
+    for (uint32_t ai = 0; ai < arity; ++ai) {
+        auto it = forcing.forced.find(base + ai);
+        const bool use_forced = it != forcing.forced.end() && occurrence_count[base + ai] <= 1;
+        app = mk_app(app, use_forced ? it->second : mk_fvar(actual ? (*actual)[ai] : base + ai));
+    }
+    return app;
+}
+
 inline ElabResult check_match_branches(uint32_t type_global_id, NodeId motive, const std::vector<NodeId>& branches,
                                         const std::vector<NodeId>& concrete_indices, ElabCtx& ec, ElabState& es) {
     std::vector<uint32_t> ctor_gids = detail::ctor_gids_for_type(type_global_id);
@@ -10614,8 +10638,7 @@ inline ElabResult check_match_branches(uint32_t type_global_id, NodeId motive, c
         CtorIndexForcing forcing = unify_ctor_pattern_indices(inst, concrete_indices, ec.size(), arity, ec.values);
         if (!forcing.ok) return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, branches[ci], std::nullopt, forcing.error});
         std::vector<NodeId> arg_types = apply_ctor_index_forcing(inst.arg_types, forcing);
-        NodeId ctor_app = mk_const(ctor_gids[ci]);
-        for (uint32_t ai = 0; ai < arity; ++ai) ctor_app = mk_app(ctor_app, mk_fvar(ec.size() + ai));
+        NodeId ctor_app = forced_ctor_app(ctor_gids[ci], ec.size(), arity, inst, forcing);
         std::vector<NodeId> forced_result_indices = apply_ctor_index_forcing_to_result_indices(inst.result_indices, forcing);
         NodeId branch_expected = mk_app(apply_all(motive, forced_result_indices), ctor_app);
         branch_expected = close_pi_telescope(arg_types, branch_expected, ec.size());
@@ -10855,7 +10878,7 @@ inline ElabResult intro(ProofState& ps, const std::string& name = "", std::optio
     ElabCtx new_ec = g.ec.extend(dom_ty);
     std::vector<Hypothesis> new_hyps = g.hyps;
     new_hyps.push_back(Hypothesis{name, dom_ty});
-    uint32_t new_meta = ctx().meta_ctx.fresh(new_target, new_ec.size());
+    uint32_t new_meta = ctx().meta_ctx.fresh(close_pi_over_context(new_target, new_ec), new_ec.size());
     NodeId inner = mk_lambda(dom_ty, abstract_fvars(meta_applied_to_context(new_meta, new_ec.size()), std::vector<uint32_t>{n}));
     ctx().meta_ctx.solve(g.meta_id, close_over_context(inner, g.ec));
     ps.goals[*idx_opt] = Goal{new_meta, new_ec, std::move(new_hyps), new_target};
@@ -10898,7 +10921,7 @@ inline ElabResult apply(ProofState& ps, NodeId candidate, std::optional<uint32_t
     std::vector<Goal> new_goals;
     for (auto& [m, arg_ty] : arg_metas) {
         if (ctx().meta_ctx.is_solved(m)) continue;
-        uint32_t subgoal_meta = ctx().meta_ctx.fresh(arg_ty, g.ec.size());
+        uint32_t subgoal_meta = ctx().meta_ctx.fresh(close_pi_over_context(arg_ty, g.ec), g.ec.size());
         ctx().meta_ctx.solve(m, close_over_context(meta_applied_to_context(subgoal_meta, g.ec.size()), g.ec));
         new_goals.push_back(Goal{subgoal_meta, g.ec, g.hyps, arg_ty});
     }
@@ -10929,15 +10952,359 @@ inline ElabResult rewrite_eq(ProofState& ps, NodeId eq_term, NodeId x, NodeId y,
     }
     const uint32_t n = g.ec.size();
     NodeId A = parts[0];
-    NodeId body_open = replace_terms(g.target, {{x, mk_fvar(n)}});            // goal with x abstracted into a context variable z = n
+    // F13: rewrite the INSTANTIATED goal. A goal produced by apply mentions solved metas as `?m x0 .. xn`; rewriting a context variable inside
+    // those spines (but not in the proofs passed alongside) yields an ill-formed goal, and misses the real occurrence hidden inside the meta.
+    x = resolve_metas(x); y = resolve_metas(y);
+    NodeId target_z = resolve_metas(g.target);
+    NodeId body_open = replace_terms(target_z, {{x, mk_fvar(n)}});           // goal with x abstracted into a context variable z = n
     NodeId motive = mk_lambda(A, abstract_fvars(body_open, std::vector<uint32_t>{n}));
+    if (!infer(motive, g.ec, ps.es))
+        return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, g.target, std::nullopt,
+            "rewrite_eq: the motive is not type correct -- some part of the goal depends on the rewritten term in a way that cannot be abstracted"});
     NodeId new_target = replace_fvars(body_open, {{n, y}});                  // goal[x := y]
-    uint32_t new_meta = ctx().meta_ctx.fresh(new_target, n);
+    uint32_t new_meta = ctx().meta_ctx.fresh(close_pi_over_context(new_target, g.ec), n);
     NodeId new_meta_ref = meta_applied_to_context(new_meta, n);
     NodeId symm_term = mk_app(mk_app(mk_app(mk_app(mk_const(symm_gid), A), x), y), eq_term);
     NodeId wrapped = mk_app(mk_app(mk_app(mk_app(mk_app(mk_app(mk_const(transport_gid), A), motive), y), x), symm_term), new_meta_ref);
     ctx().meta_ctx.solve(g.meta_id, close_over_context(wrapped, g.ec));
     ps.goals[*idx_opt] = Goal{new_meta, g.ec, g.hyps, new_target};
+    return {};
+}
+
+
+// ===========================================================================
+// S4: cases and induct on the hybrid representation.
+//   * ONE construction (not the reference's "agent" and "runtime" numberings): the generalised goal G is built once over fresh
+//     context variables n..n+arity (indices, scrutinee); the motive is its lambda closure and the Fix type its Pi closure.
+//   * Reverted hypotheses are Pi binders of G (bound variables), peeled one at a time with the next context variable.
+//   * No has_internal_binder_ref guards: embedded binders cannot collide with context variables any more.
+//   * Field types are mapped from telescope levels to their ACTUAL context levels (induct interleaves an IH after each recursive
+//     field; the reference silently assumed consecutive levels).
+//   * The exploited (refuted-sibling) branches of cases are built well-typed.
+// ===========================================================================
+inline NodeId close_binders(bool pi, const std::vector<NodeId>& doms, const std::vector<uint32_t>& fvl, NodeId body) {
+    const std::size_t m = doms.size();
+    NodeId result = abstract_fvars(body, fvl);
+    for (int j = static_cast<int>(m) - 1; j >= 0; --j) {
+        NodeId d = abstract_fvars(doms[j], std::vector<uint32_t>(fvl.begin(), fvl.begin() + j));
+        result = pi ? mk_pi(d, result) : mk_lambda(d, result);
+    }
+    return result;
+}
+
+/// same_ctor : F -> F -> Type0   (Unit when both arguments share a constructor head, Empty otherwise); non-indexed families only.
+inline uint32_t get_or_build_same_ctor(uint32_t family_gid) {
+    auto cached = ctx().same_ctor_gid_by_family.find(family_gid);
+    if (cached != ctx().same_ctor_gid_by_family.end()) return cached->second;
+    NodeId family_ty = mk_const(family_gid), type0_v = mk_type(0);
+    NodeId empty_ty = mk_const(get_or_build_empty_type()), unit_ty = mk_const(get_or_build_unit_type().first);
+    std::vector<uint32_t> ctor_gids = detail::ctor_gids_for_type(family_gid);
+    const uint32_t n = static_cast<uint32_t>(ctor_gids.size());
+    NodeId const_type0_motive = mk_lambda(family_ty, type0_v);
+    std::vector<NodeId> outer_branches(n);
+    for (uint32_t i = 0; i < n; ++i) {
+        detail::InstantiatedCtor iinst = detail::instantiate_ctor_telescope(ctor_gids[i], 2);
+        const uint32_t oa = static_cast<uint32_t>(iinst.arg_types.size());
+        std::vector<NodeId> inner_branches(n);
+        for (uint32_t jb = 0; jb < n; ++jb) {
+            detail::InstantiatedCtor jinst = detail::instantiate_ctor_telescope(ctor_gids[jb], 2 + oa);
+            inner_branches[jb] = close_lambda_telescope(jinst.arg_types, jb == i ? unit_ty : empty_ty, 2 + oa);
+        }
+        outer_branches[i] = close_lambda_telescope(iinst.arg_types, mk_match(mk_fvar(1), const_type0_motive, inner_branches), 2);
+    }
+    NodeId body = close_lambda_telescope({family_ty, family_ty}, mk_match(mk_fvar(0), const_type0_motive, outer_branches), 0);
+    NodeId ty = mk_pi(family_ty, mk_pi(family_ty, type0_v));
+    auto declared = declare_checked(ty, body, "__same_ctor_" + std::to_string(family_gid));
+    if (!declared) throw std::logic_error("itp: internal error -- synthesized same_ctor discriminator for family " + std::to_string(family_gid) + " failed to type-check: " + declared.error().message);
+    ctx().same_ctor_gid_by_family[family_gid] = *declared;
+    return *declared;
+}
+
+namespace detail {
+struct ScrutInfo { uint32_t type_gid = 0; std::vector<NodeId> indices; };
+}
+inline std::expected<detail::ScrutInfo, TypeError> scrutinee_info(const char* who, const Goal& g, uint32_t hyp_level) {
+    NodeId scrut_ty = g.hyps[hyp_level].type;
+    Value v = eval(scrut_ty, g.ec.values);
+    auto* nt = std::get_if<VNeutral>(&v);
+    if (!nt || nt->head.kind != NeutralHead::Kind::GlobalConst)
+        return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, scrut_ty, std::nullopt, std::string(who) + ": hypothesis's type is not an inductive type application"});
+    detail::ScrutInfo si; si.type_gid = nt->head.id;
+    for (auto& frame : nt->spine) {
+        auto* af = std::get_if<ApplyFrame>(&frame);
+        if (!af) return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, scrut_ty, std::nullopt, std::string(who) + ": scrutinee's type has a non-application eliminator frame; cannot enumerate its indices"});
+        si.indices.push_back(quote(af->arg, g.ec.size()));
+    }
+    return si;
+}
+
+/// G = Pi (reverted hypotheses). target, with the indices and the scrutinee replaced by the context variables n .. n+arity.
+inline NodeId generalized_goal(const Goal& g, const std::vector<std::pair<NodeId, NodeId>>& subs, const std::vector<uint32_t>& reverted_js) {
+    std::vector<NodeId> doms;
+    for (uint32_t j : reverted_js) doms.push_back(replace_terms(g.hyps[j].type, subs));
+    return close_binders(true, doms, reverted_js, replace_terms(g.target, subs));
+}
+
+inline ElabResult cases(ProofState& ps, uint32_t hyp_level, std::optional<uint32_t> target_meta_id = std::nullopt) {
+    auto idx_opt = find_goal_index(ps, target_meta_id);
+    if (!idx_opt) return no_goal_error("cases", target_meta_id);
+    Goal g = ps.goals[*idx_opt];
+    if (hyp_level >= g.hyps.size()) return std::unexpected(TypeError{TypeErrorKind::Other, NodeId{}, std::nullopt, "cases: hypothesis index out of range"});
+    if (g.target.tag == NodeType::PI)
+        return std::unexpected(TypeError{TypeErrorKind::Other, g.target, std::nullopt, "cases: goal's own target is still a Pi -- intro every quantified variable before casing"});
+    auto si = scrutinee_info("cases", g, hyp_level); if (!si) return std::unexpected(si.error());
+    const uint32_t n = g.ec.size(), tgid = si->type_gid, arity = static_cast<uint32_t>(si->indices.size());
+    const std::vector<NodeId>& concrete_indices = si->indices;
+    std::vector<std::pair<NodeId, NodeId>> subs;
+    for (uint32_t i = 0; i < arity; ++i) subs.push_back({concrete_indices[i], mk_fvar(n + i)});
+    subs.push_back({mk_fvar(hyp_level), mk_fvar(n + arity)});
+    // cases reverts a CONTIGUOUS suffix: from the earliest hypothesis that mentions an index or the scrutinee, to the end
+    uint32_t revert_from = hyp_level + 1;
+    for (uint32_t j = 0; j < hyp_level; ++j) if (replace_terms(g.hyps[j].type, subs) != g.hyps[j].type) { revert_from = j; break; }
+    std::vector<uint32_t> reverted_js;
+    for (uint32_t j = revert_from; j < g.hyps.size(); ++j) if (j != hyp_level) reverted_js.push_back(j);
+    NodeId G = generalized_goal(g, subs, reverted_js);
+    std::vector<NodeId> index_types = detail::instantiate_type_telescope(tgid, n);
+    if (index_types.size() != arity)
+        return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, g.target, std::nullopt, "cases: index count mismatch between the hypothesis's type application and the inductive's own declared arity"});
+    std::vector<NodeId> idx_vars; for (uint32_t i = 0; i < arity; ++i) idx_vars.push_back(mk_fvar(n + i));
+    std::vector<NodeId> mdoms = index_types; mdoms.push_back(apply_all(mk_const(tgid), idx_vars));
+    NodeId motive_original = close_lambda_telescope(mdoms, G, n);
+    if (!infer(motive_original, g.ec, ps.es))
+        return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, g.target, std::nullopt, "cases: constructed motive failed to type-check -- the goal likely depends on the hypothesis in a way that cannot be abstracted cleanly"});
+    std::vector<uint32_t> ctor_gids = detail::ctor_gids_for_type(tgid);
+    std::vector<detail::InstantiatedCtor> insts; std::vector<CtorIndexForcing> forcings;
+    for (uint32_t ctor_gid : ctor_gids) {
+        detail::InstantiatedCtor inst = detail::instantiate_ctor_telescope(ctor_gid, n);
+        CtorIndexForcing forcing = unify_ctor_pattern_indices(inst, concrete_indices, n, static_cast<uint32_t>(inst.arg_types.size()), g.ec.values);
+        if (!forcing.ok) return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, g.target, std::nullopt, forcing.error});
+        insts.push_back(std::move(inst)); forcings.push_back(std::move(forcing));
+    }
+    // refutation exploitation (only one constructor per call, and only when nothing is reverted)
+    std::optional<std::size_t> exploit_ci;
+    for (std::size_t ci = 0; ci < forcings.size(); ++ci) {
+        const CtorIndexForcing& f = forcings[ci];
+        if (f.refuted && f.refuted_slot && f.refuted_pat_value && f.refuted_conc_value) { exploit_ci = ci; break; }
+    }
+    if (!reverted_js.empty()) exploit_ci.reset();
+    NodeId motive_final = motive_original;
+    if (exploit_ci) {
+        const uint32_t slot = *forcings[*exploit_ci].refuted_slot, family_gid = *forcings[*exploit_ci].refuted_family_gid;
+        NodeId component = apply_all(mk_const(get_or_build_same_ctor(family_gid)), {idx_vars[slot], concrete_indices[slot]});
+        NodeId m = close_lambda_telescope(mdoms, mk_pi(component, G), n);
+        if (infer(m, g.ec, ps.es)) motive_final = m; else exploit_ci.reset();
+    }
+    std::vector<NodeId> branches; std::vector<Goal> new_goals;
+    for (std::size_t ci = 0; ci < ctor_gids.size(); ++ci) {
+        const uint32_t ctor_gid = ctor_gids[ci];
+        const detail::InstantiatedCtor& inst = insts[ci]; const CtorIndexForcing& forcing = forcings[ci];
+        const uint32_t ctor_arity = static_cast<uint32_t>(inst.arg_types.size());
+        std::vector<NodeId> arg_types = apply_ctor_index_forcing(inst.arg_types, forcing);
+        NodeId ctor_app = forced_ctor_app(ctor_gid, n, ctor_arity, inst, forcing);
+        std::vector<NodeId> forced_result_indices = apply_ctor_index_forcing_to_result_indices(inst.result_indices, forcing);
+        NodeId branch_expected = mk_app(apply_all(motive_original, forced_result_indices), ctor_app);
+        Env be_env = g.ec.values;
+        for (uint32_t ai = 0; ai < ctor_arity; ++ai) be_env = be_env.extend(fresh_neutral(n + ai));
+        std::vector<NodeId> reverted_dom_types;
+        if (!reverted_js.empty()) {   // the reverted layers are normalised with FULL delta, exactly as the reference does
+            Value cur_val = eval(branch_expected, be_env);
+            for (std::size_t ri = 0; ri < reverted_js.size(); ++ri) {
+                auto* pi = std::get_if<VPi>(&cur_val);
+                if (!pi) return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, g.target, std::nullopt, "cases: internal error -- expected a Pi layer for a reverted hypothesis but found none"});
+                const uint32_t target_level = n + ctor_arity + static_cast<uint32_t>(ri);
+                reverted_dom_types.push_back(quote(eval(pi->dom_id, pi->env), target_level));
+                Value next = eval(pi->cod_id, pi->env.extend(fresh_neutral(target_level)));
+                cur_val = std::move(next);
+            }
+            branch_expected = quote(cur_val, n + ctor_arity + static_cast<uint32_t>(reverted_js.size()));
+        } else {                      // nothing reverted: beta/iota only, definitions stay folded (F4)
+            NoDeltaScope keep_constants_folded;
+            branch_expected = quote(eval(branch_expected, be_env), n + ctor_arity);
+        }
+        if (exploit_ci && ci == *exploit_ci) {
+            const uint32_t family_gid = *forcing.refuted_family_gid, absurd_level = n + ctor_arity;
+            NodeId absurd_ty = apply_all(mk_const(get_or_build_same_ctor(family_gid)), {*forcing.refuted_pat_value, *forcing.refuted_conc_value});
+            NodeId reduced = quote(eval(branch_expected, be_env), absurd_level);
+            NodeId absurd_body = mk_match(mk_fvar(absurd_level), mk_lambda(mk_const(get_or_build_empty_type()), reduced), {});
+            std::vector<NodeId> doms = arg_types; doms.push_back(absurd_ty);
+            branches.push_back(close_lambda_telescope(doms, absurd_body, n));
+            continue;
+        }
+        ElabCtx branch_ec = g.ec; std::vector<Hypothesis> branch_hyps = g.hyps;
+        for (NodeId field_ty : arg_types) { branch_ec = branch_ec.extend(field_ty); branch_hyps.push_back(Hypothesis{"", field_ty}); }
+        for (std::size_t ri = 0; ri < reverted_js.size(); ++ri) { branch_ec = branch_ec.extend(reverted_dom_types[ri]); branch_hyps.push_back(Hypothesis{g.hyps[reverted_js[ri]].name, reverted_dom_types[ri]}); }
+        uint32_t subgoal_meta = ctx().meta_ctx.fresh(close_pi_over_context(branch_expected, branch_ec), branch_ec.size());
+        NodeId subgoal_ref = meta_applied_to_context(subgoal_meta, branch_ec.size());
+        std::vector<NodeId> doms = arg_types;
+        if (exploit_ci) {   // the extended motive adds a same_ctor premise after the fields; this branch ignores it
+            const uint32_t slot = *forcings[*exploit_ci].refuted_slot, family_gid = *forcings[*exploit_ci].refuted_family_gid;
+            doms.push_back(apply_all(mk_const(get_or_build_same_ctor(family_gid)), {inst.result_indices[slot], concrete_indices[slot]}));
+        } else for (NodeId d : reverted_dom_types) doms.push_back(d);
+        branches.push_back(close_lambda_telescope(doms, subgoal_ref, n));
+        new_goals.push_back(Goal{subgoal_meta, branch_ec, std::move(branch_hyps), branch_expected});
+    }
+    NodeId match_term = mk_match(mk_fvar(hyp_level), motive_final, branches);
+    if (exploit_ci) match_term = mk_app(match_term, mk_const(get_or_build_unit_type().second));
+    for (uint32_t rj : reverted_js) match_term = mk_app(match_term, mk_fvar(rj));
+    ctx().meta_ctx.solve(g.meta_id, close_over_context(match_term, g.ec));
+    ps.goals.erase(ps.goals.begin() + *idx_opt);
+    ps.goals.insert(ps.goals.begin() + *idx_opt, new_goals.begin(), new_goals.end());
+    return {};
+}
+
+inline ElabResult induct(ProofState& ps, uint32_t hyp_level, std::optional<uint32_t> target_meta_id = std::nullopt) {
+    auto idx_opt = find_goal_index(ps, target_meta_id);
+    if (!idx_opt) return no_goal_error("induct", target_meta_id);
+    Goal g = ps.goals[*idx_opt];
+    if (hyp_level >= g.hyps.size()) return std::unexpected(TypeError{TypeErrorKind::Other, NodeId{}, std::nullopt, "induct: hypothesis index out of range"});
+    if (g.target.tag == NodeType::PI)
+        return std::unexpected(TypeError{TypeErrorKind::Other, g.target, std::nullopt, "induct: goal's own target is still a Pi -- intro every quantified variable before inducting"});
+    auto si = scrutinee_info("induct", g, hyp_level); if (!si) return std::unexpected(si.error());
+    const uint32_t n = g.ec.size(), tgid = si->type_gid, arity = static_cast<uint32_t>(si->indices.size());
+    const std::vector<NodeId>& concrete_indices = si->indices;
+    {   // Induction needs something to recurse on. The reference never accepted induct on a non-recursive family (e.g. Eq): its level-based
+        // guard tripped over a marker/self-level collision. The principled rule gives the same behaviour with an honest message.
+        bool any_recursive = false;
+        for (uint32_t cg : detail::ctor_gids_for_type(tgid)) for (bool b : recursive_field_mask(tgid, cg)) any_recursive = any_recursive || b;
+        if (!any_recursive)
+            return std::unexpected(TypeError{TypeErrorKind::Other, g.hyps[hyp_level].type, std::nullopt, "induct: the hypothesis's inductive type has no recursive constructor field -- use cases"});
+    }
+    std::vector<std::pair<NodeId, NodeId>> subs;
+    for (uint32_t i = 0; i < arity; ++i) subs.push_back({concrete_indices[i], mk_fvar(n + i)});
+    subs.push_back({mk_fvar(hyp_level), mk_fvar(n + arity)});
+    // induct reverts exactly the hypotheses that (transitively) depend on the scrutinee or its indices: a fixpoint, not a suffix
+    std::vector<bool> needs_revert(g.hyps.size(), false);
+    for (bool changed = true; changed;) {
+        changed = false;
+        std::vector<std::pair<NodeId, NodeId>> probe = subs;
+        for (uint32_t j = 0; j < g.hyps.size(); ++j) if (needs_revert[j]) probe.push_back({mk_fvar(j), mk_fvar(1'000'000'000u + j)});
+        for (uint32_t j = 0; j < g.hyps.size(); ++j) {
+            if (j == hyp_level || needs_revert[j]) continue;
+            if (replace_terms(g.hyps[j].type, probe) != g.hyps[j].type) { needs_revert[j] = true; changed = true; }
+        }
+    }
+    std::vector<uint32_t> reverted_js;
+    for (uint32_t j = 0; j < g.hyps.size(); ++j) if (needs_revert[j]) reverted_js.push_back(j);
+    NodeId G = generalized_goal(g, subs, reverted_js);
+    std::vector<NodeId> index_types = detail::instantiate_type_telescope(tgid, n);
+    if (index_types.size() != arity)
+        return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, g.target, std::nullopt, "induct: index count mismatch between the hypothesis's type application and the inductive's own declared arity"});
+    std::vector<NodeId> idx_vars; for (uint32_t i = 0; i < arity; ++i) idx_vars.push_back(mk_fvar(n + i));
+    std::vector<NodeId> mdoms = index_types; mdoms.push_back(apply_all(mk_const(tgid), idx_vars));
+    NodeId motive = close_lambda_telescope(mdoms, G, n);
+    if (!infer(motive, g.ec, ps.es))
+        return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, g.target, std::nullopt, "induct: constructed motive failed to type-check -- the goal likely depends on the hypothesis in a way that cannot be abstracted cleanly"});
+    NodeId fn_type = close_pi_telescope(mdoms, G, n);
+    // runtime scope of the Fix body:  self = n, index parameters n+1.., scrutinee parameter n+1+arity, constructor fields from body_base
+    const uint32_t self_level = n, scrutinee_level = n + 1 + arity, body_base = scrutinee_level + 1;
+    std::vector<NodeId> idx_vars_body; for (uint32_t i = 0; i < arity; ++i) idx_vars_body.push_back(mk_fvar(n + 1 + i));
+    std::vector<uint32_t> ctor_gids = detail::ctor_gids_for_type(tgid);
+    std::vector<NodeId> branches; std::vector<Goal> new_goals;
+    for (uint32_t ctor_gid : ctor_gids) {
+        // ---- the goal the user sees
+        detail::InstantiatedCtor inst_agent = detail::instantiate_ctor_telescope(ctor_gid, n);
+        const uint32_t ctor_arity = static_cast<uint32_t>(inst_agent.arg_types.size());
+        std::vector<bool> rec_mask = recursive_field_mask(tgid, ctor_gid);
+        CtorIndexForcing forcing_agent = unify_ctor_pattern_indices(inst_agent, concrete_indices, n, ctor_arity, g.ec.values);
+        if (!forcing_agent.ok) return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, g.target, std::nullopt, forcing_agent.error});
+        std::vector<NodeId> arg_types_agent = apply_ctor_index_forcing(inst_agent.arg_types, forcing_agent);
+        ElabCtx branch_ec = g.ec; std::vector<Hypothesis> branch_hyps = g.hyps;
+        std::vector<uint32_t> actual(ctor_arity);
+        auto to_actual = [&](NodeId t, uint32_t upto) { std::unordered_map<uint32_t, NodeId> m; for (uint32_t j = 0; j < upto; ++j) m[n + j] = mk_fvar(actual[j]); return replace_fvars(t, m); };
+        for (uint32_t fi = 0; fi < ctor_arity; ++fi) {
+            NodeId fty = to_actual(arg_types_agent[fi], fi);
+            actual[fi] = branch_ec.size();
+            branch_ec = branch_ec.extend(fty); branch_hyps.push_back(Hypothesis{"", fty});
+            if (fi < rec_mask.size() && rec_mask[fi]) {   // the induction hypothesis follows its recursive field immediately
+                detail::AppSpine sp = detail::decompose_app_spine(fty);
+                std::unordered_map<uint32_t, NodeId> m;
+                for (uint32_t j = 0; j < arity && j < sp.args.size(); ++j) m[n + j] = sp.args[j];
+                m[n + arity] = mk_fvar(actual[fi]);
+                NodeId ih_ty = replace_fvars(G, m);
+                branch_ec = branch_ec.extend(ih_ty); branch_hyps.push_back(Hypothesis{"", ih_ty});
+            }
+        }
+        NodeId agent_ctor_app = forced_ctor_app(ctor_gid, n, ctor_arity, inst_agent, forcing_agent, &actual);
+        std::vector<NodeId> forced_agent_result_indices = apply_ctor_index_forcing_to_result_indices(inst_agent.result_indices, forcing_agent);
+        std::unordered_map<uint32_t, NodeId> bm;
+        for (uint32_t j = 0; j < arity; ++j) bm[n + j] = to_actual(forced_agent_result_indices[j], ctor_arity);
+        bm[n + arity] = agent_ctor_app;
+        NodeId branch_expected = replace_fvars(G, bm);
+        std::vector<NodeId> reverted_dom_types;
+        if (!reverted_js.empty()) {
+            const uint32_t base_level = branch_ec.size();
+            NodeId remaining = branch_expected;
+            for (std::size_t ri = 0; ri < reverted_js.size(); ++ri) {
+                if (remaining.tag != NodeType::PI) return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, g.target, std::nullopt, "induct: internal error -- expected a Pi layer for a reverted hypothesis but found none"});
+                Pi p = ctx().pis[remaining.index];
+                reverted_dom_types.push_back(p.dom_id);
+                remaining = instantiate1(p.cod_id, mk_fvar(base_level + static_cast<uint32_t>(ri)));
+            }
+            branch_expected = remaining;
+            for (std::size_t ri = 0; ri < reverted_js.size(); ++ri) { branch_ec = branch_ec.extend(reverted_dom_types[ri]); branch_hyps.push_back(Hypothesis{g.hyps[reverted_js[ri]].name, reverted_dom_types[ri]}); }
+        }
+        uint32_t subgoal_meta = ctx().meta_ctx.fresh(close_pi_over_context(branch_expected, branch_ec), branch_ec.size());
+        // ---- the runtime branch (a lambda over the fields and the reverted hypotheses; no IH binders, the IH is the recursive call)
+        detail::InstantiatedCtor inst = detail::instantiate_ctor_telescope(ctor_gid, body_base);
+        CtorIndexForcing forcing_body = unify_ctor_pattern_indices(inst, idx_vars_body, body_base, ctor_arity, g.ec.values);
+        if (!forcing_body.ok) return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, g.target, std::nullopt, forcing_body.error});
+        std::vector<NodeId> arg_types_body = apply_ctor_index_forcing(inst.arg_types, forcing_body);
+        std::vector<NodeId> forced_body_result_indices = apply_ctor_index_forcing_to_result_indices(inst.result_indices, forcing_body);
+        NodeId true_ctor_app = forced_ctor_app(ctor_gid, body_base, ctor_arity, inst, forcing_body);
+        NodeId applied = mk_meta(subgoal_meta);
+        for (uint32_t i = 0; i < n; ++i) {
+            NodeId supplied = mk_fvar(i);
+            if (i == hyp_level) supplied = true_ctor_app;
+            else {
+                bool replaced = false;
+                for (uint32_t j = 0; j < arity && !replaced; ++j) {
+                    if (concrete_indices[j].tag == NodeType::VAR) { Var v = ctx().vars[concrete_indices[j].index]; if (!v.bound && v.n == i) { supplied = forced_body_result_indices[j]; replaced = true; } }
+                }
+                if (!replaced) for (std::size_t ri = 0; ri < reverted_js.size(); ++ri) if (reverted_js[ri] == i) { supplied = mk_fvar(body_base + ctor_arity + static_cast<uint32_t>(ri)); break; }
+            }
+            applied = mk_app(applied, supplied);
+        }
+        for (uint32_t fi = 0; fi < ctor_arity; ++fi) {
+            applied = mk_app(applied, mk_fvar(body_base + fi));
+            if (fi < rec_mask.size() && rec_mask[fi]) {
+                NodeId ih_call = mk_fvar(self_level);
+                detail::AppSpine sp = detail::decompose_app_spine(arg_types_body[fi]);
+                for (uint32_t j = 0; j < arity && j < sp.args.size(); ++j) ih_call = mk_app(ih_call, sp.args[j]);
+                applied = mk_app(applied, mk_app(ih_call, mk_fvar(body_base + fi)));
+            }
+        }
+        for (uint32_t ri = 0; ri < reverted_js.size(); ++ri) applied = mk_app(applied, mk_fvar(body_base + ctor_arity + ri));
+        std::vector<NodeId> bdoms = arg_types_body;
+        if (!reverted_js.empty()) {
+            std::unordered_map<uint32_t, NodeId> rm;
+            for (uint32_t j = 0; j < arity; ++j) rm[n + j] = forced_body_result_indices[j];
+            rm[n + arity] = true_ctor_app;
+            NodeId remaining_body = replace_fvars(G, rm);
+            for (std::size_t ri = 0; ri < reverted_js.size(); ++ri) {
+                Pi p = ctx().pis[remaining_body.index];
+                bdoms.push_back(p.dom_id);
+                remaining_body = instantiate1(p.cod_id, mk_fvar(body_base + ctor_arity + static_cast<uint32_t>(ri)));
+            }
+        }
+        branches.push_back(close_lambda_telescope(bdoms, applied, body_base));
+        new_goals.push_back(Goal{subgoal_meta, branch_ec, std::move(branch_hyps), branch_expected});
+    }
+    NodeId match_term = mk_match(mk_fvar(scrutinee_level), motive, branches);
+    std::vector<NodeId> body_doms = detail::instantiate_type_telescope(tgid, n + 1);
+    std::vector<NodeId> body_idx; for (uint32_t i = 0; i < arity; ++i) body_idx.push_back(mk_fvar(n + 1 + i));
+    body_doms.push_back(apply_all(mk_const(tgid), body_idx));
+    NodeId fix_body = abstract_fvars(close_lambda_telescope(body_doms, match_term, n + 1), std::vector<uint32_t>{self_level});
+    Fix fix_node{fn_type, arity, fix_body};
+    if (!fix_guard_ok(fix_node, n))
+        return std::unexpected(TypeError{TypeErrorKind::Other, g.target, std::nullopt,
+            "induct: the assembled recursive proof failed the local structural recursion check -- some recursive call does not recurse on a structurally smaller instance of the hypothesis's own type"});
+    NodeId proof = mk_fix(fn_type, arity, fix_body);
+    for (NodeId idx : concrete_indices) proof = mk_app(proof, idx);
+    proof = mk_app(proof, mk_fvar(hyp_level));
+    for (uint32_t rj : reverted_js) proof = mk_app(proof, mk_fvar(rj));
+    ctx().meta_ctx.solve(g.meta_id, close_over_context(proof, g.ec));
+    ps.goals.erase(ps.goals.begin() + *idx_opt);
+    ps.goals.insert(ps.goals.begin() + *idx_opt, new_goals.begin(), new_goals.end());
     return {};
 }
 
