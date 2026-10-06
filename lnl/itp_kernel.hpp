@@ -11057,6 +11057,19 @@ inline ElabResult apply(ProofState& ps, NodeId candidate, std::optional<uint32_t
     NodeId concl_ty = quote(cur_ty_val, g.ec.size());
     if (ElabResult r = unify(concl_ty, g.target, g.ec, ps.es); !r) return r;
     if (ElabResult r = drain_pending(g.ec, ps.es); !r) return r;
+    {   // F25: a SOLVED argument meta must have received a solution OF ITS TYPE. Unification solves `?A := goal` for a lemma whose conclusion is a bare variable (choice : Pi (A : Type1), Nonempty A -> A) even when the
+        // goal lives in another universe; nothing checked that, so apply produced a state that could never verify (the kernel caught it only at the end). The check runs on a scratch copy and its meta assignments are undone.
+        auto mark = ctx().meta_ctx.checkpoint(); ElabState scratch = ps.es; bool solutions_ok = true; std::string why;
+        for (auto& [m, arg_ty] : arg_metas) {
+            if (!ctx().meta_ctx.is_solved(m)) continue;
+            NodeId solution = quote(eval(meta_applied_to_context(m, g.ec.size()), g.ec.values), g.ec.size());
+            NodeId wanted = quote(eval(arg_ty, g.ec.values), g.ec.size());
+            ElabCtx scratch_ec = g.ec;
+            if (ElabResult r = check(solution, wanted, scratch_ec, scratch); !r) { solutions_ok = false; why = r.error().message; break; }
+        }
+        ctx().meta_ctx.rewind(mark);
+        if (!solutions_ok) return std::unexpected(TypeError{TypeErrorKind::Mismatch, g.target, std::nullopt, "apply: the solution unification found for an argument of the lemma does not have that argument's type (" + why + ")"});
+    }
     std::vector<Goal> new_goals;
     for (auto& [m, arg_ty] : arg_metas) {
         if (ctx().meta_ctx.is_solved(m)) continue;

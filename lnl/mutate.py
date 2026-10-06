@@ -2,6 +2,7 @@
 import os, re, shutil, subprocess, sys, time
 SRC = '/home/claude/itp_py/lnl'
 MUTANTS = {
+ 'M71 apply does not check that the solutions unification found have their arguments\' types (F25)': ("        if (!solutions_ok) return std::unexpected(TypeError{TypeErrorKind::Mismatch, g.target, std::nullopt, \"apply: the solution unification found for an argument of the lemma does not have that argument's type (\" + why + \")\"});\n", ""),
  'M67 prop_elim: Match does not enforce the elimination restriction': ("    if (ctx().prop_mode && ctx().prop_elim_only.count(type_global_id)) {      // a proposition that is not a syntactic subsingleton: eliminable only into Type0", "    if (false && ctx().prop_mode && ctx().prop_elim_only.count(type_global_id)) {      // a proposition that is not a syntactic subsingleton: eliminable only into Type0"),
  'M68 prop_elim: a family with two constructors counts as a subsingleton': ("    bool subsingleton = ctors.size() <= 1;\n    if (ctors.size() == 1) {", "    bool subsingleton = ctors.size() <= 2;\n    if (ctors.size() == 1) {"),
  'M69 prop_elim: fields that occur in the result indices are not exempt (Eq becomes restricted)': ("            if (!proof_field && !in_indices) subsingleton = false;", "            if (!proof_field) subsingleton = false;"),
@@ -72,7 +73,7 @@ MUTANTS = {
  'M7 strict positivity always true': ("                if (!is_strictly_positive(type_global_id, arg_ty))\n                    throw std::logic_error(\"itp: constructor '\" + ctor.name + \"' fails strict positivity", "                if (false)\n                    throw std::logic_error(\"itp: constructor '\" + ctor.name + \"' fails strict positivity"),
  'M8 Match branch count not checked': ("    if (ctor_gids.size() != branches.size())\n        return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, motive, std::nullopt,\n            \"Match branch count", "    if (false)\n        return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, motive, std::nullopt,\n            \"Match branch count"),
 }
-GATE_CMDS = (['s2_tests.py', '1500'], ['harness.py', '1500', '3'], ['s3_tests.py', '600'], ['s4_tests.py', '800'], ['oracle_gate.py'], ['s5_tests.py', '1200', '3'], ['s5_probe_tests.py', '500', '7'], ['s6_logic_tests.py'], ['s6_f6_tests.py'], ['s7_param_tests.py', '150', '600'], ['s8_indep_tests.py', '100'], ['s9_strong_tests.py'], ['s10_noconf_tests.py'], ['s11_eqgen_tests.py'], ['s12_probe_eq_tests.py', '150'], ['s13_prop_tests.py'], ['s14_prop_world_tests.py', '600'])
+GATE_CMDS = (['s2_tests.py', '1500'], ['harness.py', '1500', '3'], ['s3_tests.py', '600'], ['s4_tests.py', '800'], ['oracle_gate.py'], ['s5_tests.py', '1200', '3'], ['s5_probe_tests.py', '500', '7'], ['s6_logic_tests.py'], ['s6_f6_tests.py'], ['s7_param_tests.py', '150', '600'], ['s8_indep_tests.py', '100'], ['s9_strong_tests.py'], ['s10_noconf_tests.py'], ['s11_eqgen_tests.py'], ['s12_probe_eq_tests.py', '150'], ['s13_prop_tests.py'], ['s14_prop_world_tests.py', '600'], ['s15_classical_tests.py', '300'])
 
 def run(names):
     results = []
@@ -102,8 +103,8 @@ def run(names):
             except subprocess.TimeoutExpired:
                 outs.append((99, 'Traceback: HANG (timeout) -- the mutant does not terminate'))
         text = '\n'.join(o[1] for o in outs)
-        caught = any(o[0] != 0 for o in outs) or bool(re.search(r"\bBAD\b|PROBLEM|FAILED|disagreements [1-9]|Traceback|ACCEPTED|S2 GATE: FAIL|S3 GATE: FAIL|S4 GATE: FAIL|ORACLE GATE: FAIL|S5 GATE: FAIL|S5 PROBE GATE: FAIL|S6 LOGIC GATE: FAIL|S6 F6 GATE: FAIL|S7 PARAM GATE: FAIL|S8 INDEP GATE: FAIL|S9 STRONG GATE: FAIL|S10 NOCONF GATE: FAIL|S11 EQGEN GATE: FAIL|S12 PROBE-EQ GATE: FAIL|S13 PROP-ELIM GATE: FAIL|S14 PROP-WORLD GATE: FAIL", text))
-        first = next((l.strip()[:110] for l in text.split('\n') if re.search(r"\bBAD\b|PROBLEM|FAILED|disagreements [1-9]|Traceback|ACCEPTED|S2 GATE: FAIL|S3 GATE: FAIL|S4 GATE: FAIL|ORACLE GATE: FAIL|S5 GATE: FAIL|S5 PROBE GATE: FAIL|S6 LOGIC GATE: FAIL|S6 F6 GATE: FAIL|S7 PARAM GATE: FAIL|S8 INDEP GATE: FAIL|S9 STRONG GATE: FAIL|S10 NOCONF GATE: FAIL|S11 EQGEN GATE: FAIL|S12 PROBE-EQ GATE: FAIL|S13 PROP-ELIM GATE: FAIL|S14 PROP-WORLD GATE: FAIL", l)), '')
+        caught = any(o[0] != 0 for o in outs) or bool(re.search(r"\bBAD\b|PROBLEM|FAILED|disagreements [1-9]|Traceback|ACCEPTED|S2 GATE: FAIL|S3 GATE: FAIL|S4 GATE: FAIL|ORACLE GATE: FAIL|S5 GATE: FAIL|S5 PROBE GATE: FAIL|S6 LOGIC GATE: FAIL|S6 F6 GATE: FAIL|S7 PARAM GATE: FAIL|S8 INDEP GATE: FAIL|S9 STRONG GATE: FAIL|S10 NOCONF GATE: FAIL|S11 EQGEN GATE: FAIL|S12 PROBE-EQ GATE: FAIL|S13 PROP-ELIM GATE: FAIL|S14 PROP-WORLD GATE: FAIL|S15 CLASSICAL GATE: FAIL", text))
+        first = next((l.strip()[:110] for l in text.split('\n') if re.search(r"\bBAD\b|PROBLEM|FAILED|disagreements [1-9]|Traceback|ACCEPTED|S2 GATE: FAIL|S3 GATE: FAIL|S4 GATE: FAIL|ORACLE GATE: FAIL|S5 GATE: FAIL|S5 PROBE GATE: FAIL|S6 LOGIC GATE: FAIL|S6 F6 GATE: FAIL|S7 PARAM GATE: FAIL|S8 INDEP GATE: FAIL|S9 STRONG GATE: FAIL|S10 NOCONF GATE: FAIL|S11 EQGEN GATE: FAIL|S12 PROBE-EQ GATE: FAIL|S13 PROP-ELIM GATE: FAIL|S14 PROP-WORLD GATE: FAIL|S15 CLASSICAL GATE: FAIL", l)), '')
         results.append((nm, 'CAUGHT' if caught else 'SURVIVED  <-- test gap', first)); print("  %-62s %s  (%.0fs)%s" % (nm, results[-1][1], time.time() - t0, ('  | ' + first) if os.environ.get('MUT_VERBOSE') else ''), flush=True)
     return results
 if __name__ == '__main__':

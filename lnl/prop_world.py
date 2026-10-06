@@ -50,7 +50,28 @@ def build_prop_world(classical=False):
     prove('cong', chain([NAT, NAT, eq(NAT, V(0), V(1))], eq(NAT, app(S, V(0)), app(S, V(1)))), [('intro',)] * 3 + [('cases', 2), ('apply', 'refl')])
     prove('le_trans', chain([NAT, NAT, NAT, le(V(0), V(1)), le(V(1), V(2))], le(V(0), V(2))), [('intro',)] * 5 + [('induct', 4), ('apply', V(3)), ('apply', 'le_S'), ('apply', V(8))])
     prove('zero_le', chain([NAT], le(ZERO, V(0))), [('intro',), ('induct', 0), ('apply', 'le_n'), ('apply', 'le_S'), ('apply', V(2))])
+    if classical: add_classical(k, G, defn, prove)
     return k, G()
+
+CLASSICAL_AXIOMS = ('em', 'propext', 'funext', 'choice')      # the trusted base added on top of the kernel
+
+def add_classical(k, G, defn, prove):
+    """The four standard classical axioms, in the Prop/Type world only (the elimination restriction is what keeps them consistent with an impredicative Prop), and the derived principles, proved by tactics."""
+    g = G(); C = lambda n: ('const', g[n]); NOT, OR, EQ, IFF, EX, TRUE, FALSE = [C(n) for n in ('Not', 'Or', 'Eq', 'Iff', 'Ex', 'True', 'False')]
+    defn('Nonempty', ('pi', T1, T0), ('lam', T1, app(EX, V(0), ('lam', V(0), TRUE))))
+    g = G(); NONEMPTY = ('const', g['Nonempty'])
+    axiom = lambda name, ty: k.declare_unchecked(build_new(k, l2h(ty, 0)), None, name)
+    axiom('em', ('pi', T0, app(OR, V(0), app(NOT, V(0)))))
+    axiom('propext', ('pi', T0, ('pi', T0, ('pi', app(IFF, V(0), V(1)), app(EQ, T0, V(0), V(1))))))
+    axiom('funext', ('pi', T1, ('pi', ('pi', V(0), T1), ('pi', ('pi', V(0), app(V(1), V(2))), ('pi', ('pi', V(0), app(V(1), V(3))),
+                     ('pi', ('pi', V(0), app(EQ, app(V(1), V(4)), app(V(2), V(4)), app(V(3), V(4)))), app(EQ, ('pi', V(0), app(V(1), V(5))), V(2), V(3))))))))
+    axiom('choice', ('pi', T1, ('pi', app(NONEMPTY, V(0)), V(0))))
+    prove('false_elim', ('pi', T0, ('pi', FALSE, V(0))), [('intro',), ('intro',), ('cases', 1)])
+    prove('or_elim', ('pi', T0, ('pi', T0, ('pi', T0, ('pi', app(OR, V(0), V(1)), ('pi', ('pi', V(0), V(2)), ('pi', ('pi', V(1), V(2)), V(2))))))),
+          [('intro',)] * 6 + [('cases', 3), ('apply', V(9)), ('apply', V(8)), ('apply', V(10)), ('apply', V(8))])
+    g = G(); C = lambda n: ('const', g[n])
+    by_contra_term = app(C('or_elim'), V(0), app(NOT, V(0)), V(0), app(C('em'), V(0)), ('lam', V(0), V(2)), ('lam', app(NOT, V(0)), app(C('false_elim'), V(0), app(V(1), V(2)))))
+    prove('by_contra', ('pi', T0, ('pi', app(NOT, app(NOT, V(0))), V(0))), [('intro',), ('intro',), ('apply', by_contra_term)])
 
 if __name__ == '__main__':
     import s8_indep_tests as t8, indep_checker as ic

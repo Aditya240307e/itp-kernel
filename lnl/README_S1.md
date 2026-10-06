@@ -362,3 +362,21 @@ S2-style random typed terms. Mutant inventory: 59 defined (M1-M37, M39-M60), 58 
 * **Mutants:** M62 (cases exploit with reverted hypotheses), M63 (no barrier), M64 (barrier offered by the index) are caught by S11. Inventory: 63 defined (M1-M37, M39-M64); the 62 caught include M60-M64 individually; the survivor is M12. The full
   63-mutant re-run was NOT repeated after S11 (about 90 minutes); M62-M64 were run against S11 only.
 * **Limits:** an index whose type depends on an earlier index needs heterogeneous equality (refused). F23's root cause is not fixed. Injectivity lemmas are still generated only for arity-0 families.
+
+
+---
+# S12-S15: probing x equations, the Prop/Type world, classical logic (2026-10-06)
+* **Rewind hazard (found by review, fixed):** `__barrier_k` was not a derived global, so a probe that was the first to create it could not be rewound (the kernel's own guard threw). Fixed; S12 (6,600 probes per mode, 0 exceptions,
+  0 non-determinism, 0 residue against a probe-free replay) and a deterministic first-creation test in S11; M65. Every parameter-mode `induct` now keeps its `Fix` through extraction (F23 mitigation complete for tactic proofs); M66.
+* **F2b:** injectivity lemmas now cover every family whose slots are all parameters (List, And, Or, Ex witness) besides arity 0; dependent payload fields (Ex's proof) are skipped (they need HEq).
+* **prop_elim (S13):** see F24. Kernel + independent checker + 3 configurations (off as control, on, on with parameters); M67-M70.
+* **Prop/Type world (S14):** `prop_world.py`: Nat : Type1, Eq : Pi (A : Type1), ... : Type0, Ex over Type1, Le, add, Not, Iff; transport, symm, trans, cong, le_trans, zero_le proved by tactics under prop_elim+parameters; every global re-checked by the
+  independent checker (0 rejected); Succ injectivity generated; equation-based induction, refutations, the Le-inversion capstone verified; zero-tolerance oracle (2 x 2,500 scripts, ~19,000 tactic applications, 159 completed proofs, all verified by
+  both).
+* **Classical logic (S15):** em, propext, dependent funext, choice (via Nonempty) as the only added axioms; false_elim, or_elim, by_contra proved by tactics; contrapositive verified; canary: 5,600 random attempts on 7 false statements, 0 verified,
+  and POWER: the same generator completes and verifies 45 of 3,200 attempts on true classical statements (completed = verified).
+* **Soundness status, stated plainly:** the consistency of these axioms with this kernel rests on (a) the standard set-theoretic-model argument for CIC with an impredicative Prop and restricted elimination, (b) our rules matching Lean/Coq's
+  on the points that matter (large-field admission, syntactic-subsingleton elimination), and (c) tests. There is no mechanical proof. The kernel has no definitional proof irrelevance (fewer equalities than Lean), which only makes it more conservative.
+* **Not done, and now the real bottlenecks:** no universe polymorphism or cumulativity (Eq cannot even be stated on proofs: Eq P p q needs A : Type1 but P : Type0), no proof irrelevance, no structures/records, no implicit arguments or instances, unary Nat (2024 is 2024 constructors),
+  no automation beyond the basic tactics, no numbers beyond Nat. See ROADMAP.md.
+* Inventory: 71 mutants defined (M1-M37, M39-M71), 70 caught (the survivor is M12). New ones were each run against their own gate only; the 90-minute full re-run has NOT been repeated.
