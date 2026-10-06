@@ -64,9 +64,9 @@ def kit_on(kref, knew, g):
     }
     return stmts
 
-def soundness_canary(N, seed):
-    """random tactic search on FALSE statements, parameters ON: a verified completion would be a soundness bug"""
-    kref, knew, g = t6.build_logic(); knew.set_option('parameters', True); rng = random.Random(seed)
+def soundness_canary(N, seed, eq=False, params=True):
+    """random tactic search on FALSE statements (parameters ON by default; eq = induct generalises concrete indices through equations): a verified completion would be a soundness bug"""
+    kref, knew, g = t6.build_logic(); knew.set_option('parameters', params); rng = random.Random(seed)
     C = lambda n: ('const', g[n]); NAT, EQ, Z, S, LE, FALSE = C('Nat'), C('Eq'), C('Zero'), C('Succ'), C('Le'), C('False')
     eq = lambda a, b: app(EQ, NAT, a, b); le = lambda a, b: app(LE, a, b)
     false_stmts = {'False': FALSE, '0 = 1': eq(Z, app(S, Z)), '1 <= 0': le(app(S, Z), Z), 'forall n, S n <= n': chain([NAT], le(app(S, V(0)), V(0))),
@@ -90,7 +90,10 @@ def soundness_canary(N, seed):
                 indh = [j for j, h in enumerate(hyps) if head(h)[0] == 'const' and head(h)[1] in ind]; r = rng.random()
                 try:
                     if tgt[0] == 'pi' and r < 0.4: ps.intro('x')
-                    elif indh and r < 0.7: (ps.cases if rng.random() < 0.7 else ps.induct)(rng.choice(indh))
+                    elif indh and r < 0.7:
+                        if rng.random() < 0.7: ps.cases(rng.choice(indh))
+                        elif eq: ps.induct(rng.choice(indh), eq_gid=g['Eq'], refl_gid=g['refl'])
+                        else: ps.induct(rng.choice(indh))
                     elif nh and r < 0.85: ps.apply(build_new(knew, ('fvar', rng.randrange(nh))))
                     else: ps.apply(build_new(knew, ('const', rng.choice(consts))))
                 except Exception: ps = None; break
@@ -143,6 +146,11 @@ if __name__ == '__main__':
     tried, completed, bad = soundness_canary(int(sys.argv[1]) if len(sys.argv) > 1 else 400, 3)
     if bad is None: tried2, completed2, bad = soundness_canary(int(sys.argv[1]) if len(sys.argv) > 1 else 400, 4); tried += tried2; completed += completed2
     print("   soundness canary (parameters ON): %d random proof attempts on 14 FALSE statements, %d completed, verified proof of a false statement: %s" % (tried, completed, bad))
+    if bad is not None: FAIL.append('soundness canary: verified proof of ' + str(bad))
+    for label, kw in (('parameters ON + equations', dict(eq=True, params=True)), ('legacy + equations', dict(eq=True, params=False))):
+        tr, co, bd = soundness_canary(int(sys.argv[1]) // 2 if len(sys.argv) > 1 else 200, 21, **kw)
+        print("   soundness canary (%s): %d random proof attempts on 14 FALSE statements, %d completed, verified proof of a false statement: %s" % (label, tr, co, bd))
+        if bd is not None: FAIL.append('soundness canary (%s): verified proof of %s' % (label, bd))
     if bad: FAIL.append('CANARY: verified proof of ' + bad)
     tot, c, v, fb = o.run(int(sys.argv[2]) if len(sys.argv) > 2 else 2500, 11, verbose=False, mode2_only=True, params=True)
     unatt = sum(x[1] + x[2] for x in tot.values()) + (c - v)

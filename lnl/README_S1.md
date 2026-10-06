@@ -347,3 +347,18 @@ S2-style random typed terms. Mutant inventory: 59 defined (M1-M37, M39-M60), 58 
   of any kind over the full random distribution (12,000 scripts, 980 completed proofs all verified) and the gate runs it with zero tolerance. Mutant M61 removes the guard and is caught by it. Index generalisation with
   equations is NOT implemented (design note in FINDINGS.md).
 * Inventory: 60 mutants defined (M1-M37, M39-M61), 59 caught; the survivor is M12. All gates (S2-S10, oracle, main differential) pass at full size.
+
+
+---
+# S11: index generalisation with equations (F12 done), F22, F23 (2026-10-06)
+* **Feature:** `induct(hyp, eq_gid, refl_gid)` generalises concrete (or repeated) indices through equations (details in FINDINGS.md). `n <= 0 -> n = 0` and the capstone `b <= S a -> b <= a \/ b = S a` (equation, injectivity of
+  S, transport) complete and verify in the kernel AND the independent checker; 583 mutants of those proofs get identical verdicts from both.
+* **F22 (fixed, parameter mode):** `cases` did not exploit a refutation when any hypothesis was reverted. Found because `induct` with equations produces exactly such states.
+* **F23 (mitigated):** the evaluator unfolds a Fix on a neutral argument, so extraction peels the Fix off an induct proof; this is the root cause of F12. The equation path wraps its Fix in `__barrier_k` (an identity that
+  extraction keeps folded; excluded from the library index). I first tried passing the constructor application for the scrutinee and then mixed good/bad slots; both were wrong, which is why every slot gets an equation and the
+  scrutinee is the original `h`. The kernel and the checker caught each wrong turn immediately.
+* **Evidence:** zero-tolerance random oracle with equations: 16,000 scripts over both modes, ~10,800 induct applications, 0 ill-typed partial proofs, 0 ill-formed goals, 783 completed proofs all verified. Soundness canary with
+  equations: 50,400 random attempts on 14 false statements, 0 verified proofs (both modes). All 13 gates plus the 40,000-term main differential pass.
+* **Mutants:** M62 (cases exploit with reverted hypotheses), M63 (no barrier), M64 (barrier offered by the index) are caught by S11. Inventory: 63 defined (M1-M37, M39-M64); the 62 caught include M60-M64 individually; the survivor is M12. The full
+  63-mutant re-run was NOT repeated after S11 (about 90 minutes); M62-M64 were run against S11 only.
+* **Limits:** an index whose type depends on an earlier index needs heterogeneous equality (refused). F23's root cause is not fixed. Injectivity lemmas are still generated only for arity-0 families.

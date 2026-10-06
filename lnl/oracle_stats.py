@@ -9,19 +9,19 @@ from s3_tests import library, V, app
 import s4_tests as t4
 from oracle_lib import *
 
-def apply_op(k, g, ps, op):
+def apply_op(k, g, ps, op, eq=False):
     if op[0] == 'intro': ps.intro('x')
     elif op[0] == 'cases': ps.cases(op[1])
-    elif op[0] == 'induct': ps.induct(op[1])
+    elif op[0] == 'induct': ps.induct(op[1], eq_gid=g['Eq'], refl_gid=g['refl']) if eq else ps.induct(op[1])
     elif op[0] == 'rewrite': ps.rewrite(build_new(k, ('fvar', op[1])), build_new(k, op[2]), build_new(k, op[3]), g['transport'], g['symm'])
     else: ps.apply(build_new(k, op[1]))
 
-def replay(k, g, stmt, ops):
+def replay(k, g, stmt, ops, eq=False):
     ps = k.start_proof(stmt)
-    for op in ops: apply_op(k, g, ps, op)
+    for op in ops: apply_op(k, g, ps, op, eq)
     return ps
 
-def run(N, seed, verbose=True, mode2_only=False, no_q=False, params=False):
+def run(N, seed, verbose=True, mode2_only=False, no_q=False, params=False, eq=False):
     kref, knew, g, defs = library()
     if params: knew.set_option('parameters', True)
     stmts = t4.statements4(g); rng = random.Random(seed); names = list(stmts)
@@ -46,11 +46,11 @@ def run(N, seed, verbose=True, mode2_only=False, no_q=False, params=False):
             elif eqh and tgt[0] != 'pi' and r < 0.70: j = rng.choice(eqh); op = ('rewrite', j, hyps[j][1][2], hyps[j][2])
             elif nh and r < 0.84: op = ('apply', ('fvar', rng.randrange(nh)))
             else: op = ('apply', ('const', rng.choice(consts)))
-            try: apply_op(knew, g, ps, op)
+            try: apply_op(knew, g, ps, op, eq)
             except Exception:
-                ps = replay(knew, g, stmt, ops); rebuilds += 1; continue
+                ps = replay(knew, g, stmt, ops, eq); rebuilds += 1; continue
             ops.append(op)
-            if op[0] == 'induct' and not mode2(hyps[op[1]]): m1 = True
+            if op[0] == 'induct' and not mode2(hyps[op[1]]) and not eq: m1 = True      # with equations a concrete index is supported: nothing is attributed
             d = tot.setdefault(op[0], [0, 0, 0, 0, 0])      # [ok, ill-typed partial proof, ill-formed goals, skipped, attributed to F12]
             if ps.num_pending() > 0 or not goals_meta_free(knew, ps): d[3] += 1; continue
             good = knew.check_open(ps.extract(), stmt, [])[0]; wf = goals_wellformed(knew, ps) if ps.num_goals() else True

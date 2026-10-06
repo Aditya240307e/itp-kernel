@@ -33,7 +33,7 @@ struct ProofStateHandle {
     void intro_(const std::string& name, std::optional<uint32_t> tm) { auto g = activate(); raise_if_error(itp::intro(*ps, name, tm)); }
     void apply_(itp::NodeId term, std::optional<uint32_t> tm) { auto g = activate(); require_scoped(term, scope_of(tm), "apply"); raise_if_error(itp::apply(*ps, term, tm)); }
     void cases_(uint32_t hyp_level, std::optional<uint32_t> tm, const std::vector<uint32_t>& gen) { auto g = activate(); raise_if_error(itp::cases(*ps, hyp_level, tm, gen)); }
-    void induct_(uint32_t hyp_level, std::optional<uint32_t> tm, const std::vector<uint32_t>& gen) { auto g = activate(); raise_if_error(itp::induct(*ps, hyp_level, tm, gen)); }
+    void induct_(uint32_t hyp_level, std::optional<uint32_t> tm, const std::vector<uint32_t>& gen, std::optional<uint32_t> eq_gid, std::optional<uint32_t> refl_gid) { auto g = activate(); raise_if_error(itp::induct(*ps, hyp_level, tm, gen, eq_gid, refl_gid)); }
     void exact_(itp::NodeId term, std::optional<uint32_t> tm) { auto g = activate(); require_scoped(term, scope_of(tm), "exact"); raise_if_error(itp::exact(*ps, term, tm)); }
     void rewrite_(itp::NodeId eq_term, itp::NodeId x, itp::NodeId y, uint32_t transport_gid, uint32_t symm_gid, std::optional<uint32_t> tm) {
         auto g = activate(); uint32_t sc = scope_of(tm); require_scoped(eq_term, sc, "rewrite eq_term"); require_scoped(x, sc, "rewrite x"); require_scoped(y, sc, "rewrite y"); raise_if_error(itp::rewrite_eq(*ps, eq_term, x, y, transport_gid, symm_gid, tm));
@@ -237,7 +237,7 @@ NB_MODULE(itp_env_lnl, m) {
         .def("intro", &ProofStateHandle::intro_, "name"_a = "", "target_meta_id"_a = nb::none())
         .def("apply", &ProofStateHandle::apply_, "term"_a, "target_meta_id"_a = nb::none())
         .def("cases", &ProofStateHandle::cases_, "hyp_level"_a, "target_meta_id"_a = nb::none(), "generalizing"_a = std::vector<uint32_t>{})
-        .def("induct", &ProofStateHandle::induct_, "hyp_level"_a, "target_meta_id"_a = nb::none(), "generalizing"_a = std::vector<uint32_t>{})
+        .def("induct", &ProofStateHandle::induct_, "hyp_level"_a, "target_meta_id"_a = nb::none(), "generalizing"_a = std::vector<uint32_t>{}, "eq_gid"_a = nb::none(), "refl_gid"_a = nb::none())
         .def("exact", &ProofStateHandle::exact_, "term"_a, "target_meta_id"_a = nb::none())
         .def("rewrite", &ProofStateHandle::rewrite_, "eq_term"_a, "x"_a, "y"_a, "transport_gid"_a, "symm_gid"_a, "target_meta_id"_a = nb::none())
         .def("is_complete", &ProofStateHandle::is_complete)

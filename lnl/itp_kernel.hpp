@@ -5566,7 +5566,7 @@ inline void match_index_pattern(NodeId pat, NodeId conc, uint32_t base_depth, ui
 inline CtorIndexForcing unify_ctor_pattern_indices(const detail::InstantiatedCtor& inst,
                                                     const std::vector<NodeId>& concrete_indices,
                                                     uint32_t base_depth, uint32_t ctor_arity, const Env& env,
-                                                    const std::vector<bool>* param_slots = nullptr) {
+                                                    const std::vector<bool>* param_slots = nullptr, const std::vector<bool>* skip_slots = nullptr) {
     CtorIndexForcing out;
     if (inst.result_indices.size() != concrete_indices.size()) {
         out.ok = false;
@@ -5575,6 +5575,7 @@ inline CtorIndexForcing unify_ctor_pattern_indices(const detail::InstantiatedCto
         return out;
     }
     for (std::size_t j = 0; j < inst.result_indices.size(); ++j) {
+        if (skip_slots && j < skip_slots->size() && (*skip_slots)[j]) continue;      // a slot generalised through an equation gives no forcing information
         match_index_pattern(inst.result_indices[j], concrete_indices[j], base_depth, ctor_arity, env, out);
         if (param_slots && j < param_slots->size() && (*param_slots)[j] && inst.result_indices[j].tag == NodeType::VAR) {
             Var pv = ctx().vars[inst.result_indices[j].index];
@@ -8501,6 +8502,17 @@ inline uint32_t get_or_build_empty_type() {
     return tid;
 }
 
+/// F23. Proof extraction is quote(eval(..)), and eval's apply(VFix) ALWAYS unfolds one layer, even when the decreasing argument is a neutral variable (a standard fix unfolds only on a
+/// constructor). Extraction therefore peels the Fix off an induct proof and leaves a Match on the CONCRETE hypothesis whose branches were typed for the GENERIC Fix parameter. For distinct
+/// variable indices the two views coincide; for an index generalised through an equation they do not. `__barrier_k : Pi (A : Type k). A -> A := fun A x => x` is a transparent identity that
+/// extraction (NoDeltaScope) leaves folded, so a Fix wrapped in it survives extraction and the kernel keeps checking the generic body. Conversion still sees through it (delta).
+inline uint32_t get_or_build_barrier(uint32_t level) {
+    const std::string name = "__barrier_" + std::to_string(level);
+    for (uint32_t i = 0; i < ctx().globals.defs.size(); ++i) if (ctx().globals.defs[i].name == name) return i;
+    NodeId sort = mk_type(level);
+    return ctx().globals.declare(mk_pi(sort, mk_pi(mk_bvar(0), mk_bvar(1))), mk_lambda(sort, mk_lambda(mk_bvar(0), mk_bvar(0))), name);
+}
+
 
 #if 0 // not yet ported to the hybrid variable representation: get_or_build_same_ctor
 /// Lazily builds and caches, PER FAMILY, a discriminator function
@@ -11179,7 +11191,9 @@ inline ElabResult cases(ProofState& ps, uint32_t hyp_level, std::optional<uint32
         const CtorIndexForcing& f = forcings[ci];
         if (f.refuted && f.refuted_slot && f.refuted_pat_value && f.refuted_conc_value) { exploit_ci = ci; break; }
     }
-    if (!reverted_js.empty()) exploit_ci.reset();
+    // F22: the reference only exploits a refutation when nothing is reverted, so any dependent hypothesis silently disabled discrimination. In parameter mode (which already differs from the reference)
+    // the exploit works with reverted hypotheses too: the same_ctor premise is the OUTERMOST layer of the extended motive, so the reverted binders simply sit one level further up in the branch lambdas.
+    if (!reverted_js.empty() && !ctx().param_mode) exploit_ci.reset();
     NodeId motive_final = motive_original;
     if (exploit_ci) {
         const uint32_t slot = *forcings[*exploit_ci].refuted_slot, family_gid = *forcings[*exploit_ci].refuted_family_gid;
@@ -11209,6 +11223,7 @@ inline ElabResult cases(ProofState& ps, uint32_t hyp_level, std::optional<uint32
         NodeId branch_expected = mk_app(apply_all(motive_original, forced_result_indices), ctor_app);
         Env be_env = g.ec.values;
         for (uint32_t ai = 0; ai < ctor_arity; ++ai) be_env = be_env.extend(fresh_neutral(n + ai));
+        const NodeId branch_expected_raw = branch_expected;
         std::vector<NodeId> reverted_dom_types;
         if (!reverted_js.empty()) {   // the reverted layers are normalised with FULL delta, exactly as the reference does
             Value cur_val = eval(branch_expected, be_env);
@@ -11225,12 +11240,27 @@ inline ElabResult cases(ProofState& ps, uint32_t hyp_level, std::optional<uint32
             NoDeltaScope keep_constants_folded;
             branch_expected = quote(eval(branch_expected, be_env), n + ctor_arity);
         }
+        // a branch that carries the same_ctor premise has it BEFORE the reverted binders: recompute those layers one level up
+        std::vector<NodeId> reverted_dom_types_up; NodeId branch_expected_up = branch_expected;
+        if (exploit_ci && !reverted_js.empty()) {
+            Value cur_val = eval(branch_expected_raw, be_env);
+            for (std::size_t ri = 0; ri < reverted_js.size(); ++ri) {
+                auto* pi = std::get_if<VPi>(&cur_val);
+                if (!pi) return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, g.target, std::nullopt, "cases: internal error -- expected a Pi layer for a reverted hypothesis but found none"});
+                const uint32_t target_level = n + ctor_arity + 1 + static_cast<uint32_t>(ri);
+                reverted_dom_types_up.push_back(quote(eval(pi->dom_id, pi->env), target_level));
+                Value next = eval(pi->cod_id, pi->env.extend(fresh_neutral(target_level)));
+                cur_val = std::move(next);
+            }
+            branch_expected_up = quote(cur_val, n + ctor_arity + 1 + static_cast<uint32_t>(reverted_js.size()));
+        }
         if (exploit_ci && is_exploited[ci]) {
             const uint32_t family_gid = *forcing.refuted_family_gid, absurd_level = n + ctor_arity;
             NodeId absurd_ty = apply_all(mk_const(get_or_build_same_ctor(family_gid)), {*forcing.refuted_pat_value, *forcing.refuted_conc_value});
-            NodeId reduced = quote(eval(branch_expected, be_env), absurd_level);
+            NodeId reduced = reverted_js.empty() ? quote(eval(branch_expected, be_env), absurd_level) : branch_expected_up;
             NodeId absurd_body = mk_match(mk_fvar(absurd_level), mk_lambda(mk_const(get_or_build_empty_type()), reduced), {});
             std::vector<NodeId> doms = arg_types; doms.push_back(absurd_ty);
+            for (NodeId d : reverted_dom_types_up) doms.push_back(d);
             branches.push_back(close_lambda_telescope(doms, absurd_body, n));
             continue;
         }
@@ -11238,11 +11268,17 @@ inline ElabResult cases(ProofState& ps, uint32_t hyp_level, std::optional<uint32
         for (NodeId field_ty : arg_types) { branch_ec = branch_ec.extend(field_ty); branch_hyps.push_back(Hypothesis{"", field_ty}); }
         for (std::size_t ri = 0; ri < reverted_js.size(); ++ri) { branch_ec = branch_ec.extend(reverted_dom_types[ri]); branch_hyps.push_back(Hypothesis{g.hyps[reverted_js[ri]].name, reverted_dom_types[ri]}); }
         uint32_t subgoal_meta = ctx().meta_ctx.fresh(close_pi_over_context(branch_expected, branch_ec), branch_ec.size());
-        NodeId subgoal_ref = meta_applied_to_context(subgoal_meta, branch_ec.size());
+        NodeId subgoal_ref;
+        if (exploit_ci && !reverted_js.empty()) {   // the meta is applied to the context, the fields and the reverted binders, which sit one level up (after the premise)
+            subgoal_ref = mk_meta(subgoal_meta);
+            for (uint32_t l = 0; l < n + ctor_arity; ++l) subgoal_ref = mk_app(subgoal_ref, mk_fvar(l));
+            for (uint32_t ri = 0; ri < reverted_js.size(); ++ri) subgoal_ref = mk_app(subgoal_ref, mk_fvar(n + ctor_arity + 1 + ri));
+        } else subgoal_ref = meta_applied_to_context(subgoal_meta, branch_ec.size());
         std::vector<NodeId> doms = arg_types;
         if (exploit_ci) {   // the extended motive adds a same_ctor premise after the fields; this branch ignores it
             const uint32_t slot = *forcings[*exploit_ci].refuted_slot, family_gid = *forcings[*exploit_ci].refuted_family_gid;
             doms.push_back(apply_all(mk_const(get_or_build_same_ctor(family_gid)), {forced_result_indices[slot], concrete_indices[slot]}));
+            for (NodeId d : reverted_dom_types_up) doms.push_back(d);
         } else for (NodeId d : reverted_dom_types) doms.push_back(d);
         branches.push_back(close_lambda_telescope(doms, subgoal_ref, n));
         new_goals.push_back(Goal{subgoal_meta, branch_ec, std::move(branch_hyps), branch_expected});
@@ -11256,7 +11292,8 @@ inline ElabResult cases(ProofState& ps, uint32_t hyp_level, std::optional<uint32
     return {};
 }
 
-inline ElabResult induct(ProofState& ps, uint32_t hyp_level, std::optional<uint32_t> target_meta_id = std::nullopt, const std::vector<uint32_t>& generalizing = {}) {
+inline ElabResult induct(ProofState& ps, uint32_t hyp_level, std::optional<uint32_t> target_meta_id = std::nullopt, const std::vector<uint32_t>& generalizing = {},
+                          std::optional<uint32_t> eq_gid = std::nullopt, std::optional<uint32_t> refl_gid = std::nullopt) {
     auto idx_opt = find_goal_index(ps, target_meta_id);
     if (!idx_opt) return no_goal_error("induct", target_meta_id);
     Goal g = ps.goals[*idx_opt];
@@ -11273,22 +11310,40 @@ inline ElabResult induct(ProofState& ps, uint32_t hyp_level, std::optional<uint3
     }
     MotiveParts mp = motive_binders(tgid, n, concrete_indices);        // parameters (option) are FIXED: not generalised, not abstracted by the motive or the Fix
     const std::vector<bool>& is_param = mp.params; const uint32_t R = mp.num_indices;
-    if (ctx().param_mode) {
-        // F12: the Fix is generic over its index slots, so the branch goals are only consistent with it when every index slot of the hypothesis is a DISTINCT VARIABLE.
-        // A concrete (or repeated) index would need index generalisation with equations, which is not implemented: refuse instead of producing a partial proof that cannot
-        // be completed validly. cases handles such hypotheses through its motive.
-        std::unordered_set<uint32_t> seen_idx_vars;
+    // F12 (index generalisation). An index slot is GOOD when the hypothesis has a distinct variable there that does not occur in the (fixed) parameter values: the Fix is then generic over it and the goal is
+    // generalised by replacing that variable with the slot's marker. Every other index slot (a concrete term, a repeated variable, or a variable that also occurs in a parameter) is BAD. With the Eq and refl
+    // ids supplied a bad slot is generalised through an EQUATION  marker = c  (dependent induction): the goal is left alone, the Fix takes the equation as one more premise and is applied to refl. Without the
+    // ids parameter mode refuses (a partial proof built on a concrete index cannot be completed validly) and legacy mode keeps the reference behaviour.
+    std::vector<bool> bad(arity, false); uint32_t n_bad = 0;
+    {
+        std::unordered_set<uint32_t> pfv, seen_idx_vars;
+        for (uint32_t i = 0; i < arity; ++i) if (is_param[i]) detail::collect_fvars(concrete_indices[i], pfv);
         for (uint32_t i = 0; i < arity; ++i) {
             if (is_param[i]) continue;
-            bool distinct_var = false;
-            if (concrete_indices[i].tag == NodeType::VAR) { Var v = ctx().vars[concrete_indices[i].index]; distinct_var = !v.bound && seen_idx_vars.insert(v.n).second; }
-            if (!distinct_var)
+            bool good = false;
+            if (concrete_indices[i].tag == NodeType::VAR) { Var v = ctx().vars[concrete_indices[i].index]; good = !v.bound && !pfv.count(v.n) && seen_idx_vars.insert(v.n).second; }
+            if (!good) { bad[i] = true; ++n_bad; }
+        }
+    }
+    const bool use_eq = n_bad > 0 && eq_gid.has_value() && refl_gid.has_value();
+    // When any slot needs an equation, EVERY non-parameter slot gets one. No context variable is then substituted by a forced index, so the scrutinee hypothesis can be passed to the branch as the original h
+    // (in scope inside the Fix body, and of exactly the type the branch context declares for it). A mixed good/bad treatment would need a cast of the constructor application along the equations.
+    if (use_eq) { n_bad = 0; for (uint32_t i = 0; i < arity; ++i) { bad[i] = !is_param[i]; if (bad[i]) ++n_bad; } }
+    if (n_bad > 0 && !use_eq && ctx().param_mode) {
+        uint32_t first_bad = 0; while (!bad[first_bad]) ++first_bad;
+        return std::unexpected(TypeError{TypeErrorKind::Other, g.hyps[hyp_level].type, std::nullopt, "induct: index slot " + std::to_string(first_bad) +
+            " of the hypothesis is not a distinct variable (it is a concrete term, repeats another index, or also occurs in a parameter); pass eq_gid and refl_gid to generalise it through an equation, or use cases"});
+    }
+    if (use_eq && mp.doms.size() == arity + 1) {
+        for (uint32_t i = 0; i < arity; ++i) if (bad[i]) {
+            std::unordered_set<uint32_t> dep; detail::collect_fvars(mp.doms[i], dep);
+            for (uint32_t l : dep) if (l >= n)
                 return std::unexpected(TypeError{TypeErrorKind::Other, g.hyps[hyp_level].type, std::nullopt, "induct: index slot " + std::to_string(i) +
-                    " of the hypothesis is not a distinct variable (it is a concrete term or repeats another index); induction on it needs index generalisation, which is not implemented -- use cases, or restate the goal with a variable index and an equation"});
+                    " needs an equation but its type depends on an earlier index (that would need heterogeneous equality, which is not implemented)"});
         }
     }
     std::vector<std::pair<NodeId, NodeId>> subs;
-    for (uint32_t i = 0; i < arity; ++i) if (!is_param[i]) subs.push_back({concrete_indices[i], mk_fvar(n + i)});
+    for (uint32_t i = 0; i < arity; ++i) if (!is_param[i] && !(use_eq && bad[i])) subs.push_back({concrete_indices[i], mk_fvar(n + i)});
     subs.push_back({mk_fvar(hyp_level), mk_fvar(n + arity)});
     // induct reverts exactly the hypotheses that (transitively) depend on the scrutinee or its indices: a fixpoint, not a suffix
     std::vector<bool> needs_revert(g.hyps.size(), false);
@@ -11304,9 +11359,20 @@ inline ElabResult induct(ProofState& ps, uint32_t hyp_level, std::optional<uint3
     }
     std::vector<uint32_t> reverted_js;
     for (uint32_t j = 0; j < g.hyps.size(); ++j) if (needs_revert[j]) reverted_js.push_back(j);
-    NodeId G = generalized_goal(g, subs, reverted_js);
     if (mp.doms.size() != arity + 1)
         return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, g.target, std::nullopt, "induct: index count mismatch between the hypothesis's type application and the inductive's own declared arity"});
+    NodeId G;
+    if (!use_eq) G = generalized_goal(g, subs, reverted_js);
+    else {
+        NodeId gbody = replace_terms(g.target, subs);
+        for (uint32_t i = arity; i-- > 0;) if (bad[i]) {
+            NodeId eq_ty = mk_app(mk_app(mk_app(mk_const(*eq_gid), mp.doms[i]), mk_fvar(n + i)), replace_terms(concrete_indices[i], subs));      // Eq T_i marker_i c_i
+            gbody = mk_pi(eq_ty, gbody);
+        }
+        std::vector<NodeId> rdoms; for (uint32_t j : reverted_js) rdoms.push_back(replace_terms(g.hyps[j].type, subs));
+        G = close_binders(true, rdoms, reverted_js, gbody);
+    }
+    const std::size_t n_layers = reverted_js.size() + (use_eq ? n_bad : 0);      // the reverted hypotheses, then one equation per generalised slot
     const std::vector<NodeId>& idx_vars = mp.idx_vars; const std::vector<NodeId>& mdoms = mp.doms;
     NodeId motive = close_lambda_telescope(mdoms, G, n);
     if (!infer(motive, g.ec, ps.es))
@@ -11330,7 +11396,7 @@ inline ElabResult induct(ProofState& ps, uint32_t hyp_level, std::optional<uint3
         detail::InstantiatedCtor inst_agent = detail::instantiate_ctor_telescope(ctor_gid, n);
         const uint32_t ctor_arity = static_cast<uint32_t>(inst_agent.arg_types.size());
         std::vector<bool> rec_mask = recursive_field_mask(tgid, ctor_gid);
-        CtorIndexForcing forcing_agent = unify_ctor_pattern_indices(inst_agent, concrete_indices, n, ctor_arity, g.ec.values, &is_param);
+        CtorIndexForcing forcing_agent = unify_ctor_pattern_indices(inst_agent, concrete_indices, n, ctor_arity, g.ec.values, &is_param, use_eq ? &bad : nullptr);
         if (!forcing_agent.ok) return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, g.target, std::nullopt, forcing_agent.error});
         std::vector<NodeId> arg_types_agent = apply_ctor_index_forcing(inst_agent.arg_types, forcing_agent);
         ElabCtx branch_ec = g.ec; std::vector<Hypothesis> branch_hyps = g.hyps;
@@ -11356,17 +11422,17 @@ inline ElabResult induct(ProofState& ps, uint32_t hyp_level, std::optional<uint3
         bm[n + arity] = agent_ctor_app;
         NodeId branch_expected = replace_fvars(G, bm);
         std::vector<NodeId> reverted_dom_types;
-        if (!reverted_js.empty()) {
+        if (n_layers > 0) {
             const uint32_t base_level = branch_ec.size();
             NodeId remaining = branch_expected;
-            for (std::size_t ri = 0; ri < reverted_js.size(); ++ri) {
+            for (std::size_t ri = 0; ri < n_layers; ++ri) {
                 if (remaining.tag != NodeType::PI) return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, g.target, std::nullopt, "induct: internal error -- expected a Pi layer for a reverted hypothesis but found none"});
                 Pi p = ctx().pis[remaining.index];
                 reverted_dom_types.push_back(p.dom_id);
                 remaining = instantiate1(p.cod_id, mk_fvar(base_level + static_cast<uint32_t>(ri)));
             }
             branch_expected = remaining;
-            for (std::size_t ri = 0; ri < reverted_js.size(); ++ri) { branch_ec = branch_ec.extend(reverted_dom_types[ri]); branch_hyps.push_back(Hypothesis{g.hyps[reverted_js[ri]].name, reverted_dom_types[ri]}); }
+            for (std::size_t ri = 0; ri < n_layers; ++ri) { branch_ec = branch_ec.extend(reverted_dom_types[ri]); branch_hyps.push_back(Hypothesis{ri < reverted_js.size() ? g.hyps[reverted_js[ri]].name : std::string(), reverted_dom_types[ri]}); }
         }
         uint32_t subgoal_meta = ctx().meta_ctx.fresh(close_pi_over_context(branch_expected, branch_ec), branch_ec.size());
         // ---- the runtime branch (a lambda over the fields and the reverted hypotheses; no IH binders, the IH is the recursive call)
@@ -11379,18 +11445,22 @@ inline ElabResult induct(ProofState& ps, uint32_t hyp_level, std::optional<uint3
         NodeId applied = mk_meta(subgoal_meta);
         for (uint32_t i = 0; i < n; ++i) {
             NodeId supplied = mk_fvar(i);
-            if (i == hyp_level) supplied = true_ctor_app;
+            if (i == hyp_level) supplied = use_eq ? mk_fvar(i) : true_ctor_app;
             else {
                 bool replaced = false;
                 for (uint32_t j = 0; j < arity && !replaced; ++j) {
-                    if (!is_param[j] && concrete_indices[j].tag == NodeType::VAR) { Var v = ctx().vars[concrete_indices[j].index]; if (!v.bound && v.n == i) { supplied = forced_body_result_indices[j]; replaced = true; } }
+                    if (!is_param[j] && !(use_eq && bad[j]) && concrete_indices[j].tag == NodeType::VAR) { Var v = ctx().vars[concrete_indices[j].index]; if (!v.bound && v.n == i) { supplied = forced_body_result_indices[j]; replaced = true; } }
                 }
                 if (!replaced) for (std::size_t ri = 0; ri < reverted_js.size(); ++ri) if (reverted_js[ri] == i) { supplied = mk_fvar(body_base + ctor_arity + static_cast<uint32_t>(ri)); break; }
             }
             applied = mk_app(applied, supplied);
         }
+        std::vector<NodeId> agent_ctor_args = detail::decompose_app_spine(agent_ctor_app).args, true_ctor_args = detail::decompose_app_spine(true_ctor_app).args;
         for (uint32_t fi = 0; fi < ctor_arity; ++fi) {
-            applied = mk_app(applied, mk_fvar(body_base + fi));
+            NodeId field_arg = mk_fvar(body_base + fi);
+            // a field the agent left UNFORCED (its slot is generalised through an equation) but that the kernel substitutes against the Fix's generic index: pass the substituted value so the types agree
+            if (use_eq && fi < agent_ctor_args.size() && fi < true_ctor_args.size() && agent_ctor_args[fi] == mk_fvar(actual[fi])) field_arg = true_ctor_args[fi];
+            applied = mk_app(applied, field_arg);
             if (fi < rec_mask.size() && rec_mask[fi]) {
                 NodeId ih_call = mk_fvar(self_level);
                 detail::AppSpine sp = detail::decompose_app_spine(arg_types_body[fi]);
@@ -11398,14 +11468,14 @@ inline ElabResult induct(ProofState& ps, uint32_t hyp_level, std::optional<uint3
                 applied = mk_app(applied, mk_app(ih_call, mk_fvar(body_base + fi)));
             }
         }
-        for (uint32_t ri = 0; ri < reverted_js.size(); ++ri) applied = mk_app(applied, mk_fvar(body_base + ctor_arity + ri));
+        for (uint32_t ri = 0; ri < n_layers; ++ri) applied = mk_app(applied, mk_fvar(body_base + ctor_arity + ri));
         std::vector<NodeId> bdoms = arg_types_body;
-        if (!reverted_js.empty()) {
+        if (n_layers > 0) {
             std::unordered_map<uint32_t, NodeId> rm;
             for (uint32_t j = 0; j < arity; ++j) if (!is_param[j]) rm[n + j] = forced_body_result_indices[j];
             rm[n + arity] = true_ctor_app;
             NodeId remaining_body = replace_fvars(G, rm);
-            for (std::size_t ri = 0; ri < reverted_js.size(); ++ri) {
+            for (std::size_t ri = 0; ri < n_layers; ++ri) {
                 Pi p = ctx().pis[remaining_body.index];
                 bdoms.push_back(p.dom_id);
                 remaining_body = instantiate1(p.cod_id, mk_fvar(body_base + ctor_arity + static_cast<uint32_t>(ri)));
@@ -11423,9 +11493,19 @@ inline ElabResult induct(ProofState& ps, uint32_t hyp_level, std::optional<uint3
         return std::unexpected(TypeError{TypeErrorKind::Other, g.target, std::nullopt,
             "induct: the assembled recursive proof failed the local structural recursion check -- some recursive call does not recurse on a structurally smaller instance of the hypothesis's own type"});
     NodeId proof = mk_fix(fn_type, R, fix_body);
+    if (use_eq) {   // F23: keep the Fix opaque to extraction (see get_or_build_barrier)
+        auto fn_sort = infer(fn_type, g.ec, ps.es);
+        if (!fn_sort) return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, g.target, std::nullopt, "induct: the generalised induction statement failed to type-check"});
+        NodeId sty = *fn_sort; if (sty.tag != NodeType::TYPE) sty = quote(eval(sty, g.ec.values), n);
+        if (sty.tag == NodeType::TYPE) proof = mk_app(mk_app(mk_const(get_or_build_barrier(ctx().types[sty.index].universe_level)), fn_type), proof);
+    }
     for (uint32_t i = 0; i < arity; ++i) if (!is_param[i]) proof = mk_app(proof, concrete_indices[i]);
     proof = mk_app(proof, mk_fvar(hyp_level));
     for (uint32_t rj : reverted_js) proof = mk_app(proof, mk_fvar(rj));
+    if (use_eq) for (uint32_t i = 0; i < arity; ++i) if (bad[i]) {      // the equations are discharged by refl at the actual indices
+        std::unordered_map<uint32_t, NodeId> actual_idx; for (uint32_t q = 0; q < arity; ++q) if (!is_param[q]) actual_idx[n + q] = concrete_indices[q];
+        proof = mk_app(proof, mk_app(mk_app(mk_const(*refl_gid), replace_fvars(mdoms[i], actual_idx)), concrete_indices[i]));
+    }
     ctx().meta_ctx.solve(g.meta_id, close_over_context(proof, g.ec));
     ps.goals.erase(ps.goals.begin() + *idx_opt);
     ps.goals.insert(ps.goals.begin() + *idx_opt, new_goals.begin(), new_goals.end());
@@ -11528,7 +11608,10 @@ struct DiscriminationTree {
 };
 inline DiscriminationTree index_library() {
     DiscriminationTree tree;
-    for (uint32_t gid = 0; gid < ctx().globals.defs.size(); ++gid) tree.insert(mk_const(gid), ctx().globals.defs[gid].type);
+    for (uint32_t gid = 0; gid < ctx().globals.defs.size(); ++gid) {
+        if (ctx().globals.defs[gid].name.rfind("__barrier_", 0) == 0) continue;      // an identity at every type: it would be a candidate for every goal
+        tree.insert(mk_const(gid), ctx().globals.defs[gid].type);
+    }
     return tree;
 }
 inline std::vector<NodeId> apply_candidates(const ProofState& ps, const DiscriminationTree& library, std::optional<uint32_t> target_meta_id = std::nullopt) {

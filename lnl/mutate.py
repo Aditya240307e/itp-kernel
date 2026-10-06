@@ -2,6 +2,9 @@
 import os, re, shutil, subprocess, sys, time
 SRC = '/home/claude/itp_py/lnl'
 MUTANTS = {
+ 'M63 induct with equations does not wrap its Fix in the extraction barrier (F23)': ("        if (sty.tag == NodeType::TYPE) proof = mk_app(mk_app(mk_const(get_or_build_barrier(ctx().types[sty.index].universe_level)), fn_type), proof);\n", ""),
+ 'M64 the library index offers the barrier as a candidate for every goal': ("        if (ctx().globals.defs[gid].name.rfind(\"__barrier_\", 0) == 0) continue;      // an identity at every type: it would be a candidate for every goal\n", ""),
+ 'M62 cases: refutation is not exploited when hypotheses are reverted, in parameter mode (F22)': ("    if (!reverted_js.empty() && !ctx().param_mode) exploit_ci.reset();\n", "    if (!reverted_js.empty()) exploit_ci.reset();\n"),
  'M61 induct accepts a concrete index in parameter mode (F12 guard removed)': ("            if (!distinct_var)\n                return std::unexpected(TypeError{TypeErrorKind::Other, g.hyps[hyp_level].type, std::nullopt, \"induct: index slot \" + std::to_string(i) +", "            if (false)\n                return std::unexpected(TypeError{TypeErrorKind::Other, g.hyps[hyp_level].type, std::nullopt, \"induct: index slot \" + std::to_string(i) +"),
  'M60 a lambda checked against a Pi need not have a well-typed binder annotation (F21)': ("        if (dom_j != expected_dom) { auto sdom = sort_level_of(dom_j, cur_ec, es, \"Lambda domain must be a type\"); if (!sdom) return std::unexpected(sdom.error()); }\n", ""),
  'M59 UNSOUND unifier: different constructors unify (the canary must notice)': ("return mismatch(\"different constructors\");", "return ElabResult{};"),
@@ -63,7 +66,7 @@ MUTANTS = {
  'M7 strict positivity always true': ("                if (!is_strictly_positive(type_global_id, arg_ty))\n                    throw std::logic_error(\"itp: constructor '\" + ctor.name + \"' fails strict positivity", "                if (false)\n                    throw std::logic_error(\"itp: constructor '\" + ctor.name + \"' fails strict positivity"),
  'M8 Match branch count not checked': ("    if (ctor_gids.size() != branches.size())\n        return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, motive, std::nullopt,\n            \"Match branch count", "    if (false)\n        return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, motive, std::nullopt,\n            \"Match branch count"),
 }
-GATE_CMDS = (['s2_tests.py', '1500'], ['harness.py', '1500', '3'], ['s3_tests.py', '600'], ['s4_tests.py', '800'], ['oracle_gate.py'], ['s5_tests.py', '1200', '3'], ['s5_probe_tests.py', '500', '7'], ['s6_logic_tests.py'], ['s6_f6_tests.py'], ['s7_param_tests.py', '150', '600'], ['s8_indep_tests.py', '100'], ['s9_strong_tests.py'], ['s10_noconf_tests.py'])
+GATE_CMDS = (['s2_tests.py', '1500'], ['harness.py', '1500', '3'], ['s3_tests.py', '600'], ['s4_tests.py', '800'], ['oracle_gate.py'], ['s5_tests.py', '1200', '3'], ['s5_probe_tests.py', '500', '7'], ['s6_logic_tests.py'], ['s6_f6_tests.py'], ['s7_param_tests.py', '150', '600'], ['s8_indep_tests.py', '100'], ['s9_strong_tests.py'], ['s10_noconf_tests.py'], ['s11_eqgen_tests.py'])
 
 def run(names):
     results = []
@@ -93,8 +96,8 @@ def run(names):
             except subprocess.TimeoutExpired:
                 outs.append((99, 'Traceback: HANG (timeout) -- the mutant does not terminate'))
         text = '\n'.join(o[1] for o in outs)
-        caught = any(o[0] != 0 for o in outs) or bool(re.search(r"\bBAD\b|PROBLEM|FAILED|disagreements [1-9]|Traceback|ACCEPTED|S2 GATE: FAIL|S3 GATE: FAIL|S4 GATE: FAIL|ORACLE GATE: FAIL|S5 GATE: FAIL|S5 PROBE GATE: FAIL|S6 LOGIC GATE: FAIL|S6 F6 GATE: FAIL|S7 PARAM GATE: FAIL|S8 INDEP GATE: FAIL|S9 STRONG GATE: FAIL|S10 NOCONF GATE: FAIL", text))
-        first = next((l.strip()[:110] for l in text.split('\n') if re.search(r"\bBAD\b|PROBLEM|FAILED|disagreements [1-9]|Traceback|ACCEPTED|S2 GATE: FAIL|S3 GATE: FAIL|S4 GATE: FAIL|ORACLE GATE: FAIL|S5 GATE: FAIL|S5 PROBE GATE: FAIL|S6 LOGIC GATE: FAIL|S6 F6 GATE: FAIL|S7 PARAM GATE: FAIL|S8 INDEP GATE: FAIL|S9 STRONG GATE: FAIL|S10 NOCONF GATE: FAIL", l)), '')
+        caught = any(o[0] != 0 for o in outs) or bool(re.search(r"\bBAD\b|PROBLEM|FAILED|disagreements [1-9]|Traceback|ACCEPTED|S2 GATE: FAIL|S3 GATE: FAIL|S4 GATE: FAIL|ORACLE GATE: FAIL|S5 GATE: FAIL|S5 PROBE GATE: FAIL|S6 LOGIC GATE: FAIL|S6 F6 GATE: FAIL|S7 PARAM GATE: FAIL|S8 INDEP GATE: FAIL|S9 STRONG GATE: FAIL|S10 NOCONF GATE: FAIL|S11 EQGEN GATE: FAIL", text))
+        first = next((l.strip()[:110] for l in text.split('\n') if re.search(r"\bBAD\b|PROBLEM|FAILED|disagreements [1-9]|Traceback|ACCEPTED|S2 GATE: FAIL|S3 GATE: FAIL|S4 GATE: FAIL|ORACLE GATE: FAIL|S5 GATE: FAIL|S5 PROBE GATE: FAIL|S6 LOGIC GATE: FAIL|S6 F6 GATE: FAIL|S7 PARAM GATE: FAIL|S8 INDEP GATE: FAIL|S9 STRONG GATE: FAIL|S10 NOCONF GATE: FAIL|S11 EQGEN GATE: FAIL", l)), '')
         results.append((nm, 'CAUGHT' if caught else 'SURVIVED  <-- test gap', first)); print("  %-62s %s  (%.0fs)%s" % (nm, results[-1][1], time.time() - t0, ('  | ' + first) if os.environ.get('MUT_VERBOSE') else ''), flush=True)
     return results
 if __name__ == '__main__':
