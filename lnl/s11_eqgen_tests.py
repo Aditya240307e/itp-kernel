@@ -89,6 +89,31 @@ def legacy_partial(verbose=False):
         out[name] = (knew.check_open(ps.extract(), st, [])[0], ps.num_goals() == 2)
     return out
 
+def probe_first_creation(params):
+    """a probe that is the FIRST thing to need the barrier creates a global; rewind must drop it, a repeated probe must be identical, and the real proof must still go through afterwards"""
+    from s12_probe_eq_tests import canon
+    kref, knew, g = t6.build_logic()
+    if params: knew.set_option('parameters', True)
+    C = lambda n: ('const', g[n]); NAT, ZERO, LE, EQ = C('Nat'), C('Zero'), C('Le'), C('Eq')
+    eq = lambda A, a, b: app(EQ, A, a, b); le = lambda a, b: app(LE, a, b)
+    stmt_t = ('pi', NAT, ('pi', le(V(0), ZERO), eq(NAT, V(0), ZERO)))
+    stmt = build_new(knew, l2h(stmt_t, 0)); ps = knew.start_proof(stmt); ps.intro('x'); ps.intro('x')
+    n0 = len(knew.list_globals()); res = {}; states = []
+    for rep in range(2):
+        cp = knew.checkpoint(); fk = knew.fork_single_goal(ps, ps.goal_meta_id(0))
+        fk.induct(1, eq_gid=g['Eq'], refl_gid=g['refl']); grown = len(knew.list_globals()) - n0; states.append(canon(knew, fk))
+        try: knew.rewind(cp); ok = True
+        except Exception as e: ok = False
+        res['probe %d: created a global (%d), rewind accepted it and restored the count' % (rep + 1, grown)] = ok and grown == 1 and len(knew.list_globals()) == n0
+    res['the repeated probe is identical'] = states[0] == states[1]
+    if params:
+        ps2, log = run_ops(knew, g, stmt_t, [('intro',), ('intro',), ('induct_eq', 1), ('apply', V(3)), ('cases', 6)])
+        res['the real proof still completes and verifies after the probes'] = ps2.num_goals() == 0 and ps2.is_complete() and t8.kernel_verdict(knew, parse_raw(knew.dump_raw(ps2.extract()), True), l2h(stmt_t, 0))
+    else:       # legacy cannot discriminate S m = 0 (F2b), so the proof cannot complete: the real induct must give a well-typed partial proof with two branch goals
+        ps2, log = run_ops(knew, g, stmt_t, [('intro',), ('intro',), ('induct_eq', 1)])
+        res['the real induct after the probes gives a well-typed partial proof and two goals'] = ps2.num_goals() == 2 and bool(knew.check_open(ps2.extract(), build_new(knew, l2h(stmt_t, 0)), [])[0])
+    return res
+
 if __name__ == '__main__':
     FAIL = []
     knew, out, proofs = run(True, verbose=True)
@@ -99,6 +124,10 @@ if __name__ == '__main__':
     _, st = t8.differential('eqgen', knew, proofs, True, 300, 5)
     print("   mutated proofs: %d mutants, verdicts agree %d, kernel accepts / checker rejects %d, checker accepts / kernel rejects %d" % (st['mutants'], st['agree'], len(st['kernel_accepts_indep_rejects']), len(st['indep_accepts_kernel_rejects'])))
     if st['kernel_accepts_indep_rejects'] or st['indep_accepts_kernel_rejects'] or st['mutants'] < 100: FAIL.append('differential on the equation proofs')
+    for params_ in (True, False):
+        for k_, v_ in probe_first_creation(params_).items():
+            print("   probe protocol (%s): %-84s %s" % ("parameters ON" if params_ else "legacy", k_, v_))
+            if not v_: FAIL.append('probe protocol (%s): %s' % ('params' if params_ else 'legacy', k_))
     # the barrier exists now: the library index must not offer it as an apply candidate (its conclusion is a bare variable, so it would match every goal)
     names = {gid: name for gid, name, _, _ in knew.list_globals()}
     barrier_gids = {gid for gid, nm_ in names.items() if nm_.startswith('__barrier_')}

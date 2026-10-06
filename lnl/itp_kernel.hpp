@@ -1083,9 +1083,9 @@ struct ExecutionContext {
 
     // Derived globals are the ones the kernel itself synthesises on demand, deterministically and
     // idempotently, for refutation exploitation (get_or_build_same_ctor / _unit_type / _empty_type):
-    // `__same_ctor_<family>`, `__Unit` with its constructor `__tt`, and `__Empty`.
+    // `__same_ctor_<family>`, `__Unit` with its constructor `__tt`, `__Empty`, and the extraction barrier `__barrier_<level>` used by induct's equation path.
     static bool is_derived_global_name(const std::string& nm) {
-        return nm.rfind("__same_ctor_", 0) == 0 || nm == "__Unit" || nm == "__tt" || nm == "__Empty";
+        return nm.rfind("__same_ctor_", 0) == 0 || nm == "__Unit" || nm == "__tt" || nm == "__Empty" || nm.rfind("__barrier_", 0) == 0;   // __barrier_k: built by name on demand (get_or_build_barrier), so a probe may create and drop it
     }
 
     void rewind(const Checkpoint& cp) {
