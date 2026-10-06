@@ -11273,6 +11273,20 @@ inline ElabResult induct(ProofState& ps, uint32_t hyp_level, std::optional<uint3
     }
     MotiveParts mp = motive_binders(tgid, n, concrete_indices);        // parameters (option) are FIXED: not generalised, not abstracted by the motive or the Fix
     const std::vector<bool>& is_param = mp.params; const uint32_t R = mp.num_indices;
+    if (ctx().param_mode) {
+        // F12: the Fix is generic over its index slots, so the branch goals are only consistent with it when every index slot of the hypothesis is a DISTINCT VARIABLE.
+        // A concrete (or repeated) index would need index generalisation with equations, which is not implemented: refuse instead of producing a partial proof that cannot
+        // be completed validly. cases handles such hypotheses through its motive.
+        std::unordered_set<uint32_t> seen_idx_vars;
+        for (uint32_t i = 0; i < arity; ++i) {
+            if (is_param[i]) continue;
+            bool distinct_var = false;
+            if (concrete_indices[i].tag == NodeType::VAR) { Var v = ctx().vars[concrete_indices[i].index]; distinct_var = !v.bound && seen_idx_vars.insert(v.n).second; }
+            if (!distinct_var)
+                return std::unexpected(TypeError{TypeErrorKind::Other, g.hyps[hyp_level].type, std::nullopt, "induct: index slot " + std::to_string(i) +
+                    " of the hypothesis is not a distinct variable (it is a concrete term or repeats another index); induction on it needs index generalisation, which is not implemented -- use cases, or restate the goal with a variable index and an equation"});
+        }
+    }
     std::vector<std::pair<NodeId, NodeId>> subs;
     for (uint32_t i = 0; i < arity; ++i) if (!is_param[i]) subs.push_back({concrete_indices[i], mk_fvar(n + i)});
     subs.push_back({mk_fvar(hyp_level), mk_fvar(n + arity)});

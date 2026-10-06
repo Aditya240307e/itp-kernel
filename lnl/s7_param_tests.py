@@ -118,6 +118,15 @@ if __name__ == '__main__':
             extra = ' | le_n branch goal: %s' % (tgt,); ok = ok and tgt == ('app', ('app', ('app', ('const', g['Eq']), ('const', g['Nat'])), ('fvar', 0)), ('fvar', 0))
         print("   %-64s complete+verifies: %s%s%s" % (name, ok, extra, '' if all(l[1] for l in log) else ' | FAILED STEP %s' % [l for l in log if not l[1]][:1]))
         if not ok: FAIL.append(name)
+    # F12: a TRUE index slot with a concrete index. induct must refuse it; cases handles it through its motive (le_S is refuted: S m vs 0)
+    C = lambda n: ('const', g[n]); NATc, Zc = C('Nat'), C('Zero'); leC = lambda a, b: app(C('Le'), a, b)
+    f12 = chain([NATc, leC(V(0), Zc)], app(C('Eq'), NATc, V(0), Zc))                                    # forall n, n <= 0 -> n = 0
+    ps_i, log_i = run_new(knew, f12, [('intro',), ('intro',), ('induct', 1)])
+    refused = (not log_i[2][1]) and 'not a distinct variable' in log_i[2][2]
+    ps_c, log_c = run_new(knew, f12, [('intro',), ('intro',), ('cases', 1), ('apply', C('refl'))])
+    cases_ok = verifies(knew, ps_c, f12)
+    print("   F12 (concrete TRUE index, n <= 0 -> n = 0): induct refused with a clear message: %s | cases proves it (le_S refuted): %s" % (refused, cases_ok))
+    if not (refused and cases_ok): FAIL.append('F12 true-index handling')
     # injectivity is NOT provided by cases: the open goal documents the remaining F2b limitation
     inj = chain([('const', g['Nat']), ('const', g['Nat']), app(('const', g['Eq']), ('const', g['Nat']), app(('const', g['Succ']), V(0)), app(('const', g['Succ']), V(1)))], app(('const', g['Eq']), ('const', g['Nat']), V(0), V(1)))
     ps, log = run_new(knew, inj, [('intro',)] * 3 + [('cases', 2)])

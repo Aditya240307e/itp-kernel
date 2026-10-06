@@ -17,7 +17,7 @@ Legend: **fixed** = fixed and covered by a test that fails without it; **by cons
 | F9 | forced constructor application used dummy binders | fixed | kernel Match typing + both tactics; M22-M26 |
 | F10 | sequential marker substitution collides (reverted hypotheses) | by construction | 184+ events validated against the reference's ill-formed state |
 | F11 | field after a recursive field used the IH's level | by construction | custom family test; M17 |
-| F12 | induct on a concrete index | **partial** | fixed for PARAMETER slots (S7); OPEN for true index slots (needs equation generalisation) |
+| F12 | induct on a concrete index | **fixed for parameter slots; safe refusal for true index slots** | parameter slots: S7 (`induct` on `Le 0 x`). True index slots (`Le n 0`): in parameter mode `induct` now REFUSES with a precise message (no ill-typed partial proof can arise: the full-distribution oracle shows 0 failures, M61), and `cases` proves `n <= 0 -> n = 0`. OPEN as a feature: index generalisation with equations (design below) |
 | F13 | rewrite acts inside meta spines / accepts ill-typed motives | fixed | zonk + motive check; M27, M28 |
 | F14 | exploited sibling branch wrapped in duplicated lambdas | fixed | `exploit_le` verifies in the hybrid kernel only |
 | F15 | deferred constraint re-unified in the wrong context (abort under binders) | fixed | M31 |
@@ -30,3 +30,9 @@ Legend: **fixed** = fixed and covered by a test that fails without it; **by cons
 
 Other open items: M12 (`drain_pending` is effectively dead at the tactic level); motive-hole inference ignores parameters (untested path);
 the default of the `parameters` option is OFF (a decision for the fingerprint stage).
+
+## Design note: index generalisation with equations (the remaining F12 feature)
+For each generalised index slot i (concrete, non-variable or repeated) add a SYNTHETIC reverted layer `e_i : Eq T_i marker_i c_i` innermost in G, do not replace c_i by the marker in the goal, and apply the Fix to
+`(c_i ..., h, reverted..., refl T_i c_i)`. The agent must NOT force at generalised slots (the equation then reads `Eq T r_i c_i` in terms of the constructor's own fields), while the kernel forces against the Fix's generic
+parameter, so at runtime `?sub` must be passed the FORCED VALUE for every field that the substitution rule replaces (as forced_ctor_app already does for the scrutinee) or the premise types disagree. Needs the Eq and refl
+global ids as tactic arguments. Not started: the agent/runtime/kernel agreement on which variable an equation mentions is the delicate part.

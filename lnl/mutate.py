@@ -2,6 +2,7 @@
 import os, re, shutil, subprocess, sys, time
 SRC = '/home/claude/itp_py/lnl'
 MUTANTS = {
+ 'M61 induct accepts a concrete index in parameter mode (F12 guard removed)': ("            if (!distinct_var)\n                return std::unexpected(TypeError{TypeErrorKind::Other, g.hyps[hyp_level].type, std::nullopt, \"induct: index slot \" + std::to_string(i) +", "            if (false)\n                return std::unexpected(TypeError{TypeErrorKind::Other, g.hyps[hyp_level].type, std::nullopt, \"induct: index slot \" + std::to_string(i) +"),
  'M60 a lambda checked against a Pi need not have a well-typed binder annotation (F21)': ("        if (dom_j != expected_dom) { auto sdom = sort_level_of(dom_j, cur_ec, es, \"Lambda domain must be a type\"); if (!sdom) return std::unexpected(sdom.error()); }\n", ""),
  'M59 UNSOUND unifier: different constructors unify (the canary must notice)': ("return mismatch(\"different constructors\");", "return ElabResult{};"),
  'M49 parameter analysis ignores uniformity of recursive occurrences': ("            for (NodeId ft : inst.arg_types) if (!uniform_family_occurrences(ft, family_gid, arity, i, r)) { ok = false; break; }", "            for (NodeId ft : inst.arg_types) if (false && !uniform_family_occurrences(ft, family_gid, arity, i, r)) { ok = false; break; }"),

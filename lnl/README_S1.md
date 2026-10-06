@@ -334,3 +334,16 @@ family/index, a family's constructors) and shares only the term-tree format with
 The checker implements the same SPECIFICATION as the kernel (forcing, the parameter substitution rule): it validates the implementation, not the design. No eta and no cumulativity (as in both kernels); Let/Meta/Quot are
 rejected as unsupported; the guard is a conservative syntactic rule (a valid Fix it cannot recognise would show up as a disagreement); work is bounded by a fuel counter (exhaustion counts as rejection). Not done: the checker over the
 S2-style random typed terms. Mutant inventory: 59 defined (M1-M37, M39-M60), 58 caught; the survivor is M12.
+
+
+---
+# S9, S10, F12 policy (2026-10-06)
+* **S9 (F6 done):** `Below P n` (a recursive function returning a type: True / And (Below P k) (P k)), `below_all` by plain induction (the IH is `Below P x`, not a forall), `strong_induction`, and a client proof
+  (`forall n, n <= n`), all verified by the kernel AND the independent checker, in both modes.
+* **S10 (F2b injectivity):** `noconf.py` generates, per constructor and payload field of a non-indexed, non-parametric family, `Inj_c_q` (a type-valued Match) and `c_inj_q : c a = c b -> a_q = b_q` (transport along the
+  equation), declared through the kernel's CHECKED path and re-checked by the independent checker. `S a = S b -> a = b` (which `cases` cannot close) and both fields of a binary `node` are proved; a wrong use fails.
+  Not covered: indexed/parametric families, dependent fields (HEq), automatic use inside `cases`.
+* **F12 policy:** in parameter mode `induct` refuses a hypothesis whose index slot is not a distinct variable (clear message); `cases` handles those through its motive. With that, the parameter-mode oracle shows NO failure
+  of any kind over the full random distribution (12,000 scripts, 980 completed proofs all verified) and the gate runs it with zero tolerance. Mutant M61 removes the guard and is caught by it. Index generalisation with
+  equations is NOT implemented (design note in FINDINGS.md).
+* Inventory: 60 mutants defined (M1-M37, M39-M61), 59 caught; the survivor is M12. All gates (S2-S10, oracle, main differential) pass at full size.
