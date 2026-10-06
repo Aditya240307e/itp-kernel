@@ -7,11 +7,11 @@ Legend: **fixed** = fixed and covered by a test that fails without it; **by cons
 |---|---|---|---|
 | F1 | inductive admission (universe rule, large fields) | fixed (baseline b777dc8); ported | S2 admission corpus agrees with the reference |
 | F2a | extraction inlined constants | fixed (baseline) | probes; `extract_proof_term` uses NoDeltaScope |
-| F2b | no clash/injectivity machinery | **partial** | `0 != S n` via Eq and `Le (S n) 0 -> False` work in parameter mode (S7). OPEN: injectivity (`S a = S b -> a = b`), no-confusion |
+| F2b | no clash/injectivity machinery | **fixed for non-indexed, non-parametric families** | discrimination: `0 != S n` via Eq and `Le (S n) 0 -> False` close in parameter mode (S7). Injectivity: `noconf.py` generates `Inj_c_q` and `c_inj_q` lemmas through the checked path (S10: `S a = S b -> a = b`, both fields of `node`). OPEN: indexed/parametric families, dependent fields (HEq), automatic use inside `cases` |
 | F3 | nested induction | fixed (baseline); by construction | S3/S4 lockstep, oracle, soak |
 | F4 | induct after cases | fixed (baseline); by construction | S4 |
 | F5 | Ex over a lambda cannot be eliminated | fixed in parameter mode | S7 `ex_lambda`; needs `parameters` ON (the kernel otherwise generalises Ex's parameters) |
-| F6 | strong induction needs a design | **partial** | Pi-headed induct/cases and `generalizing` done (S6 F6). OPEN: the bounded-predicate (`Below`) probe |
+| F6 | strong induction needs a design | fixed | Pi-headed induct/cases + `generalizing` (S6 F6); the bounded-predicate probe (S9): `Below`, `below_all`, `strong_induction`, and a client proof, verified by the kernel and the independent checker in both modes |
 | F7 | no logical vocabulary | fixed | True, False, And, Or, Ex, Not, Iff declared; 7 proofs verified; 6 wrong proofs rejected (S6) |
 | F8 | the checker is not independent; scaling unmeasured | **partial** | independent checker DONE (indep_checker.py, S8): written from the spec with named variables; exact agreement with the kernel on 11,972 mutated proofs, 7 guard cases, all library definitions. OPEN: scaling benchmarks (deferred to the large machine) |
 | F9 | forced constructor application used dummy binders | fixed | kernel Match typing + both tactics; M22-M26 |
