@@ -11313,6 +11313,116 @@ inline ElabResult induct(ProofState& ps, uint32_t hyp_level, std::optional<uint3
     return {};
 }
 
+
+// ===========================================================================
+// S5: the library index (candidate lemmas for `apply`).
+// The reference keyed a variable-headed conclusion on the variable's absolute LEVEL. A bound variable of a lemma type had level
+// (its binder's position); a context variable has its own level. With de Bruijn indices the same key is recovered as
+//     level = base + depth - 1 - index      (bound variable `depth` binders below a context of `base` variables)
+// where base = 0 for a lemma type and the context size (or, for a hypothesis, its own position) otherwise. Context variables key on their level.
+// ===========================================================================
+namespace detail {
+inline uint64_t pack_head_key(HeadKind kind, uint32_t id) {
+    return (static_cast<uint64_t>(kind) << 32) | static_cast<uint64_t>(id);
+}
+struct PeeledConclusion { NodeId head; std::vector<NodeId> args; uint32_t depth = 0; };   // args in REVERSE application order, as in the reference
+inline PeeledConclusion peel_conclusion(NodeId ty) {
+    PeeledConclusion pc; NodeId cur = ty;
+    while (true) {
+        auto next = inspect(cur, [](Pi p) -> std::optional<NodeId> { return p.cod_id; }, [](auto) -> std::optional<NodeId> { return std::nullopt; });
+        if (!next) break;
+        cur = *next; ++pc.depth;
+    }
+    pc.head = cur;
+    bool progressed = true;
+    while (progressed) {
+        progressed = false;
+        inspect(pc.head, [&](App a) { pc.head = a.fn_id; pc.args.push_back(a.arg_id); progressed = true; }, [](auto) {});
+    }
+    return pc;
+}
+inline std::optional<uint64_t> head_key_at(NodeId h, uint32_t base, uint32_t depth) {
+    return inspect(h,
+        [](Const c) -> std::optional<uint64_t> { return pack_head_key(HeadKind::GlobalConst, c.global_id); },
+        [&](Var v) -> std::optional<uint64_t> {
+            if (!v.bound) return pack_head_key(HeadKind::LocalVar, v.n);
+            if (v.n >= depth) return std::nullopt;                       // loose bound variable: not a well-formed head here
+            return pack_head_key(HeadKind::LocalVar, base + depth - 1 - v.n);
+        },
+        [](auto) -> std::optional<uint64_t> { return std::nullopt; });
+}
+inline std::optional<uint64_t> conclusion_head_key(NodeId ty, uint32_t base = 0) {
+    PeeledConclusion pc = peel_conclusion(ty);
+    return head_key_at(pc.head, base, pc.depth);
+}
+inline std::optional<uint64_t> library_index_key(NodeId ty, uint32_t base = 0) {
+    PeeledConclusion pc = peel_conclusion(ty);
+    auto outer = head_key_at(pc.head, base, pc.depth);
+    if (!outer) return std::nullopt;
+    uint64_t combined = *outer;
+    for (NodeId a : pc.args) {
+        NodeId h = a; bool p = true;
+        while (p) { p = false; inspect(h, [&](App ap) { h = ap.fn_id; p = true; }, [](auto) {}); }
+        auto k = head_key_at(h, base, pc.depth);
+        uint64_t part = k.value_or(0xdeadbeefULL);   // an un-headed argument (Meta, Type, ...) still contributes a fixed, distinct part
+        combined ^= part + 0x9e3779b97f4a7c15ULL + (combined << 6) + (combined >> 2);   // boost-style hash-combine
+    }
+    return combined;
+}
+inline bool library_index_key_is_generic(NodeId ty) {
+    PeeledConclusion pc = peel_conclusion(ty);
+    auto is_var_headed = [](NodeId t) -> bool {
+        NodeId h = t; bool p = true;
+        while (p) { p = false; inspect(h, [&](App a) { h = a.fn_id; p = true; }, [](auto) {}); }
+        bool result = false;
+        inspect(h, [&](Var) { result = true; }, [](auto) {});
+        return result;
+    };
+    if (is_var_headed(pc.head)) return true;
+    for (NodeId a : pc.args) if (is_var_headed(a)) return true;
+    return false;
+}
+} // namespace detail
+
+struct DiscriminationTree {
+    std::unordered_map<uint64_t, std::vector<NodeId>> by_head;
+    std::unordered_map<uint64_t, std::vector<NodeId>> generic_by_outer_head;
+    void insert(NodeId candidate_term, NodeId candidate_type) {
+        if (detail::library_index_key_is_generic(candidate_type)) {
+            if (auto key = detail::conclusion_head_key(candidate_type)) generic_by_outer_head[*key].push_back(candidate_term);
+            return;
+        }
+        if (auto key = detail::library_index_key(candidate_type)) by_head[*key].push_back(candidate_term);
+    }
+    std::vector<NodeId> candidates_for(NodeId goal_type, uint32_t base = 0) const {
+        std::vector<NodeId> result;
+        if (auto key = detail::library_index_key(goal_type, base)) {
+            auto it = by_head.find(*key);
+            if (it != by_head.end()) result.insert(result.end(), it->second.begin(), it->second.end());
+        }
+        if (auto key = detail::conclusion_head_key(goal_type, base)) {
+            auto it = generic_by_outer_head.find(*key);
+            if (it != generic_by_outer_head.end()) result.insert(result.end(), it->second.begin(), it->second.end());
+        }
+        return result;
+    }
+};
+inline DiscriminationTree index_library() {
+    DiscriminationTree tree;
+    for (uint32_t gid = 0; gid < ctx().globals.defs.size(); ++gid) tree.insert(mk_const(gid), ctx().globals.defs[gid].type);
+    return tree;
+}
+inline std::vector<NodeId> apply_candidates(const ProofState& ps, const DiscriminationTree& library, std::optional<uint32_t> target_meta_id = std::nullopt) {
+    auto idx_opt = find_goal_index(ps, target_meta_id);
+    if (!idx_opt) return {};
+    const Goal& g = ps.goals[*idx_opt];
+    std::vector<NodeId> result = library.candidates_for(g.target, g.ec.size());
+    auto goal_key = detail::conclusion_head_key(g.target, g.ec.size());
+    for (uint32_t lvl = 0; lvl < g.hyps.size(); ++lvl)
+        if (goal_key && detail::conclusion_head_key(g.hyps[lvl].type, lvl) == goal_key) result.push_back(mk_fvar(lvl));
+    return result;
+}
+
 } // namespace itp
 
 // -----------------------------------------------------------------------

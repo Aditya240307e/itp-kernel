@@ -2,6 +2,11 @@
 import os, re, shutil, subprocess, sys, time
 SRC = '/home/claude/itp_py/lnl'
 MUTANTS = {
+ 'M32 index keys: a bound variable head ignores the context size': ("return pack_head_key(HeadKind::LocalVar, base + depth - 1 - v.n);", "return pack_head_key(HeadKind::LocalVar, depth - 1 - v.n);"),
+ 'M33 index: a hypothesis keyed as if it were the first one': ("detail::conclusion_head_key(g.hyps[lvl].type, lvl) == goal_key", "detail::conclusion_head_key(g.hyps[lvl].type, 0) == goal_key"),
+ 'M34 index: a lemma whose ARGUMENTS are variable-headed is not generic': ("    for (NodeId a : pc.args) if (is_var_headed(a)) return true;\n    return false;", "    return false;"),
+ 'M35 index: generic lemmas never offered': ("        if (auto key = detail::conclusion_head_key(goal_type, base)) {\n            auto it = generic_by_outer_head.find(*key);", "        if (auto key = detail::conclusion_head_key(goal_type, base); false) {\n            auto it = generic_by_outer_head.find(*key);"),
+ 'M36 index: hypothesis candidate offered at the wrong level': ("result.push_back(mk_fvar(lvl));\n    return result;", "result.push_back(mk_fvar(lvl + 1));\n    return result;"),
  'M31 drain_pending re-unifies a deferred constraint in the outer context (the abort)': ("ElabCtx local = pc.ctx_at_deferral ? *pc.ctx_at_deferral : ec;", "ElabCtx local = ec;"),
  'M22 cases: scrutinee applied to the field binders (F9 regression)': ("NodeId ctor_app = forced_ctor_app(ctor_gid, n, ctor_arity, inst, forcing);", "NodeId ctor_app = mk_const(ctor_gid); for (uint32_t ai = 0; ai < ctor_arity; ++ai) ctor_app = mk_app(ctor_app, mk_fvar(n + ai));"),
  'M23 induct (goal side): scrutinee applied to the field binders': ("NodeId agent_ctor_app = forced_ctor_app(ctor_gid, n, ctor_arity, inst_agent, forcing_agent, &actual);", "NodeId agent_ctor_app = mk_const(ctor_gid); for (uint32_t fi = 0; fi < ctor_arity; ++fi) agent_ctor_app = mk_app(agent_ctor_app, mk_fvar(actual[fi]));"),
@@ -34,7 +39,7 @@ MUTANTS = {
  'M7 strict positivity always true': ("                if (!is_strictly_positive(type_global_id, arg_ty))\n                    throw std::logic_error(\"itp: constructor '\" + ctor.name + \"' fails strict positivity", "                if (false)\n                    throw std::logic_error(\"itp: constructor '\" + ctor.name + \"' fails strict positivity"),
  'M8 Match branch count not checked': ("    if (ctor_gids.size() != branches.size())\n        return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, motive, std::nullopt,\n            \"Match branch count", "    if (false)\n        return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, motive, std::nullopt,\n            \"Match branch count"),
 }
-GATE_CMDS = (['s2_tests.py', '1500'], ['harness.py', '1500', '3'], ['s3_tests.py', '600'], ['s4_tests.py', '800'], ['oracle_gate.py'])
+GATE_CMDS = (['s2_tests.py', '1500'], ['harness.py', '1500', '3'], ['s3_tests.py', '600'], ['s4_tests.py', '800'], ['oracle_gate.py'], ['s5_tests.py', '1200', '3'])
 
 def run(names):
     results = []
@@ -63,8 +68,8 @@ def run(names):
             except subprocess.TimeoutExpired:
                 outs.append((99, 'Traceback: HANG (timeout) -- the mutant does not terminate'))
         text = '\n'.join(o[1] for o in outs)
-        caught = any(o[0] != 0 for o in outs) or bool(re.search(r"\bBAD\b|PROBLEM|FAILED|disagreements [1-9]|Traceback|ACCEPTED|S2 GATE: FAIL|S3 GATE: FAIL|S4 GATE: FAIL|ORACLE GATE: FAIL", text))
-        first = next((l.strip()[:110] for l in text.split('\n') if re.search(r"\bBAD\b|PROBLEM|FAILED|disagreements [1-9]|Traceback|ACCEPTED|S2 GATE: FAIL|S3 GATE: FAIL|S4 GATE: FAIL|ORACLE GATE: FAIL", l)), '')
+        caught = any(o[0] != 0 for o in outs) or bool(re.search(r"\bBAD\b|PROBLEM|FAILED|disagreements [1-9]|Traceback|ACCEPTED|S2 GATE: FAIL|S3 GATE: FAIL|S4 GATE: FAIL|ORACLE GATE: FAIL|S5 GATE: FAIL", text))
+        first = next((l.strip()[:110] for l in text.split('\n') if re.search(r"\bBAD\b|PROBLEM|FAILED|disagreements [1-9]|Traceback|ACCEPTED|S2 GATE: FAIL|S3 GATE: FAIL|S4 GATE: FAIL|ORACLE GATE: FAIL|S5 GATE: FAIL", l)), '')
         results.append((nm, 'CAUGHT' if caught else 'SURVIVED  <-- test gap', first)); print("  %-62s %s  (%.0fs)" % (nm, results[-1][1], time.time() - t0), flush=True)
     return results
 if __name__ == '__main__':

@@ -204,3 +204,19 @@ and (b) every goal's hypotheses and target are well-formed types. It runs on the
   ~1,300 steps per 6,000 scripts to F12 instead of ~180. The variable-index runs are the strict evidence and are unaffected.
 * Full-size gates on the final build: S2 (4,000), main differential (40,000 terms), S3 (2,000 scripts, 19,629 steps, 90 completed proofs verified identically), S4 (3,000 scripts,
   26,847 steps, 0 divergences), oracle gate: all PASS.
+
+
+---
+# S5 part 1: the library index (status 2026-10-05) -- gate PASS
+Ported `index_library`, `apply_candidates`, the discrimination tree and its keys (Python: `Kernel.index_library()`, `Kernel.apply_candidates(ps, library, target_meta_id=None)`, class `Library`).
+The only non-mechanical point: the reference keyed a variable-headed conclusion on the variable's absolute LEVEL. A bound variable of a lemma type had level = its binder's position, so with
+de Bruijn indices the same key is `base + depth - 1 - index` (bound variable `depth` binders below `base` context variables: base 0 for a lemma type, the context size for a goal, the
+hypothesis's own position for a hypothesis); context variables key on their own level. Note the reference's key coincidences between bound and context variables are preserved on purpose
+(e.g. a lemma whose conclusion head is its second binder is offered for goals headed by context variable 1); they are an accident of absolute numbering, not a design, and are now
+reproduced rather than "fixed", so that the search sees the same candidates.
+
+Evidence: `apply_candidates` compared for EVERY goal after EVERY step of random lockstep scripts and at the initial state, entries and order. 5 seeds, 1,500-3,000 scripts each, ~145,000 goal
+states, 0 mismatches. Coverage (per 3,000 scripts): ~19,000 non-empty lists, ~6,700 with hypothesis candidates, ~8,900 Pi-targets, ~280 distinct lists, ~1,300 bound-variable-headed and
+~3,900 context-variable-headed targets (new statements with predicate variables: `pred_transport`, `pred_hyp`, `pred_two`, `pred_pi_goal`, `pi_bound_head`, `pi_bound_pair`, `pred_pi_hyp`).
+Mutants M32-M36 (bound-head base dropped, per-hypothesis base dropped, argument-headed lemmas not generic, generic lemmas never offered, hypothesis offered at the wrong level): see below.
+Not yet ported (S5 part 2): checkpoint/rewind/compact (the search's probing), and the search-level fingerprint itself.

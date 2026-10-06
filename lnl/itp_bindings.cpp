@@ -47,6 +47,10 @@ struct KernelWrapper {
     std::unique_ptr<itp::ExecutionContext> exec = std::make_unique<itp::ExecutionContext>();
     itp::ContextGuard activate() { return itp::ContextGuard(*exec); }
 
+    itp::DiscriminationTree index_library() { auto g = activate(); return itp::index_library(); }
+    std::vector<itp::NodeId> apply_candidates(ProofStateHandle& psh, const itp::DiscriminationTree& lib, std::optional<uint32_t> target_meta_id) {
+        auto g = activate(); return itp::apply_candidates(*psh.ps, lib, target_meta_id);
+    }
     ProofStateHandle start_proof(itp::NodeId goal_type) {
         auto g = activate(); ProofStateHandle h; h.kernel = this;
         *h.ps = itp::start_proof(goal_type); h.root_meta_id = h.ps->goals[0].meta_id; return h;
@@ -184,6 +188,7 @@ NB_MODULE(itp_env_lnl, m) {
     nb::class_<itp::InductiveHandle>(m, "InductiveHandle")
         .def_ro("type_global_id", &itp::InductiveHandle::type_global_id)
         .def_ro("ctor_global_ids", &itp::InductiveHandle::ctor_global_ids);
+    nb::class_<itp::DiscriminationTree>(m, "Library");
     nb::class_<ProofStateHandle>(m, "ProofState")
         .def("intro", &ProofStateHandle::intro_, "name"_a = "", "target_meta_id"_a = nb::none())
         .def("apply", &ProofStateHandle::apply_, "term"_a, "target_meta_id"_a = nb::none())
@@ -203,6 +208,8 @@ NB_MODULE(itp_env_lnl, m) {
     nb::class_<KernelWrapper>(m, "Kernel")
         .def(nb::init<>())
         .def("start_proof", &KernelWrapper::start_proof, "goal_type"_a, nb::keep_alive<0, 1>())
+        .def("index_library", &KernelWrapper::index_library)
+        .def("apply_candidates", &KernelWrapper::apply_candidates, "ps"_a, "library"_a, "target_meta_id"_a = nb::none())
         .def("mk_type", &KernelWrapper::mk_type, "level"_a)
         .def("mk_bvar", &KernelWrapper::mk_bvar, "index"_a)
         .def("mk_fvar", &KernelWrapper::mk_fvar, "level"_a)
