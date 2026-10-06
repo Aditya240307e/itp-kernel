@@ -275,3 +275,35 @@ Test-discipline fix: the S5 candidate test used to END a script silently on any 
   "Fixed by construction in the new representation" is still only a claim for F5 until that is done.
 * F2b (clash/injectivity through repeated indices), F12 (induct on a concrete index), F8 (an independent checker; scaling benchmarks later on a larger machine), M12.
 * Inventory: 47 mutants defined (M1-M37, M39-M48), 46 caught; the survivor is M12.
+
+
+---
+# S7: parameters vs indices (kernel option "parameters", default OFF) -- gate PASS (2026-10-06)
+
+`Kernel.set_option("parameters", True)`; `Kernel.param_slots(family_gid)` shows the analysis. With the option OFF every earlier gate is unchanged (re-run at full size).
+
+## The rule
+A family's leading result-index positions are PARAMETERS when, in EVERY constructor, the position holds a bare field variable that differs from the earlier parameters' variables, and EVERY occurrence of
+the family inside any field type passes exactly that variable there (they form a prefix). Found: Eq [A, x], Le [n] (as in Coq), And/Or/Ex [all], List [A], Vec [A]; NOT parameters: a recursive field that passes
+a different argument (NonUniform), a repeated variable (Rep slot 1), a slot after a non-variable one (Late).
+* kernel (trusted): forcing records which field variables a PARAMETER slot determined; those are substituted EVERYWHERE, repeated occurrences included (`refl Nat a`, `le_n a`), in the result indices and in
+  the constructor application. This is the standard eliminator's minor premise. Argument for soundness: parameters are fixed by the scrutinee's type, so by subject reduction the field equals the parameter.
+* tactics: parameters are not generalised or abstracted; the motive's binder TYPES are specialised to the actual parameters (y : Nat, not y : A) so a premise like `same_ctor y _` type-checks; the induction's
+  Fix is generic over the INDEX slots only; every constructor refuted at the same slot shares one same_ctor premise.
+
+## Evidence
+* F5: `Ex Nat (lam n. n = 0) -> Ex Nat (lam n. 0 = n)` completes and verifies. `ex_elim` too (only `f`, after the scrutinee, is reverted: 10 hypotheses).
+* F2b-lite: `0 != S n` and `S n != 0` via Eq, and `Le (S n) 0 -> False`, close and verify. Branch goals are stated with `a`, not a dummy field (le_n: `Eq Nat a a`).
+* F12 for parameter slots: induct on `Le 0 x` and on `Le a b` completes and verifies.
+* parameter-free scripts are identical to the reference with the option ON.
+* soundness canary: random tactic search on 14 FALSE statements (7 conditionally false, to exercise the new substitution): 16,800 attempts, 0 verified proofs. The canary CAN fail: with a deliberately unsound
+  unifier (M59) it finds a verified proof of `0 = 1`.
+* oracle (partial proofs type-check, goals well-formed) with the option ON: 0 unattributed failures; on the full random mix completed proofs rise from 73 to 454, all verified.
+* mutants M49-M58 (analysis: uniformity, distinctness, prefix; kernel and tactic substitution; generalisation; binder specialisation; multi-constructor exploit; Fix genericity; kernel ignoring parameters) all
+  caught; M59 caught by the canary. Inventory: 58 mutants defined (M1-M37, M39-M59), 57 caught; the survivor is M12.
+
+## Limits
+* F12 is only fixed for PARAMETER slots. The F12-attributed share of the full random mix barely moved (1,243 -> 1,207 per 6,000 scripts): concrete indices on true index slots (`Le n 0`) dominate it.
+* injectivity (`S a = S b -> a = b`) is NOT derivable by `cases` (1 goal is left): the rest of F2b.
+* motive-hole inference ignores parameters (untested). The soundness argument is an argument plus a canary, not a proof; the independent checker (F8) is meant to test the implementation.
+See FINDINGS.md for the status of every finding.

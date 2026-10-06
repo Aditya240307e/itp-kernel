@@ -66,8 +66,8 @@ def kit(g, params=False):
       'ex_elim':       [('intro',)] * 5 + [('cases', 3), ('apply', app(V(11), V(7), V(8)))],
     }
     if params:
-        # with parameters nothing is reverted: x is hypothesis 7 and p hypothesis 8 of [A, P, Q, h, f, A', P', x, p], and f itself applies
-        scripts['ex_elim'] = [('intro',)] * 5 + [('cases', 3), ('apply', app(V(4), V(7), V(8)))]
+        # with parameters only the hypotheses AFTER the scrutinee are reverted: [A, P, Q, h, f, A', P', x, p, f'], and the usable copy is f' (hypothesis 9)
+        scripts['ex_elim'] = [('intro',)] * 5 + [('cases', 3), ('apply', app(V(9), V(7), V(8)))]
         scripts['ex_lambda'] = [('intro',), ('cases', 0), ('apply', C('ex_intro')), ('apply', V(3)), ('apply', C('symm')), ('apply', V(4))]
         stmts['ex_lambda'] = ('pi', app(EX, NAT, ('lam', NAT, app(EQ, NAT, V(0), Z))), app(EX, NAT, ('lam', NAT, app(EQ, NAT, Z, V(1)))))
     wrong = {   # (type, term): must be REJECTED

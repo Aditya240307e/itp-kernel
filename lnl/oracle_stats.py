@@ -21,12 +21,14 @@ def replay(k, g, stmt, ops):
     for op in ops: apply_op(k, g, ps, op)
     return ps
 
-def run(N, seed, verbose=True, mode2_only=False, no_q=False):
-    kref, knew, g, defs = library(); stmts = t4.statements4(g); rng = random.Random(seed); names = list(stmts)
+def run(N, seed, verbose=True, mode2_only=False, no_q=False, params=False):
+    kref, knew, g, defs = library()
+    if params: knew.set_option('parameters', True)
+    stmts = t4.statements4(g); rng = random.Random(seed); names = list(stmts)
     ind = {g['Nat'], g['Eq'], g['Le']}; consts = [g[n] for n in ('refl', 'cong', 'symm', 'trans', 'transport', 'le_n', 'le_S', 'le_trans', 'Succ', 'add', 'Q')]
     if no_q: consts = [c for c in consts if c != g['Q']]
     head = lambda x: head(x[1]) if x[0] == 'app' else x
-    mode2 = lambda h: is_mode2(h, g)
+    mode2 = lambda h: is_mode2(h, g, knew if params else None)
     tot = {}; first_bad = {}; completed = verified = rebuilds = 0; t0 = time.time()
     for i in range(N):
         sname = rng.choice(names); stmt = build_new(knew, l2h(stmts[sname], 0)); ps = knew.start_proof(stmt); ops = []; m1 = False

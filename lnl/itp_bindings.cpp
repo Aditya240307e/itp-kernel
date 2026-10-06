@@ -77,6 +77,9 @@ struct KernelWrapper {
         return h;
     }
     uint32_t loose_range_of(itp::NodeId t) { auto g = activate(); return itp::loose_range(t); }
+    void set_option(const std::string& name, bool value) { auto g = activate(); if (name == "parameters") itp::ctx().param_mode = value; else throw ITPError("unknown option: " + name); }
+    bool get_option(const std::string& name) { auto g = activate(); if (name == "parameters") return itp::ctx().param_mode; throw ITPError("unknown option: " + name); }
+    std::vector<int> param_slots(uint32_t family_gid) { auto g = activate(); std::vector<int> out; for (bool b : itp::family_param_slots(family_gid)) out.push_back(b ? 1 : 0); return out; }
     itp::DiscriminationTree index_library() { auto g = activate(); return itp::index_library(); }
     std::vector<itp::NodeId> apply_candidates(ProofStateHandle& psh, const itp::DiscriminationTree& lib, std::optional<uint32_t> target_meta_id) {
         auto g = activate(); return itp::apply_candidates(*psh.ps, lib, target_meta_id);
@@ -248,6 +251,9 @@ NB_MODULE(itp_env_lnl, m) {
         .def("fork_single_goal", &KernelWrapper::fork_single_goal, "source"_a, "target_meta_id"_a, nb::keep_alive<0, 1>())
         .def("materialize_from_node", &KernelWrapper::materialize_from_node, "target"_a, "hyp_types"_a, "hyp_names"_a, nb::keep_alive<0, 1>())
         .def("loose_range_of", &KernelWrapper::loose_range_of, "term"_a)
+        .def("set_option", &KernelWrapper::set_option, "name"_a, "value"_a)
+        .def("get_option", &KernelWrapper::get_option, "name"_a)
+        .def("param_slots", &KernelWrapper::param_slots, "family_gid"_a)
         .def("index_library", &KernelWrapper::index_library)
         .def("apply_candidates", &KernelWrapper::apply_candidates, "ps"_a, "library"_a, "target_meta_id"_a = nb::none())
         .def("mk_type", &KernelWrapper::mk_type, "level"_a)

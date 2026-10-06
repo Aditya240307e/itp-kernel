@@ -37,10 +37,14 @@ def goals_wellformed(k, ps):
         if not is_type(k, parse_raw(k.dump_raw(ps.goal_target(i)), True), ctxs): return False
     return True
 
-def is_mode2(h, g):
+def is_mode2(h, g, k=None):
     """a hypothesis type whose index arguments are all distinct bare context variables (generic indices), or whose family has no indices.
-    Anything else is a concrete-index induction (F12): the generic Fix cannot supply the specialised binder types of the branch goals."""
+    Anything else is a concrete-index induction (F12): the generic Fix cannot supply the specialised binder types of the branch goals.
+    With the kernel `k` in parameter mode, PARAMETER slots may hold anything (they are fixed), only the index slots must be distinct variables."""
     args = []
     while h[0] == 'app': args.append(h[2]); h = h[1]
-    idxs = args[::-1] if h[1] != g['Nat'] else []
+    args = args[::-1]
+    if k is not None and k.get_option('parameters') and h[0] == 'const':
+        slots = k.param_slots(h[1]); idxs = [a for i, a in enumerate(args) if not (i < len(slots) and slots[i])]
+    else: idxs = args if h[1] != g['Nat'] else []
     return all(a[0] == 'fvar' for a in idxs) and len(set(idxs)) == len(idxs)

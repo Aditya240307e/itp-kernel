@@ -2,6 +2,17 @@
 import os, re, shutil, subprocess, sys, time
 SRC = '/home/claude/itp_py/lnl'
 MUTANTS = {
+ 'M59 UNSOUND unifier: different constructors unify (the canary must notice)': ("return mismatch(\"different constructors\");", "return ElabResult{};"),
+ 'M49 parameter analysis ignores uniformity of recursive occurrences': ("            for (NodeId ft : inst.arg_types) if (!uniform_family_occurrences(ft, family_gid, arity, i, r)) { ok = false; break; }", "            for (NodeId ft : inst.arg_types) if (false && !uniform_family_occurrences(ft, family_gid, arity, i, r)) { ok = false; break; }"),
+ 'M50 parameter analysis ignores distinctness from earlier parameters': ("            for (uint32_t k = 0; k < i; ++k) if (inst.result_indices[k] == r) { ok = false; break; }   // distinct from the earlier parameters' variables", "            for (uint32_t k = 0; k < i; ++k) if (false && inst.result_indices[k] == r) { ok = false; break; }"),
+ 'M51 parameters need not form a prefix': ("        if (!ok) break;                                                       // parameters form a PREFIX", "        if (!ok) continue;"),
+ 'M52 field forced by a parameter is not substituted in the constructor application': ("const bool use_forced = it != forcing.forced.end() && (occurrence_count[base + ai] <= 1 || forcing.param_vars.count(base + ai));", "const bool use_forced = it != forcing.forced.end() && occurrence_count[base + ai] <= 1;"),
+ 'M53 field forced by a parameter is not substituted in the result indices': ("if (occurrence_count[level] <= 1 || forcing.param_vars.count(level)) m[level] = replacement;", "if (occurrence_count[level] <= 1) m[level] = replacement;"),
+ 'M54 cases still generalises the parameter slots': ("    for (uint32_t i = 0; i < arity; ++i) if (!is_param[i]) subs.push_back({concrete_indices[i], mk_fvar(n + i)});\n    subs.push_back({mk_fvar(hyp_level), mk_fvar(n + arity)});\n    // cases reverts a CONTIGUOUS suffix", "    for (uint32_t i = 0; i < arity; ++i) subs.push_back({concrete_indices[i], mk_fvar(n + i)});\n    subs.push_back({mk_fvar(hyp_level), mk_fvar(n + arity)});\n    // cases reverts a CONTIGUOUS suffix"),
+ 'M55 motive binder types are not specialised to the parameters': ("mp.doms.push_back(pm.empty() ? index_types[i] : replace_fvars(index_types[i], pm));", "mp.doms.push_back(index_types[i]);"),
+ 'M56 only the first refuted constructor is exploited in parameter mode': ("        if (ctx().param_mode)\n            for (std::size_t cj = 0;", "        if (false)\n            for (std::size_t cj = 0;"),
+ 'M57 the Fix is generic over the parameters too': ("idx_vars_body.push_back(is_param[i] ? concrete_indices[i] : mk_fvar(n + 1 + rank[i]));", "idx_vars_body.push_back(mk_fvar(n + 1 + (is_param[i] ? 0u : rank[i])));"),
+ 'M58 the kernel Match typing ignores parameters': ("param_slots_v.empty() ? nullptr : &param_slots_v);", "nullptr);"),
  'M47 induct ignores the generalizing list (F6)': ("    for (uint32_t j : generalizing) if (j < g.hyps.size() && j != hyp_level) needs_revert[j] = true;   // F6: explicitly generalised hypotheses, then the closure\n", ""),
  'M48 cases ignores the generalizing list (F6)': ("    for (uint32_t j : generalizing) if (j < hyp_level) revert_from = std::min(revert_from, j);   // F6: explicitly generalised hypotheses (those after the scrutinee are reverted anyway)", ""),
  'M42 scope validation accepts everything': ("    if (loose_range(t) != 0) return false;\n    std::unordered_set<uint64_t> seen; return fvars_below(t, nfree, seen);", "    return true;"),
@@ -50,13 +61,14 @@ MUTANTS = {
  'M7 strict positivity always true': ("                if (!is_strictly_positive(type_global_id, arg_ty))\n                    throw std::logic_error(\"itp: constructor '\" + ctor.name + \"' fails strict positivity", "                if (false)\n                    throw std::logic_error(\"itp: constructor '\" + ctor.name + \"' fails strict positivity"),
  'M8 Match branch count not checked': ("    if (ctor_gids.size() != branches.size())\n        return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, motive, std::nullopt,\n            \"Match branch count", "    if (false)\n        return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, motive, std::nullopt,\n            \"Match branch count"),
 }
-GATE_CMDS = (['s2_tests.py', '1500'], ['harness.py', '1500', '3'], ['s3_tests.py', '600'], ['s4_tests.py', '800'], ['oracle_gate.py'], ['s5_tests.py', '1200', '3'], ['s5_probe_tests.py', '500', '7'], ['s6_logic_tests.py'], ['s6_f6_tests.py'])
+GATE_CMDS = (['s2_tests.py', '1500'], ['harness.py', '1500', '3'], ['s3_tests.py', '600'], ['s4_tests.py', '800'], ['oracle_gate.py'], ['s5_tests.py', '1200', '3'], ['s5_probe_tests.py', '500', '7'], ['s6_logic_tests.py'], ['s6_f6_tests.py'], ['s7_param_tests.py', '150', '600'])
 
 def run(names):
     results = []
+    cmds = [c for c in GATE_CMDS if not os.environ.get('MUT_ONLY') or c[0] in os.environ['MUT_ONLY'].split(',')]
     # the UNMUTATED build must be green on every gate, otherwise every mutant would look "caught" and the results would mean nothing
     base_env = dict(os.environ, LNL_DIR=SRC, PYTHONPATH='/home/claude/itp_ref:/home/claude/itp_py:' + SRC)
-    for cmd in GATE_CMDS:
+    for cmd in cmds:
         r = subprocess.run([sys.executable, SRC + '/' + cmd[0]] + cmd[1:], cwd=SRC, env=base_env, capture_output=True, text=True, timeout=250)
         if r.returncode != 0:
             print("BASELINE IS RED on %s -- mutation results would be meaningless" % cmd[0]); print((r.stdout + r.stderr)[-500:]); sys.exit(2)
@@ -72,16 +84,16 @@ def run(names):
         if 'Build succeeded' not in b.stdout: results.append((nm, 'BUILD FAILED', b.stdout[-200:] + b.stderr[-200:])); continue
         env = dict(os.environ, LNL_DIR=d, PYTHONPATH='/home/claude/itp_ref:/home/claude/itp_py:' + d)
         outs = []
-        for cmd in GATE_CMDS:
+        for cmd in cmds:
             try:
                 r = subprocess.run([sys.executable, d + '/' + cmd[0]] + cmd[1:], cwd=d, env=env, capture_output=True, text=True, timeout=100)
                 outs.append((r.returncode, r.stdout + r.stderr))
             except subprocess.TimeoutExpired:
                 outs.append((99, 'Traceback: HANG (timeout) -- the mutant does not terminate'))
         text = '\n'.join(o[1] for o in outs)
-        caught = any(o[0] != 0 for o in outs) or bool(re.search(r"\bBAD\b|PROBLEM|FAILED|disagreements [1-9]|Traceback|ACCEPTED|S2 GATE: FAIL|S3 GATE: FAIL|S4 GATE: FAIL|ORACLE GATE: FAIL|S5 GATE: FAIL|S5 PROBE GATE: FAIL|S6 LOGIC GATE: FAIL|S6 F6 GATE: FAIL", text))
-        first = next((l.strip()[:110] for l in text.split('\n') if re.search(r"\bBAD\b|PROBLEM|FAILED|disagreements [1-9]|Traceback|ACCEPTED|S2 GATE: FAIL|S3 GATE: FAIL|S4 GATE: FAIL|ORACLE GATE: FAIL|S5 GATE: FAIL|S5 PROBE GATE: FAIL|S6 LOGIC GATE: FAIL|S6 F6 GATE: FAIL", l)), '')
-        results.append((nm, 'CAUGHT' if caught else 'SURVIVED  <-- test gap', first)); print("  %-62s %s  (%.0fs)" % (nm, results[-1][1], time.time() - t0), flush=True)
+        caught = any(o[0] != 0 for o in outs) or bool(re.search(r"\bBAD\b|PROBLEM|FAILED|disagreements [1-9]|Traceback|ACCEPTED|S2 GATE: FAIL|S3 GATE: FAIL|S4 GATE: FAIL|ORACLE GATE: FAIL|S5 GATE: FAIL|S5 PROBE GATE: FAIL|S6 LOGIC GATE: FAIL|S6 F6 GATE: FAIL|S7 PARAM GATE: FAIL", text))
+        first = next((l.strip()[:110] for l in text.split('\n') if re.search(r"\bBAD\b|PROBLEM|FAILED|disagreements [1-9]|Traceback|ACCEPTED|S2 GATE: FAIL|S3 GATE: FAIL|S4 GATE: FAIL|ORACLE GATE: FAIL|S5 GATE: FAIL|S5 PROBE GATE: FAIL|S6 LOGIC GATE: FAIL|S6 F6 GATE: FAIL|S7 PARAM GATE: FAIL", l)), '')
+        results.append((nm, 'CAUGHT' if caught else 'SURVIVED  <-- test gap', first)); print("  %-62s %s  (%.0fs)%s" % (nm, results[-1][1], time.time() - t0, ('  | ' + first) if os.environ.get('MUT_VERBOSE') else ''), flush=True)
     return results
 if __name__ == '__main__':
     names = [n for n in MUTANTS if any(n.startswith(p) for p in sys.argv[1:])] if len(sys.argv) > 1 else list(MUTANTS)
