@@ -2,6 +2,7 @@
 import os, re, shutil, subprocess, sys, time
 SRC = '/home/claude/itp_py/lnl'
 MUTANTS = {
+ 'M66 parameter-mode induct does not wrap its Fix in the barrier unless equations are used (F23)': ("    if (use_eq || ctx().param_mode) {   // F23: keep the Fix opaque to extraction (see get_or_build_barrier): the generic body is then what the kernel (and the independent checker) verify", "    if (use_eq) {   // F23: keep the Fix opaque to extraction (see get_or_build_barrier)"),
  'M65 rewind does not treat the barrier as a derived global (a probe that creates it cannot be rewound)': (' || nm.rfind("__barrier_", 0) == 0;   // __barrier_k: built by name on demand (get_or_build_barrier), so a probe may create and drop it', ';'),
  'M63 induct with equations does not wrap its Fix in the extraction barrier (F23)': ("        if (sty.tag == NodeType::TYPE) proof = mk_app(mk_app(mk_const(get_or_build_barrier(ctx().types[sty.index].universe_level)), fn_type), proof);\n", ""),
  'M64 the library index offers the barrier as a candidate for every goal': ("        if (ctx().globals.defs[gid].name.rfind(\"__barrier_\", 0) == 0) continue;      // an identity at every type: it would be a candidate for every goal\n", ""),

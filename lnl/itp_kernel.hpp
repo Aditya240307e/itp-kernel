@@ -11493,7 +11493,7 @@ inline ElabResult induct(ProofState& ps, uint32_t hyp_level, std::optional<uint3
         return std::unexpected(TypeError{TypeErrorKind::Other, g.target, std::nullopt,
             "induct: the assembled recursive proof failed the local structural recursion check -- some recursive call does not recurse on a structurally smaller instance of the hypothesis's own type"});
     NodeId proof = mk_fix(fn_type, R, fix_body);
-    if (use_eq) {   // F23: keep the Fix opaque to extraction (see get_or_build_barrier)
+    if (use_eq || ctx().param_mode) {   // F23: keep the Fix opaque to extraction (see get_or_build_barrier): the generic body is then what the kernel (and the independent checker) verify
         auto fn_sort = infer(fn_type, g.ec, ps.es);
         if (!fn_sort) return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, g.target, std::nullopt, "induct: the generalised induction statement failed to type-check"});
         NodeId sty = *fn_sort; if (sty.tag != NodeType::TYPE) sty = quote(eval(sty, g.ec.values), n);

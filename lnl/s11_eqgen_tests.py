@@ -89,6 +89,26 @@ def legacy_partial(verbose=False):
         out[name] = (knew.check_open(ps.extract(), st, [])[0], ps.num_goals() == 2)
     return out
 
+def contains_const(t, gids):
+    if not isinstance(t, tuple): return False
+    if t[0] == 'const': return t[1] in gids
+    if t[0] == 'match': return contains_const(t[1], gids) or contains_const(t[2], gids) or any(contains_const(x, gids) for x in t[3])
+    return any(contains_const(x, gids) for x in t[1:] if isinstance(x, tuple))
+
+def fix_survives_extraction(params):
+    """F23: an ORDINARY (variable-index) induct proof. In parameter mode the Fix is wrapped in the barrier, so the extracted proof keeps it and the kernel (and the independent checker) verify the generic body."""
+    kref, knew, g = t6.build_logic()
+    if params: knew.set_option('parameters', True)
+    C = lambda n: ('const', g[n]); NAT, ZERO, S, LE = C('Nat'), C('Zero'), C('Succ'), C('Le')
+    stmt_t = ('pi', NAT, app(LE, ZERO, V(0)))                                    # forall n, 0 <= n
+    ps, log = run_ops(knew, g, stmt_t, [('intro',), ('induct', 0), ('apply', C('le_n')), ('apply', C('le_S')), ('apply', V(2))])
+    ok = ps.num_goals() == 0 and ps.is_complete() and not [l for l in log if not l[1]]
+    proof = parse_raw(knew.dump_raw(ps.extract()), True) if ok else None
+    verified = ok and t8.kernel_verdict(knew, proof, l2h(stmt_t, 0))
+    indep = ok and ic.Checker(t8.build_env(knew), params=params, fuel=4_000_000).check_closed(proof, l2h(stmt_t, 0))[0]
+    barrier_gids = {gid for gid, nm, _, _ in knew.list_globals() if nm.startswith('__barrier_')}
+    return verified, indep, bool(ok and contains_const(proof, barrier_gids))
+
 def probe_first_creation(params):
     """a probe that is the FIRST thing to need the barrier creates a global; rewind must drop it, a repeated probe must be identical, and the real proof must still go through afterwards"""
     from s12_probe_eq_tests import canon
@@ -128,6 +148,11 @@ if __name__ == '__main__':
         for k_, v_ in probe_first_creation(params_).items():
             print("   probe protocol (%s): %-84s %s" % ("parameters ON" if params_ else "legacy", k_, v_))
             if not v_: FAIL.append('probe protocol (%s): %s' % ('params' if params_ else 'legacy', k_))
+    for params_ in (True, False):
+        ver, ind, fx = fix_survives_extraction(params_)
+        print("   forall n, 0 <= n by induct (%s): kernel %s, independent %s, the extracted proof is wrapped in the barrier (outer Fix kept): %s" % ("parameters ON" if params_ else "legacy", ver, ind, fx))
+        if not (ver and ind): FAIL.append('ordinary induct proof (%s)' % ('params' if params_ else 'legacy'))
+        if params_ and not fx: FAIL.append('parameter mode: the Fix did not survive extraction')
     # the barrier exists now: the library index must not offer it as an apply candidate (its conclusion is a bare variable, so it would match every goal)
     names = {gid: name for gid, name, _, _ in knew.list_globals()}
     barrier_gids = {gid for gid, nm_ in names.items() if nm_.startswith('__barrier_')}
