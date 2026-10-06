@@ -2,6 +2,9 @@
 import os, re, shutil, subprocess, sys, time
 SRC = '/home/claude/itp_py/lnl'
 MUTANTS = {
+ 'M37 rewind does not clear the loose_range memo': ("        loose_cache.clear();\n        vars.rewind(cp.vars_n);", "        vars.rewind(cp.vars_n);"),
+ 'M39 rewind does not roll back the metas': ("        meta_ctx.rewind(cp.meta_mark);", ""),
+ 'M40 rewind keeps stale same_ctor cache entries': ("it = (it->first >= keep || it->second >= keep) ? same_ctor_gid_by_family.erase(it) : std::next(it);", "it = std::next(it);"),
  'M32 index keys: a bound variable head ignores the context size': ("return pack_head_key(HeadKind::LocalVar, base + depth - 1 - v.n);", "return pack_head_key(HeadKind::LocalVar, depth - 1 - v.n);"),
  'M33 index: a hypothesis keyed as if it were the first one': ("detail::conclusion_head_key(g.hyps[lvl].type, lvl) == goal_key", "detail::conclusion_head_key(g.hyps[lvl].type, 0) == goal_key"),
  'M34 index: a lemma whose ARGUMENTS are variable-headed is not generic': ("    for (NodeId a : pc.args) if (is_var_headed(a)) return true;\n    return false;", "    return false;"),
@@ -39,7 +42,7 @@ MUTANTS = {
  'M7 strict positivity always true': ("                if (!is_strictly_positive(type_global_id, arg_ty))\n                    throw std::logic_error(\"itp: constructor '\" + ctor.name + \"' fails strict positivity", "                if (false)\n                    throw std::logic_error(\"itp: constructor '\" + ctor.name + \"' fails strict positivity"),
  'M8 Match branch count not checked': ("    if (ctor_gids.size() != branches.size())\n        return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, motive, std::nullopt,\n            \"Match branch count", "    if (false)\n        return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, motive, std::nullopt,\n            \"Match branch count"),
 }
-GATE_CMDS = (['s2_tests.py', '1500'], ['harness.py', '1500', '3'], ['s3_tests.py', '600'], ['s4_tests.py', '800'], ['oracle_gate.py'], ['s5_tests.py', '1200', '3'])
+GATE_CMDS = (['s2_tests.py', '1500'], ['harness.py', '1500', '3'], ['s3_tests.py', '600'], ['s4_tests.py', '800'], ['oracle_gate.py'], ['s5_tests.py', '1200', '3'], ['s5_probe_tests.py', '500', '7'])
 
 def run(names):
     results = []
@@ -68,8 +71,8 @@ def run(names):
             except subprocess.TimeoutExpired:
                 outs.append((99, 'Traceback: HANG (timeout) -- the mutant does not terminate'))
         text = '\n'.join(o[1] for o in outs)
-        caught = any(o[0] != 0 for o in outs) or bool(re.search(r"\bBAD\b|PROBLEM|FAILED|disagreements [1-9]|Traceback|ACCEPTED|S2 GATE: FAIL|S3 GATE: FAIL|S4 GATE: FAIL|ORACLE GATE: FAIL|S5 GATE: FAIL", text))
-        first = next((l.strip()[:110] for l in text.split('\n') if re.search(r"\bBAD\b|PROBLEM|FAILED|disagreements [1-9]|Traceback|ACCEPTED|S2 GATE: FAIL|S3 GATE: FAIL|S4 GATE: FAIL|ORACLE GATE: FAIL|S5 GATE: FAIL", l)), '')
+        caught = any(o[0] != 0 for o in outs) or bool(re.search(r"\bBAD\b|PROBLEM|FAILED|disagreements [1-9]|Traceback|ACCEPTED|S2 GATE: FAIL|S3 GATE: FAIL|S4 GATE: FAIL|ORACLE GATE: FAIL|S5 GATE: FAIL|S5 PROBE GATE: FAIL", text))
+        first = next((l.strip()[:110] for l in text.split('\n') if re.search(r"\bBAD\b|PROBLEM|FAILED|disagreements [1-9]|Traceback|ACCEPTED|S2 GATE: FAIL|S3 GATE: FAIL|S4 GATE: FAIL|ORACLE GATE: FAIL|S5 GATE: FAIL|S5 PROBE GATE: FAIL", l)), '')
         results.append((nm, 'CAUGHT' if caught else 'SURVIVED  <-- test gap', first)); print("  %-62s %s  (%.0fs)" % (nm, results[-1][1], time.time() - t0), flush=True)
     return results
 if __name__ == '__main__':

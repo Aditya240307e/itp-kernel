@@ -70,7 +70,11 @@ def run_random(N, seed, max_steps=8):
             elif nh and r < 0.82: op = ('apply', V(rng.randrange(nh)))
             else: op = ('apply', ('const', rng.choice(consts)))
             ok, same, st = L.step(op); ops.append(op)
-            if L.stopped or not same: break                       # lockstep itself diverged (an explained category): this script can no longer be compared
+            if L.stopped or not same:                              # the two kernels' states differ: only an EXPLAINED category may end a script silently
+                cat = t4.explain_divergence(L, stmts[sname], op, st) if not same or L.stopped else None
+                stats['explained_' + str(cat)] = stats.get('explained_' + str(cat), 0) + 1
+                if cat is None: bad.append(('unexplained lockstep divergence', sname, ops[-3:], str(st)[:200]))
+                break
             if ok:
                 m = check(L, stats, sname, ops)
                 if m: bad.append(m); break
@@ -81,7 +85,8 @@ if __name__ == '__main__':
     t0 = time.time(); N = int(sys.argv[1]) if len(sys.argv) > 1 else 1500; seed = int(sys.argv[2]) if len(sys.argv) > 2 else 3
     stats, bad = run_random(N, seed)
     heads = {k[5:]: v for k, v in stats.items() if k.startswith('head_')}
-    print("S5 candidates: %d scripts, %d goal states compared; non-empty candidate lists %d, with hypothesis candidates %d, Pi-targets %d, distinct lists %d; target heads %s" %
-          (stats['scripts'], stats['compared'], stats['nonempty'], stats['hyp_candidates'], stats['pi_target'], len(stats['distinct']), heads))
-    for b in bad[:2]: print("   MISMATCH:", b[0], b[1][-4:], "goal", b[2], "\n      ref:", b[3], "\n      new:", b[4])
+    expl = {k[10:]: v for k, v in stats.items() if k.startswith('explained_')}
+    print("S5 candidates: %d scripts, %d goal states compared; non-empty candidate lists %d, with hypothesis candidates %d, Pi-targets %d, distinct lists %d; target heads %s; explained lockstep divergences %s" %
+          (stats['scripts'], stats['compared'], stats['nonempty'], stats['hyp_candidates'], stats['pi_target'], len(stats['distinct']), heads, expl))
+    for b in bad[:2]: print("   MISMATCH:", str(b)[:420])
     print("elapsed %.1fs" % (time.time() - t0)); print("S5 GATE:", "PASS" if not bad else "FAIL"); sys.exit(1 if bad else 0)

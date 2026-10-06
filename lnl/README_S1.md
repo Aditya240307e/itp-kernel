@@ -220,3 +220,27 @@ states, 0 mismatches. Coverage (per 3,000 scripts): ~19,000 non-empty lists, ~6,
 ~3,900 context-variable-headed targets (new statements with predicate variables: `pred_transport`, `pred_hyp`, `pred_two`, `pred_pi_goal`, `pi_bound_head`, `pi_bound_pair`, `pred_pi_hyp`).
 Mutants M32-M36 (bound-head base dropped, per-hypothesis base dropped, argument-headed lemmas not generic, generic lemmas never offered, hypothesis offered at the wrong level): see below.
 Not yet ported (S5 part 2): checkpoint/rewind/compact (the search's probing), and the search-level fingerprint itself.
+
+
+## S5 part 2a: the search's probing protocol (2026-10-05) -- gate PASS
+Ported/bound: `Kernel.checkpoint()`, `Kernel.rewind(cp)`, `Kernel.fork_single_goal(ps, meta_id)`, `Kernel.materialize_from_node(target, hyp_types, hyp_names)` (the goal meta gets the closed Pi type, D1),
+class `Checkpoint`. The arena rollback itself already lived in ExecutionContext; the work was the Python layer and the hazards specific to the new representation:
+* HAZARD, checked and tested: the S1 core operations memoise `loose_range` per node id, and `rewind` REUSES node indices for different nodes. `rewind` clears the memo
+  (test: a node nobody built before, memoised with loose range 4243, then a different new node reusing its index must report 0; mutant M37 removes the clearing and is caught).
+* rewind restores the global count, drops derived globals (`__Unit`, `__tt`, `__Empty`, `__same_ctor_*`) and their cache entries, and rolls the metas back (M39, M40 caught);
+  replaying the same script after a rewind is identical, in both kernels (`exploit_le`: 4 derived globals created, dropped, recreated identically).
+* the search's protocol (checkpoint, fork the goal, apply, read off, rewind) in lockstep inside random scripts: 2 seeds x 1,200 scripts, ~14,300 steps, ~57,000 probes
+  (24,600 succeeded in both kernels): verdicts and resulting states agree (exact for intro/apply, variable-erased shape for cases/induct/rewrite), probing never disturbed the live state or
+  left the live goal meta solved, and `materialize_from_node` reproduced the live goal in both kernels (14,316 checks).
+Mutants M32-M36 (library index) and M37, M39, M40 (rewind): all caught. Inventory: 38 of the 39 defined mutants caught (the survivor is M12).
+
+## F16 (reference bug, found by the S5 tests): `apply` misbinds the binders of a Pi-typed hypothesis
+The reference REJECTS `apply h` for EVERY Pi-typed hypothesis I tried, including `h : forall n, Le n n |- Le 0 0` (and with 0, 1, 2 dummy hypotheses before it, and a first-order
+`h : forall n, P n |- P 0`). The hybrid kernel closes the goal each time and the completed proofs verify. The cause has the signature of the F3/F5/F10 class (a binder referenced by absolute level, peeled in an environment where
+that level now belongs to a context variable); I have NOT read the reference's `apply`/`infer(Var)` to pin the exact line. Curriculum proofs are unaffected because they apply an explicitly instantiated IH term, not the bare hypothesis.
+`h : forall Q, Q 0 |- P 0` additionally needs higher-order unification: the hybrid kernel defers `?m P h 0 =?= P 0` as a pending constraint (cannot complete, but not wrong); the reference errors.
+CONSEQUENCE FOR THE FINGERPRINT: any search step that applies a bare Pi-typed hypothesis behaves differently (the hybrid kernel succeeds where the reference fails). The behavioural fingerprint can therefore equal the reference's only if the
+search never tries those applications; first MEASURE how often it does (instrument candidate generation on the baseline runs); if it does, compare against a reference with F16 patched, or explain the deltas.
+
+Test-discipline fix: the S5 candidate test used to END a script silently on any lockstep divergence, which hid 112 F16 divergences per 3,000 scripts. Divergences now must fall in an explained, validated category
+(F10, F13, relaxed guard, F16) or they are mismatches. Candidate lists are identical wherever they can be compared (5 seeds, ~145,000 goal states).

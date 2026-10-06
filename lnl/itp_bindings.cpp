@@ -47,6 +47,30 @@ struct KernelWrapper {
     std::unique_ptr<itp::ExecutionContext> exec = std::make_unique<itp::ExecutionContext>();
     itp::ContextGuard activate() { return itp::ContextGuard(*exec); }
 
+    // ---- S5: the search's probing protocol. A probe is: checkpoint, fork the goal, apply a tactic to the fork, read off, rewind. Rewind reverts the
+    // ExecutionContext (node pools, metas, derived globals) but cannot see a ProofState, which is why a probe works on a FORK and discards it.
+    itp::ExecutionContext::Checkpoint checkpoint() { auto g = activate(); return itp::ctx().checkpoint(); }
+    void rewind(const itp::ExecutionContext::Checkpoint& cp) { auto g = activate(); itp::ctx().rewind(cp); }
+    ProofStateHandle fork_single_goal(ProofStateHandle& source, uint32_t target_meta_id) {
+        auto g = activate();
+        auto idx_opt = itp::find_goal_index(*source.ps, target_meta_id);
+        if (!idx_opt) throw ITPError("fork_single_goal: no goal with the given meta_id in the source ProofState");
+        ProofStateHandle h;
+        h.ps->goals.push_back(source.ps->goals[*idx_opt]);   // a Goal is an ordinary value type
+        h.ps->es = itp::ElabState{};                          // deliberately fresh, not shared with the source
+        h.root_meta_id = target_meta_id; h.kernel = this;
+        return h;
+    }
+    ProofStateHandle materialize_from_node(itp::NodeId target, const std::vector<itp::NodeId>& hyp_types, const std::vector<std::string>& hyp_names) {
+        auto g = activate();
+        if (hyp_types.size() != hyp_names.size()) throw ITPError("materialize_from_node: hyp_types and hyp_names must be the same length");
+        itp::ElabCtx ec{}; std::vector<itp::Hypothesis> hyps;
+        for (size_t i = 0; i < hyp_types.size(); ++i) { ec = ec.extend(hyp_types[i]); hyps.push_back(itp::Hypothesis{hyp_names[i], hyp_types[i]}); }
+        uint32_t meta = itp::ctx().meta_ctx.fresh(itp::close_pi_over_context(target, ec), ec.size());   // closed Pi type, like every goal meta (D1)
+        ProofStateHandle h; h.ps->goals.push_back(itp::Goal{meta, ec, std::move(hyps), target}); h.root_meta_id = meta; h.kernel = this;
+        return h;
+    }
+    uint32_t loose_range_of(itp::NodeId t) { auto g = activate(); return itp::loose_range(t); }
     itp::DiscriminationTree index_library() { auto g = activate(); return itp::index_library(); }
     std::vector<itp::NodeId> apply_candidates(ProofStateHandle& psh, const itp::DiscriminationTree& lib, std::optional<uint32_t> target_meta_id) {
         auto g = activate(); return itp::apply_candidates(*psh.ps, lib, target_meta_id);
@@ -189,6 +213,7 @@ NB_MODULE(itp_env_lnl, m) {
         .def_ro("type_global_id", &itp::InductiveHandle::type_global_id)
         .def_ro("ctor_global_ids", &itp::InductiveHandle::ctor_global_ids);
     nb::class_<itp::DiscriminationTree>(m, "Library");
+    nb::class_<itp::ExecutionContext::Checkpoint>(m, "Checkpoint");
     nb::class_<ProofStateHandle>(m, "ProofState")
         .def("intro", &ProofStateHandle::intro_, "name"_a = "", "target_meta_id"_a = nb::none())
         .def("apply", &ProofStateHandle::apply_, "term"_a, "target_meta_id"_a = nb::none())
@@ -208,6 +233,11 @@ NB_MODULE(itp_env_lnl, m) {
     nb::class_<KernelWrapper>(m, "Kernel")
         .def(nb::init<>())
         .def("start_proof", &KernelWrapper::start_proof, "goal_type"_a, nb::keep_alive<0, 1>())
+        .def("checkpoint", &KernelWrapper::checkpoint)
+        .def("rewind", &KernelWrapper::rewind, "checkpoint"_a)
+        .def("fork_single_goal", &KernelWrapper::fork_single_goal, "source"_a, "target_meta_id"_a, nb::keep_alive<0, 1>())
+        .def("materialize_from_node", &KernelWrapper::materialize_from_node, "target"_a, "hyp_types"_a, "hyp_names"_a, nb::keep_alive<0, 1>())
+        .def("loose_range_of", &KernelWrapper::loose_range_of, "term"_a)
         .def("index_library", &KernelWrapper::index_library)
         .def("apply_candidates", &KernelWrapper::apply_candidates, "ps"_a, "library"_a, "target_meta_id"_a = nb::none())
         .def("mk_type", &KernelWrapper::mk_type, "level"_a)

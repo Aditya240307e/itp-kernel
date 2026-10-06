@@ -102,6 +102,19 @@ def strip_meta_args(x):
     return x
 
 f10_scripted = []
+def hyp_is_pi(L, j):
+    return parse_raw(L.knew.dump_raw(L.psn.goal_hyp_type(0, j)), True)[0] == 'pi' if j < L.psn.goal_num_hyps(0) else False
+
+def explain_divergence(L, stmt, op, st):
+    """name the explained category of a lockstep divergence (each is validated on the hybrid side), or None if it is unexplained"""
+    last = L.log[-1]
+    if L.stopped: return 'F13'
+    if last[1] and last[2] and f10_class(L, stmt, st): return 'F10'
+    if op[0] in ('induct', 'cases') and last[1] is False and last[2] is True and 'embedded bound structure' in L.last_msgs[0] and strict_ok(L, stmt): return 'relaxed'
+    # F16: the reference's apply misbinds the binders of a Pi-typed hypothesis; the hybrid kernel's result must itself be consistent
+    if op[0] == 'apply' and op[1][0] == 'var' and last[1] is False and last[2] is True and hyp_is_pi(L, op[1][1]) and (L.psn.num_pending() > 0 or strict_ok(L, stmt)): return 'F16'
+    return None
+
 def run_scripted(kref, knew, g):
     stmts = statements4(g); rows = []; del f10_scripted[:]
     for name, mk in SCRIPTS4.items():
