@@ -244,3 +244,34 @@ search never tries those applications; first MEASURE how often it does (instrume
 
 Test-discipline fix: the S5 candidate test used to END a script silently on any lockstep divergence, which hid 112 F16 divergences per 3,000 scripts. Divergences now must fall in an explained, validated category
 (F10, F13, relaxed guard, F16) or they are mismatches. Candidate lists are identical wherever they can be compared (5 seeds, ~145,000 goal states).
+
+
+---
+# S6: logical vocabulary, scope validation, F6 groundwork (2026-10-06)
+
+## Fixed / added
+* **`?m =?= ?m` now succeeds** (the S3 section's preserved quirk is gone). Mutant M41.
+* **F6 (strong induction groundwork).** The Pi-headed guard is removed from `cases` and `induct` (with de Bruijn indices there is nothing for it to protect) and both take an explicit
+  `generalizing=[...]` list. Probes, all verified by the kernel: `Pi n acc. add (S n) acc = add n (S acc)` by `intro n; induct n` on the Pi-headed goal, and by `induct n generalizing acc`; for `cases`,
+  `generalizing` matters for hypotheses BEFORE the scrutinee (everything after it is already reverted): hypothesis counts [2,3] vs [3,4]. The reference rejects the Pi-headed `induct`.
+  Mutants M47, M48. NOT done: the bounded-predicate strong-induction probe (`Below P n`).
+* **F7 (logical vocabulary).** `True`, `False`, `And`, `Or`, `Ex` (inductive families) and `Not`, `Iff` (definitions) declared in BOTH kernels through each one's own checked admission.
+  Tactic proofs verified by the hybrid kernel: `true_intro`, `false_elim`, `and_comm`, `or_comm`, `not_not_intro`, `iff_refl`, `ex_elim`. Six hand-made wrong proofs are rejected by both kernels.
+  Differential on MUTATED valid proofs (only well-scoped mutants are sent to the reference): 244 verdicts, 223 agree, 21 are F19, 0 unexplained.
+* **Scope validation at every API entry that accepts a user-built term** (no loose bound variable, no context variable beyond the context). Before it, the hybrid kernel ABORTED on such terms
+  (`check_lambda` evaluates a domain before inferring it). 288 ill-scoped terms (including hand-built loose bound variables) are now rejected, 0 accepted, no abort. Mutants M42-M44.
+
+## New findings in the reference
+* **F17** `intro` on a goal that is a definition unfolding to a Pi (`Not (Not P)`): the reference cannot complete `not_not_intro`; lockstep diverges at the `intro` step. The hybrid routes the
+  non-literal case through NbE (mutant M46 restores the raw-id behaviour and is caught). Cause taken from my reading of the reference's `intro` in S3, not re-verified now.
+* **F18** the reference ABORTS (not rejects) on an ill-scoped term in `whole_term_check` (backtrace: `whole_term_check -> check -> unify -> eval -> Env::operator[]`).
+* **F19** the reference accepts a `Match` whose motive has a binder domain that is not a type: `match h as (lam (_ : Or). P) {}` on `h : False` is accepted by the reference and rejected by the hybrid
+  ("Lambda domain must be a type", mutant M45); a well-formed motive is accepted by both. I did not try to exploit this in the reference.
+* F16 again: `ex_elim` needs `apply (f' x p)` on a reverted Pi-typed hypothesis, which the reference cannot do.
+
+## Still open (and why)
+* **F5 is NOT verified.** `Ex Nat (lam n. n = 0) -> Ex Nat (lam n. 0 = n)` cannot even reach the elimination: `cases` treats `Ex`'s parameters `A` and `P` as indices, generalises EVERY occurrence of `Nat` in the goal
+  (so `Zero : A` stops type-checking) and reverts unrelated hypotheses. This is the missing PARAMETER / INDEX distinction, which is also the core of F12 and of the useful half of F2b.
+  "Fixed by construction in the new representation" is still only a claim for F5 until that is done.
+* F2b (clash/injectivity through repeated indices), F12 (induct on a concrete index), F8 (an independent checker; scaling benchmarks later on a larger machine), M12.
+* Inventory: 47 mutants defined (M1-M37, M39-M48), 46 caught; the survivor is M12.

@@ -16,6 +16,11 @@ struct ITPError : std::runtime_error { using std::runtime_error::runtime_error; 
 
 
 struct KernelWrapper;
+inline void require_scoped(itp::NodeId t, uint32_t nfree, const char* what) {
+    if (!itp::detail::well_scoped(t, nfree))
+        throw ITPError(std::string("ill-scoped term (") + what + "): it has an unbound bound variable, or a context variable beyond the " + std::to_string(nfree) + " in scope");
+}
+inline void require_scoped_telescope(const std::vector<itp::NodeId>& types, const char* what) { for (uint32_t j = 0; j < types.size(); ++j) require_scoped(types[j], j, what); }
 template <class R> void raise_if_error(const R& r) { if (!r) throw ITPError(r.error().message); }
 
 // Wraps itp::ProofState; keeps a raw pointer to its Kernel (start_proof binds nb::keep_alive<0,1> so the kernel outlives it).
@@ -24,13 +29,14 @@ struct ProofStateHandle {
     KernelWrapper* kernel = nullptr;
     uint32_t root_meta_id = 0;
     itp::ContextGuard activate();
+    uint32_t scope_of(std::optional<uint32_t> tm) { auto idx = itp::find_goal_index(*ps, tm); return idx ? ps->goals[*idx].ec.size() : 0; }
     void intro_(const std::string& name, std::optional<uint32_t> tm) { auto g = activate(); raise_if_error(itp::intro(*ps, name, tm)); }
-    void apply_(itp::NodeId term, std::optional<uint32_t> tm) { auto g = activate(); raise_if_error(itp::apply(*ps, term, tm)); }
-    void cases_(uint32_t hyp_level, std::optional<uint32_t> tm) { auto g = activate(); raise_if_error(itp::cases(*ps, hyp_level, tm)); }
-    void induct_(uint32_t hyp_level, std::optional<uint32_t> tm) { auto g = activate(); raise_if_error(itp::induct(*ps, hyp_level, tm)); }
-    void exact_(itp::NodeId term, std::optional<uint32_t> tm) { auto g = activate(); raise_if_error(itp::exact(*ps, term, tm)); }
+    void apply_(itp::NodeId term, std::optional<uint32_t> tm) { auto g = activate(); require_scoped(term, scope_of(tm), "apply"); raise_if_error(itp::apply(*ps, term, tm)); }
+    void cases_(uint32_t hyp_level, std::optional<uint32_t> tm, const std::vector<uint32_t>& gen) { auto g = activate(); raise_if_error(itp::cases(*ps, hyp_level, tm, gen)); }
+    void induct_(uint32_t hyp_level, std::optional<uint32_t> tm, const std::vector<uint32_t>& gen) { auto g = activate(); raise_if_error(itp::induct(*ps, hyp_level, tm, gen)); }
+    void exact_(itp::NodeId term, std::optional<uint32_t> tm) { auto g = activate(); require_scoped(term, scope_of(tm), "exact"); raise_if_error(itp::exact(*ps, term, tm)); }
     void rewrite_(itp::NodeId eq_term, itp::NodeId x, itp::NodeId y, uint32_t transport_gid, uint32_t symm_gid, std::optional<uint32_t> tm) {
-        auto g = activate(); raise_if_error(itp::rewrite_eq(*ps, eq_term, x, y, transport_gid, symm_gid, tm));
+        auto g = activate(); uint32_t sc = scope_of(tm); require_scoped(eq_term, sc, "rewrite eq_term"); require_scoped(x, sc, "rewrite x"); require_scoped(y, sc, "rewrite y"); raise_if_error(itp::rewrite_eq(*ps, eq_term, x, y, transport_gid, symm_gid, tm));
     }
     bool is_complete() { auto g = activate(); return itp::proof_complete(*ps); }
     itp::NodeId extract() { auto g = activate(); return itp::extract_proof_term(root_meta_id); }
@@ -62,7 +68,7 @@ struct KernelWrapper {
         return h;
     }
     ProofStateHandle materialize_from_node(itp::NodeId target, const std::vector<itp::NodeId>& hyp_types, const std::vector<std::string>& hyp_names) {
-        auto g = activate();
+        auto g = activate(); require_scoped_telescope(hyp_types, "hypothesis type"); require_scoped(target, hyp_types.size(), "target");
         if (hyp_types.size() != hyp_names.size()) throw ITPError("materialize_from_node: hyp_types and hyp_names must be the same length");
         itp::ElabCtx ec{}; std::vector<itp::Hypothesis> hyps;
         for (size_t i = 0; i < hyp_types.size(); ++i) { ec = ec.extend(hyp_types[i]); hyps.push_back(itp::Hypothesis{hyp_names[i], hyp_types[i]}); }
@@ -76,7 +82,7 @@ struct KernelWrapper {
         auto g = activate(); return itp::apply_candidates(*psh.ps, lib, target_meta_id);
     }
     ProofStateHandle start_proof(itp::NodeId goal_type) {
-        auto g = activate(); ProofStateHandle h; h.kernel = this;
+        auto g = activate(); require_scoped(goal_type, 0, "goal type"); ProofStateHandle h; h.kernel = this;
         *h.ps = itp::start_proof(goal_type); h.root_meta_id = h.ps->goals[0].meta_id; return h;
     }
     itp::NodeId mk_type(uint32_t l) { auto g = activate(); return itp::mk_type(l); }
@@ -90,21 +96,25 @@ struct KernelWrapper {
     itp::NodeId mk_match(itp::NodeId s, itp::NodeId m, std::vector<itp::NodeId> bs) { auto g = activate(); return itp::mk_match(s, m, std::move(bs)); }
     itp::NodeId mk_fix(itp::NodeId fn_type, uint32_t dec, itp::NodeId body) { auto g = activate(); return itp::mk_fix(fn_type, dec, body); }
 
-    uint32_t reserve_inductive_type(const std::string& name, itp::NodeId sort) { auto g = activate(); return itp::reserve_inductive_type(name, sort); }
-    itp::InductiveHandle finish_inductive(uint32_t tid, std::vector<itp::CtorSpec> ctors) { auto g = activate(); return itp::finish_inductive(tid, std::move(ctors)); }
+    uint32_t reserve_inductive_type(const std::string& name, itp::NodeId sort) { auto g = activate(); require_scoped(sort, 0, "inductive sort"); return itp::reserve_inductive_type(name, sort); }
+    itp::InductiveHandle finish_inductive(uint32_t tid, std::vector<itp::CtorSpec> ctors) { auto g = activate();
+        for (auto& c : ctors) { require_scoped_telescope(c.arg_types, "constructor field type"); for (auto r : c.result_indices) require_scoped(r, static_cast<uint32_t>(c.arg_types.size()), "constructor result index"); }
+        return itp::finish_inductive(tid, std::move(ctors)); }
     uint32_t reserve_recursive_function(const std::string& name, itp::NodeId type) { auto g = activate(); return itp::reserve_recursive_function(name, type); }
-    void finish_recursive_function(uint32_t gid, uint32_t ind_gid, uint32_t dec, itp::NodeId body) { auto g = activate(); itp::finish_recursive_function(gid, ind_gid, dec, body); }
-    uint32_t declare_unchecked(itp::NodeId type, std::optional<itp::NodeId> value, const std::string& name) { auto g = activate(); return itp::declare_unchecked(type, value, name); }
+    void finish_recursive_function(uint32_t gid, uint32_t ind_gid, uint32_t dec, itp::NodeId body) { auto g = activate(); require_scoped(body, 0, "recursive function body"); itp::finish_recursive_function(gid, ind_gid, dec, body); }
+    uint32_t declare_unchecked(itp::NodeId type, std::optional<itp::NodeId> value, const std::string& name) { auto g = activate(); require_scoped(type, 0, "declared type"); if (value) require_scoped(*value, 0, "declared value"); return itp::declare_unchecked(type, value, name); }
 
     // ---- S2: checked declarations and the full typing core
-    itp::InductiveHandle finish_inductive_unchecked(uint32_t tid, std::vector<itp::CtorSpec> ctors) { auto g = activate(); return itp::finish_inductive_unchecked(tid, std::move(ctors)); }
+    itp::InductiveHandle finish_inductive_unchecked(uint32_t tid, std::vector<itp::CtorSpec> ctors) { auto g = activate();
+        for (auto& c : ctors) { require_scoped_telescope(c.arg_types, "constructor field type"); for (auto r : c.result_indices) require_scoped(r, static_cast<uint32_t>(c.arg_types.size()), "constructor result index"); }
+        return itp::finish_inductive_unchecked(tid, std::move(ctors)); }
     uint32_t declare_checked(itp::NodeId type, itp::NodeId value, const std::string& name) {
-        auto g = activate(); auto r = itp::declare_checked(type, value, name);
+        auto g = activate(); require_scoped(type, 0, "declared type"); require_scoped(value, 0, "declared value"); auto r = itp::declare_checked(type, value, name);
         if (!r) throw ITPError(r.error().message);
         return *r;
     }
     void finish_recursive_function_checked(uint32_t gid, uint32_t ind_gid, uint32_t dec, itp::NodeId body) {
-        auto g = activate(); auto r = itp::finish_recursive_function_checked(gid, ind_gid, dec, body);
+        auto g = activate(); require_scoped(body, 0, "recursive function body"); auto r = itp::finish_recursive_function_checked(gid, ind_gid, dec, body);
         if (!r) throw ITPError(r.error().message);
     }
     std::pair<bool, nb::object> infer_open(itp::NodeId t, const std::vector<itp::NodeId>& hyp_types) {
@@ -115,7 +125,7 @@ struct KernelWrapper {
         return {false, nb::cast(r.error().message)};
     }
     std::pair<bool, std::string> check_open(itp::NodeId t, itp::NodeId expected, const std::vector<itp::NodeId>& hyp_types) {
-        auto g = activate(); itp::ElabCtx ec; itp::ElabState es;
+        auto g = activate(); require_scoped_telescope(hyp_types, "hypothesis type"); require_scoped(t, hyp_types.size(), "term"); require_scoped(expected, hyp_types.size(), "expected type"); itp::ElabCtx ec; itp::ElabState es;
         for (auto h : hyp_types) ec = ec.extend(h);
         auto r = itp::check(t, expected, ec, es);
         if (r) return {true, "OK"};
@@ -130,13 +140,13 @@ struct KernelWrapper {
         return sol ? dump_raw(*sol) : std::string("");
     }
     std::tuple<bool, std::string, uint32_t> unify_open(itp::NodeId a, itp::NodeId b, const std::vector<itp::NodeId>& hyp_types) {
-        auto g = activate(); itp::ElabCtx ec; itp::ElabState es;
+        auto g = activate(); require_scoped_telescope(hyp_types, "hypothesis type"); require_scoped(a, hyp_types.size(), "lhs"); require_scoped(b, hyp_types.size(), "rhs"); itp::ElabCtx ec; itp::ElabState es;
         for (auto h : hyp_types) ec = ec.extend(h);
         auto r = itp::unify(a, b, ec, es);
         return {static_cast<bool>(r), r ? std::string("OK") : r.error().message, static_cast<uint32_t>(es.pending.size())};
     }
     std::tuple<bool, std::string, uint32_t> unify_drain_open(itp::NodeId a, itp::NodeId b, const std::vector<itp::NodeId>& hyp_types) {
-        auto g = activate(); itp::ElabCtx ec; itp::ElabState es;           // the production sequence of apply: unify, then drain in the OUTER context
+        auto g = activate(); require_scoped_telescope(hyp_types, "hypothesis type"); require_scoped(a, hyp_types.size(), "lhs"); require_scoped(b, hyp_types.size(), "rhs"); itp::ElabCtx ec; itp::ElabState es;           // the production sequence of apply: unify, then drain in the OUTER context
         for (auto h : hyp_types) ec = ec.extend(h);
         auto r = itp::unify(a, b, ec, es);
         if (r) r = itp::drain_pending(ec, es);
@@ -147,7 +157,7 @@ struct KernelWrapper {
         return kind == "lam" ? itp::close_lambda_telescope(doms, body, base) : itp::close_pi_telescope(doms, body, base);
     }
     itp::Env fresh_env(uint32_t n0) { itp::Env env; for (uint32_t i = 0; i < n0; ++i) env = env.extend(itp::fresh_neutral(i)); return env; }
-    itp::NodeId normalize_open(itp::NodeId t, uint32_t n0) { auto g = activate(); return itp::normalize(t, fresh_env(n0)); }
+    itp::NodeId normalize_open(itp::NodeId t, uint32_t n0) { auto g = activate(); require_scoped(t, n0, "term"); return itp::normalize(t, fresh_env(n0)); }
     bool conv_open(itp::NodeId a, itp::NodeId b, uint32_t n0) {
         auto g = activate(); itp::Env env = fresh_env(n0);
         return itp::conv_value(itp::eval(a, env), itp::eval(b, env), n0);
@@ -217,8 +227,8 @@ NB_MODULE(itp_env_lnl, m) {
     nb::class_<ProofStateHandle>(m, "ProofState")
         .def("intro", &ProofStateHandle::intro_, "name"_a = "", "target_meta_id"_a = nb::none())
         .def("apply", &ProofStateHandle::apply_, "term"_a, "target_meta_id"_a = nb::none())
-        .def("cases", &ProofStateHandle::cases_, "hyp_level"_a, "target_meta_id"_a = nb::none())
-        .def("induct", &ProofStateHandle::induct_, "hyp_level"_a, "target_meta_id"_a = nb::none())
+        .def("cases", &ProofStateHandle::cases_, "hyp_level"_a, "target_meta_id"_a = nb::none(), "generalizing"_a = std::vector<uint32_t>{})
+        .def("induct", &ProofStateHandle::induct_, "hyp_level"_a, "target_meta_id"_a = nb::none(), "generalizing"_a = std::vector<uint32_t>{})
         .def("exact", &ProofStateHandle::exact_, "term"_a, "target_meta_id"_a = nb::none())
         .def("rewrite", &ProofStateHandle::rewrite_, "eq_term"_a, "x"_a, "y"_a, "transport_gid"_a, "symm_gid"_a, "target_meta_id"_a = nb::none())
         .def("is_complete", &ProofStateHandle::is_complete)

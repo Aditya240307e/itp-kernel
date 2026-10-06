@@ -222,7 +222,7 @@ def test_unifier():
         good = (ok == expect_ok) and (pending == expect_pending) and (expect_solved is None or solved == expect_solved)
         rows.append((name, expect_ok, ok, pending, solved, good, msg[:50]))
     def f1(): m, t = meta(0); return [m], t, t
-    case('?m =?= ?m  (reference quirk preserved: rejected by the occurs check)', 0, f1, False, 0, [False])
+    case('?m =?= ?m  (reference quirk, now FIXED: identical metas unify)', 0, f1, True, 0, [False])
     def f2(): m, t = meta(0); return [m], t, Sx(t)
     case('occurs check: ?m =?= S ?m', 0, f2, False, 0, [False])
     def f3(): m, t = meta(0); return [m], t, Sx(Z)

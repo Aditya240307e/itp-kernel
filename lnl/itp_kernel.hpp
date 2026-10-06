@@ -4667,6 +4667,8 @@ inline ElabResult unify_values(const Value& a_in, const Value& b_in, ElabCtx& ec
         auto* n = std::get_if<VNeutral>(&v);
         return n && n->head.kind == NeutralHead::Kind::Meta;
     };
+    // the same metavariable applied to the same arguments is trivially equal (the reference rejected ?m =?= ?m: the occurs check fired on itself)
+    if (is_meta_headed(a) && is_meta_headed(b) && quote(a, ec.size()) == quote(b, ec.size())) return {};
     if (auto pat = is_miller_pattern(a)) {
         return detail::solve_pattern(pat->first, pat->second, quote(b, ec.size()), ec);
     }
@@ -11050,13 +11052,11 @@ inline NodeId generalized_goal(const Goal& g, const std::vector<std::pair<NodeId
     return close_binders(true, doms, reverted_js, replace_terms(g.target, subs));
 }
 
-inline ElabResult cases(ProofState& ps, uint32_t hyp_level, std::optional<uint32_t> target_meta_id = std::nullopt) {
+inline ElabResult cases(ProofState& ps, uint32_t hyp_level, std::optional<uint32_t> target_meta_id = std::nullopt, const std::vector<uint32_t>& generalizing = {}) {
     auto idx_opt = find_goal_index(ps, target_meta_id);
     if (!idx_opt) return no_goal_error("cases", target_meta_id);
     Goal g = ps.goals[*idx_opt];
     if (hyp_level >= g.hyps.size()) return std::unexpected(TypeError{TypeErrorKind::Other, NodeId{}, std::nullopt, "cases: hypothesis index out of range"});
-    if (g.target.tag == NodeType::PI)
-        return std::unexpected(TypeError{TypeErrorKind::Other, g.target, std::nullopt, "cases: goal's own target is still a Pi -- intro every quantified variable before casing"});
     auto si = scrutinee_info("cases", g, hyp_level); if (!si) return std::unexpected(si.error());
     const uint32_t n = g.ec.size(), tgid = si->type_gid, arity = static_cast<uint32_t>(si->indices.size());
     const std::vector<NodeId>& concrete_indices = si->indices;
@@ -11066,6 +11066,7 @@ inline ElabResult cases(ProofState& ps, uint32_t hyp_level, std::optional<uint32
     // cases reverts a CONTIGUOUS suffix: from the earliest hypothesis that mentions an index or the scrutinee, to the end
     uint32_t revert_from = hyp_level + 1;
     for (uint32_t j = 0; j < hyp_level; ++j) if (replace_terms(g.hyps[j].type, subs) != g.hyps[j].type) { revert_from = j; break; }
+    for (uint32_t j : generalizing) if (j < hyp_level) revert_from = std::min(revert_from, j);   // F6: explicitly generalised hypotheses (those after the scrutinee are reverted anyway)
     std::vector<uint32_t> reverted_js;
     for (uint32_t j = revert_from; j < g.hyps.size(); ++j) if (j != hyp_level) reverted_js.push_back(j);
     NodeId G = generalized_goal(g, subs, reverted_js);
@@ -11157,13 +11158,11 @@ inline ElabResult cases(ProofState& ps, uint32_t hyp_level, std::optional<uint32
     return {};
 }
 
-inline ElabResult induct(ProofState& ps, uint32_t hyp_level, std::optional<uint32_t> target_meta_id = std::nullopt) {
+inline ElabResult induct(ProofState& ps, uint32_t hyp_level, std::optional<uint32_t> target_meta_id = std::nullopt, const std::vector<uint32_t>& generalizing = {}) {
     auto idx_opt = find_goal_index(ps, target_meta_id);
     if (!idx_opt) return no_goal_error("induct", target_meta_id);
     Goal g = ps.goals[*idx_opt];
     if (hyp_level >= g.hyps.size()) return std::unexpected(TypeError{TypeErrorKind::Other, NodeId{}, std::nullopt, "induct: hypothesis index out of range"});
-    if (g.target.tag == NodeType::PI)
-        return std::unexpected(TypeError{TypeErrorKind::Other, g.target, std::nullopt, "induct: goal's own target is still a Pi -- intro every quantified variable before inducting"});
     auto si = scrutinee_info("induct", g, hyp_level); if (!si) return std::unexpected(si.error());
     const uint32_t n = g.ec.size(), tgid = si->type_gid, arity = static_cast<uint32_t>(si->indices.size());
     const std::vector<NodeId>& concrete_indices = si->indices;
@@ -11179,6 +11178,7 @@ inline ElabResult induct(ProofState& ps, uint32_t hyp_level, std::optional<uint3
     subs.push_back({mk_fvar(hyp_level), mk_fvar(n + arity)});
     // induct reverts exactly the hypotheses that (transitively) depend on the scrutinee or its indices: a fixpoint, not a suffix
     std::vector<bool> needs_revert(g.hyps.size(), false);
+    for (uint32_t j : generalizing) if (j < g.hyps.size() && j != hyp_level) needs_revert[j] = true;   // F6: explicitly generalised hypotheses, then the closure
     for (bool changed = true; changed;) {
         changed = false;
         std::vector<std::pair<NodeId, NodeId>> probe = subs;
@@ -11422,6 +11422,25 @@ inline std::vector<NodeId> apply_candidates(const ProofState& ps, const Discrimi
         if (goal_key && detail::conclusion_head_key(g.hyps[lvl].type, lvl) == goal_key) result.push_back(mk_fvar(lvl));
     return result;
 }
+
+
+// ===========================================================================
+// Scope validation for terms built OUTSIDE the kernel (API boundary). A term is well-scoped in a context of `nfree` variables when it has no loose
+// bound variable and every context variable has a level below nfree. eval()/Env::operator[] abort on an out-of-range level, so every entry point that
+// accepts a user-built term must reject ill-scoped input with an error first. (The reference aborts on such input too: finding F18.)
+// ===========================================================================
+namespace detail {
+inline bool fvars_below(NodeId t, uint32_t nfree, std::unordered_set<uint64_t>& seen) {
+    uint64_t key = (static_cast<uint64_t>(static_cast<uint32_t>(t.tag)) << 32) | t.index;
+    if (!seen.insert(key).second) return true;
+    if (t.tag == NodeType::VAR) { Var v = ctx().vars[t.index]; return v.bound || v.n < nfree; }
+    return !any_child(t, [&](NodeId c) { return !fvars_below(c, nfree, seen); });
+}
+inline bool well_scoped(NodeId t, uint32_t nfree) {
+    if (loose_range(t) != 0) return false;
+    std::unordered_set<uint64_t> seen; return fvars_below(t, nfree, seen);
+}
+} // namespace detail
 
 } // namespace itp
 

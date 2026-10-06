@@ -2,6 +2,14 @@
 import os, re, shutil, subprocess, sys, time
 SRC = '/home/claude/itp_py/lnl'
 MUTANTS = {
+ 'M47 induct ignores the generalizing list (F6)': ("    for (uint32_t j : generalizing) if (j < g.hyps.size() && j != hyp_level) needs_revert[j] = true;   // F6: explicitly generalised hypotheses, then the closure\n", ""),
+ 'M48 cases ignores the generalizing list (F6)': ("    for (uint32_t j : generalizing) if (j < hyp_level) revert_from = std::min(revert_from, j);   // F6: explicitly generalised hypotheses (those after the scrutinee are reverted anyway)", ""),
+ 'M42 scope validation accepts everything': ("    if (loose_range(t) != 0) return false;\n    std::unordered_set<uint64_t> seen; return fvars_below(t, nfree, seen);", "    return true;"),
+ 'M43 scope validation ignores context variables beyond the context': ("return v.bound || v.n < nfree;", "return true;"),
+ 'M44 scope validation ignores loose bound variables': ("    if (loose_range(t) != 0) return false;\n    std::unordered_set<uint64_t> seen;", "    std::unordered_set<uint64_t> seen;"),
+ 'M45 lambda binder domain need not be a type (F19)': ("auto s = sort_level_of(dj, cur, es, \"Lambda domain must be a type\"); if (!s) return std::unexpected(s.error());", "auto s = sort_level_of(dj, cur, es, \"Lambda domain must be a type\"); if (!s) s = 0u;"),
+ 'M46 intro on a non-literal Pi uses the raw ids (F17, the reference behaviour)': ("dom_ty = quote(eval(pi->dom_id, pi->env), n);\n        new_target = quote(eval(pi->cod_id, pi->env.extend(fresh_neutral(n))), n + 1);", "dom_ty = pi->dom_id;\n        new_target = pi->cod_id;"),
+ 'M41 identical metas no longer unify (the quirk returns)': ("    if (is_meta_headed(a) && is_meta_headed(b) && quote(a, ec.size()) == quote(b, ec.size())) return {};\n", ""),
  'M37 rewind does not clear the loose_range memo': ("        loose_cache.clear();\n        vars.rewind(cp.vars_n);", "        vars.rewind(cp.vars_n);"),
  'M39 rewind does not roll back the metas': ("        meta_ctx.rewind(cp.meta_mark);", ""),
  'M40 rewind keeps stale same_ctor cache entries': ("it = (it->first >= keep || it->second >= keep) ? same_ctor_gid_by_family.erase(it) : std::next(it);", "it = std::next(it);"),
@@ -42,7 +50,7 @@ MUTANTS = {
  'M7 strict positivity always true': ("                if (!is_strictly_positive(type_global_id, arg_ty))\n                    throw std::logic_error(\"itp: constructor '\" + ctor.name + \"' fails strict positivity", "                if (false)\n                    throw std::logic_error(\"itp: constructor '\" + ctor.name + \"' fails strict positivity"),
  'M8 Match branch count not checked': ("    if (ctor_gids.size() != branches.size())\n        return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, motive, std::nullopt,\n            \"Match branch count", "    if (false)\n        return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, motive, std::nullopt,\n            \"Match branch count"),
 }
-GATE_CMDS = (['s2_tests.py', '1500'], ['harness.py', '1500', '3'], ['s3_tests.py', '600'], ['s4_tests.py', '800'], ['oracle_gate.py'], ['s5_tests.py', '1200', '3'], ['s5_probe_tests.py', '500', '7'])
+GATE_CMDS = (['s2_tests.py', '1500'], ['harness.py', '1500', '3'], ['s3_tests.py', '600'], ['s4_tests.py', '800'], ['oracle_gate.py'], ['s5_tests.py', '1200', '3'], ['s5_probe_tests.py', '500', '7'], ['s6_logic_tests.py'], ['s6_f6_tests.py'])
 
 def run(names):
     results = []
@@ -71,8 +79,8 @@ def run(names):
             except subprocess.TimeoutExpired:
                 outs.append((99, 'Traceback: HANG (timeout) -- the mutant does not terminate'))
         text = '\n'.join(o[1] for o in outs)
-        caught = any(o[0] != 0 for o in outs) or bool(re.search(r"\bBAD\b|PROBLEM|FAILED|disagreements [1-9]|Traceback|ACCEPTED|S2 GATE: FAIL|S3 GATE: FAIL|S4 GATE: FAIL|ORACLE GATE: FAIL|S5 GATE: FAIL|S5 PROBE GATE: FAIL", text))
-        first = next((l.strip()[:110] for l in text.split('\n') if re.search(r"\bBAD\b|PROBLEM|FAILED|disagreements [1-9]|Traceback|ACCEPTED|S2 GATE: FAIL|S3 GATE: FAIL|S4 GATE: FAIL|ORACLE GATE: FAIL|S5 GATE: FAIL|S5 PROBE GATE: FAIL", l)), '')
+        caught = any(o[0] != 0 for o in outs) or bool(re.search(r"\bBAD\b|PROBLEM|FAILED|disagreements [1-9]|Traceback|ACCEPTED|S2 GATE: FAIL|S3 GATE: FAIL|S4 GATE: FAIL|ORACLE GATE: FAIL|S5 GATE: FAIL|S5 PROBE GATE: FAIL|S6 LOGIC GATE: FAIL|S6 F6 GATE: FAIL", text))
+        first = next((l.strip()[:110] for l in text.split('\n') if re.search(r"\bBAD\b|PROBLEM|FAILED|disagreements [1-9]|Traceback|ACCEPTED|S2 GATE: FAIL|S3 GATE: FAIL|S4 GATE: FAIL|ORACLE GATE: FAIL|S5 GATE: FAIL|S5 PROBE GATE: FAIL|S6 LOGIC GATE: FAIL|S6 F6 GATE: FAIL", l)), '')
         results.append((nm, 'CAUGHT' if caught else 'SURVIVED  <-- test gap', first)); print("  %-62s %s  (%.0fs)" % (nm, results[-1][1], time.time() - t0), flush=True)
     return results
 if __name__ == '__main__':

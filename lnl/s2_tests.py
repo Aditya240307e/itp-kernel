@@ -48,7 +48,7 @@ def admission_cases(g):
       ('U_paradox: mk : Type0 -> U', T0, [('mk', [T0], [])], False, "universe"),
       ('field Nat -> Type0 in a Type0 inductive', T0, [('mk', [('pi', nat, T0)], [])], False, "universe"),
       ('field whose type is a value', T0, [('mk', [zero], [])], False, "not a type"),
-      ('unbound variable in a field type', T0, [('mk', [('var', 5)], [])], False, "ill-typed"),
+      ('unbound variable in a field type', T0, [('mk', [('var', 5)], [])], False, "ill-"),
       ('constructor omits a required index', ('pi', nat, T0), [('mk', [], [])], False, "fully apply"),
       ('too many indices', ('pi', nat, T0), [('mk', [], [zero, zero])], False, "ill-typed"),
       ('index of the wrong type', ('pi', nat, T0), [('mk', [], [T0])], False, "ill-typed"),
