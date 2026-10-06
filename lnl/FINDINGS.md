@@ -13,7 +13,7 @@ Legend: **fixed** = fixed and covered by a test that fails without it; **by cons
 | F5 | Ex over a lambda cannot be eliminated | fixed in parameter mode | S7 `ex_lambda`; needs `parameters` ON (the kernel otherwise generalises Ex's parameters) |
 | F6 | strong induction needs a design | **partial** | Pi-headed induct/cases and `generalizing` done (S6 F6). OPEN: the bounded-predicate (`Below`) probe |
 | F7 | no logical vocabulary | fixed | True, False, And, Or, Ex, Not, Iff declared; 7 proofs verified; 6 wrong proofs rejected (S6) |
-| F8 | the checker is not independent; scaling unmeasured | **open** | independent checker in progress; scaling benchmarks deferred to the large machine |
+| F8 | the checker is not independent; scaling unmeasured | **partial** | independent checker DONE (indep_checker.py, S8): written from the spec with named variables; exact agreement with the kernel on 11,972 mutated proofs, 7 guard cases, all library definitions. OPEN: scaling benchmarks (deferred to the large machine) |
 | F9 | forced constructor application used dummy binders | fixed | kernel Match typing + both tactics; M22-M26 |
 | F10 | sequential marker substitution collides (reverted hypotheses) | by construction | 184+ events validated against the reference's ill-formed state |
 | F11 | field after a recursive field used the IH's level | by construction | custom family test; M17 |
@@ -25,6 +25,8 @@ Legend: **fixed** = fixed and covered by a test that fails without it; **by cons
 | F17 | reference `intro` on a definition that unfolds to a Pi | fixed | NbE path; `not_not_intro`; M46 |
 | F18 | reference aborts on ill-scoped terms (hybrid did too; now validated) | fixed in the hybrid | 288 ill-scoped terms rejected; M42-M44 |
 | F19 | reference accepts a Match motive whose binder domain is not a type | hybrid is stricter | minimal case + 21 mutant disagreements; M45 |
+| F20 | Match terms are MODE-DEPENDENT: under `parameters` a branch must use the parameter's value, not its field binder | documented (design consequence) | kernel and independent checker both reject exactly cong, le_trans, transport when re-declared in parameter mode |
+| F21 | a lambda CHECKED against a Pi never validated its binder annotation (infer did) | fixed | found by the independent checker; M60; S2/S3/S4/S6/S7 unaffected |
 
 Other open items: M12 (`drain_pending` is effectively dead at the tactic level); motive-hole inference ignores parameters (untested path);
 the default of the `parameters` option is OFF (a decision for the fingerprint stage).

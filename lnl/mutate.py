@@ -2,6 +2,7 @@
 import os, re, shutil, subprocess, sys, time
 SRC = '/home/claude/itp_py/lnl'
 MUTANTS = {
+ 'M60 a lambda checked against a Pi need not have a well-typed binder annotation (F21)': ("        if (dom_j != expected_dom) { auto sdom = sort_level_of(dom_j, cur_ec, es, \"Lambda domain must be a type\"); if (!sdom) return std::unexpected(sdom.error()); }\n", ""),
  'M59 UNSOUND unifier: different constructors unify (the canary must notice)': ("return mismatch(\"different constructors\");", "return ElabResult{};"),
  'M49 parameter analysis ignores uniformity of recursive occurrences': ("            for (NodeId ft : inst.arg_types) if (!uniform_family_occurrences(ft, family_gid, arity, i, r)) { ok = false; break; }", "            for (NodeId ft : inst.arg_types) if (false && !uniform_family_occurrences(ft, family_gid, arity, i, r)) { ok = false; break; }"),
  'M50 parameter analysis ignores distinctness from earlier parameters': ("            for (uint32_t k = 0; k < i; ++k) if (inst.result_indices[k] == r) { ok = false; break; }   // distinct from the earlier parameters' variables", "            for (uint32_t k = 0; k < i; ++k) if (false && inst.result_indices[k] == r) { ok = false; break; }"),
@@ -61,7 +62,7 @@ MUTANTS = {
  'M7 strict positivity always true': ("                if (!is_strictly_positive(type_global_id, arg_ty))\n                    throw std::logic_error(\"itp: constructor '\" + ctor.name + \"' fails strict positivity", "                if (false)\n                    throw std::logic_error(\"itp: constructor '\" + ctor.name + \"' fails strict positivity"),
  'M8 Match branch count not checked': ("    if (ctor_gids.size() != branches.size())\n        return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, motive, std::nullopt,\n            \"Match branch count", "    if (false)\n        return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, motive, std::nullopt,\n            \"Match branch count"),
 }
-GATE_CMDS = (['s2_tests.py', '1500'], ['harness.py', '1500', '3'], ['s3_tests.py', '600'], ['s4_tests.py', '800'], ['oracle_gate.py'], ['s5_tests.py', '1200', '3'], ['s5_probe_tests.py', '500', '7'], ['s6_logic_tests.py'], ['s6_f6_tests.py'], ['s7_param_tests.py', '150', '600'])
+GATE_CMDS = (['s2_tests.py', '1500'], ['harness.py', '1500', '3'], ['s3_tests.py', '600'], ['s4_tests.py', '800'], ['oracle_gate.py'], ['s5_tests.py', '1200', '3'], ['s5_probe_tests.py', '500', '7'], ['s6_logic_tests.py'], ['s6_f6_tests.py'], ['s7_param_tests.py', '150', '600'], ['s8_indep_tests.py', '100'])
 
 def run(names):
     results = []
@@ -91,8 +92,8 @@ def run(names):
             except subprocess.TimeoutExpired:
                 outs.append((99, 'Traceback: HANG (timeout) -- the mutant does not terminate'))
         text = '\n'.join(o[1] for o in outs)
-        caught = any(o[0] != 0 for o in outs) or bool(re.search(r"\bBAD\b|PROBLEM|FAILED|disagreements [1-9]|Traceback|ACCEPTED|S2 GATE: FAIL|S3 GATE: FAIL|S4 GATE: FAIL|ORACLE GATE: FAIL|S5 GATE: FAIL|S5 PROBE GATE: FAIL|S6 LOGIC GATE: FAIL|S6 F6 GATE: FAIL|S7 PARAM GATE: FAIL", text))
-        first = next((l.strip()[:110] for l in text.split('\n') if re.search(r"\bBAD\b|PROBLEM|FAILED|disagreements [1-9]|Traceback|ACCEPTED|S2 GATE: FAIL|S3 GATE: FAIL|S4 GATE: FAIL|ORACLE GATE: FAIL|S5 GATE: FAIL|S5 PROBE GATE: FAIL|S6 LOGIC GATE: FAIL|S6 F6 GATE: FAIL|S7 PARAM GATE: FAIL", l)), '')
+        caught = any(o[0] != 0 for o in outs) or bool(re.search(r"\bBAD\b|PROBLEM|FAILED|disagreements [1-9]|Traceback|ACCEPTED|S2 GATE: FAIL|S3 GATE: FAIL|S4 GATE: FAIL|ORACLE GATE: FAIL|S5 GATE: FAIL|S5 PROBE GATE: FAIL|S6 LOGIC GATE: FAIL|S6 F6 GATE: FAIL|S7 PARAM GATE: FAIL|S8 INDEP GATE: FAIL", text))
+        first = next((l.strip()[:110] for l in text.split('\n') if re.search(r"\bBAD\b|PROBLEM|FAILED|disagreements [1-9]|Traceback|ACCEPTED|S2 GATE: FAIL|S3 GATE: FAIL|S4 GATE: FAIL|ORACLE GATE: FAIL|S5 GATE: FAIL|S5 PROBE GATE: FAIL|S6 LOGIC GATE: FAIL|S6 F6 GATE: FAIL|S7 PARAM GATE: FAIL|S8 INDEP GATE: FAIL", l)), '')
         results.append((nm, 'CAUGHT' if caught else 'SURVIVED  <-- test gap', first)); print("  %-62s %s  (%.0fs)%s" % (nm, results[-1][1], time.time() - t0, ('  | ' + first) if os.environ.get('MUT_VERBOSE') else ''), flush=True)
     return results
 if __name__ == '__main__':

@@ -10857,6 +10857,9 @@ inline ElabResult check_lambda(NodeId t, NodeId expected_ty, ElabCtx& ec, ElabSt
         Lambda l = ctx().lambdas[body.index];
         NodeId dom_j = instantiate(l.type_id, fv_rev);
         NodeId expected_dom = quote(eval(pi->dom_id, pi->env), n + j);
+        // F21: a binder annotation must itself be a type. Unifying it with the expected domain is not enough (an ill-typed annotation can be
+        // convertible to a well-typed one), and infer(Lambda) already insists on it. Skipped only when it IS the expected domain.
+        if (dom_j != expected_dom) { auto sdom = sort_level_of(dom_j, cur_ec, es, "Lambda domain must be a type"); if (!sdom) return std::unexpected(sdom.error()); }
         if (ElabResult r = unify(dom_j, expected_dom, cur_ec, es); !r) return r;
         Value next = eval(pi->cod_id, pi->env.extend(fresh_neutral(n + j)));
         cur = std::move(next);

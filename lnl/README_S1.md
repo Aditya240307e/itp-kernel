@@ -307,3 +307,30 @@ a different argument (NonUniform), a repeated variable (Rep slot 1), a slot afte
 * injectivity (`S a = S b -> a = b`) is NOT derivable by `cases` (1 goal is left): the rest of F2b.
 * motive-hole inference ignores parameters (untested). The soundness argument is an argument plus a canary, not a proof; the independent checker (F8) is meant to test the implementation.
 See FINDINGS.md for the status of every finding.
+
+
+---
+# S8: the independent checker (F8) -- gate PASS (2026-10-06)
+`indep_checker.py` (~330 lines) was written from the SPECIFICATION (its docstring states the rules) and built differently from the kernel: named variables with explicit capture-avoiding substitution, conversion by
+weak-head normalisation, its own universe rule, structural-recursion guard, parameter analysis and Match rule. It reads the kernel's global table through the read-only `Kernel.global_info(gid)` (type, value, constructor
+family/index, a family's constructors) and shares only the term-tree format with the code under test. `s8_indep_tests.py` is the gate.
+
+## Evidence
+* re-checks all 35 globals (library, logic kit, derived `__same_ctor`/`__Unit`/`__Empty`): 0 rejected in legacy mode; accepts the 7 kit proofs; rejects the 6 wrong proofs.
+* differential on MUTATED proofs (scope-aware mutations of named terms: variable, constant, sort, argument swap, annotation, branch swap, scrutinee, Fix index): legacy 4,296 of 4,296 verdicts agree (138 accept, 4,158 reject);
+  parameter mode 7,676 of 7,676 (389 / 7,287). Zero disagreements in either direction.
+* guard corpus: 7 Fix terms valid or invalid only because of the structural-recursion guard agree with my labels in the kernel AND the checker.
+* re-declaring the library through the kernel's checked path in parameter mode: the kernel and the checker reject exactly {cong, le_trans, transport} (see F20 below).
+* the checker alone catches kernel mutants M1 (guard off; needs the guard corpus), M2, M3, M5, M8, M60.
+
+## Findings it produced
+* **F21 (fixed):** `check_lambda` only unified a binder annotation with the expected domain and never checked that the annotation is a type, so an ill-typed annotation convertible to a well-typed one was accepted
+  (`__same_ctor_0 (Succ Q) Zero` and `__same_ctor_0 (Succ m) Zero` both reduce to `__Empty`). It is probably harmless computationally (the annotation equals the expected type) but it broke the invariant that every
+  subterm of an accepted term is well typed. Now validated unless the annotation is literally the expected domain. 15 disagreements in the first run (all from exploit_le) disappeared; M60 restores it and is caught.
+* **F20 (documented):** Match terms are mode-dependent. Library definitions written under the legacy rule (a branch uses its field binder for a parameter position) do not check under the parameter rule, where the branch must
+  use the parameter's value. A library therefore has to be checked in ONE mode; the tactics produce terms consistent with the active mode.
+
+## Limits
+The checker implements the same SPECIFICATION as the kernel (forcing, the parameter substitution rule): it validates the implementation, not the design. No eta and no cumulativity (as in both kernels); Let/Meta/Quot are
+rejected as unsupported; the guard is a conservative syntactic rule (a valid Fix it cannot recognise would show up as a disagreement); work is bounded by a fuel counter (exhaustion counts as rejection). Not done: the checker over the
+S2-style random typed terms. Mutant inventory: 59 defined (M1-M37, M39-M60), 58 caught; the survivor is M12.

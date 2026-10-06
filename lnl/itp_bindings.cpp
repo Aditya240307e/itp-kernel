@@ -183,6 +183,12 @@ struct KernelWrapper {
         for (uint32_t i = 0; i < defs.size(); ++i) out.emplace_back(i, defs[i].name, defs[i].type, defs[i].value.has_value());
         return out;
     }
+    // read-only view of a global for the independent checker: (name, type, value or None, ctor family or -1, ctor index or -1, constructors of this family in order, declared recursive)
+    std::tuple<std::string, itp::NodeId, std::optional<itp::NodeId>, int, int, std::vector<uint32_t>, bool> global_info(uint32_t gid) {
+        auto g = activate(); const auto& d = itp::ctx().globals.defs.at(gid);
+        std::vector<uint32_t> ctors; auto it = itp::ctx().globals.ctors_by_family.find(gid); if (it != itp::ctx().globals.ctors_by_family.end()) ctors = it->second;
+        return {d.name, d.type, d.value, d.ctor_info ? static_cast<int>(d.ctor_info->ind_type_global_id) : -1, d.ctor_info ? static_cast<int>(d.ctor_info->ctor_idx) : -1, ctors, d.recursive_info.has_value()};
+    }
     // Raw dump with explicit variable kinds: b<i> = bound index, f<l> = context level.
     std::string dump_raw(itp::NodeId n) {
         auto g = activate();
@@ -292,5 +298,6 @@ NB_MODULE(itp_env_lnl, m) {
         .def("abstract_fvars", &KernelWrapper::abstract_fvars, "term"_a, "levels"_a)
         .def("num_globals", &KernelWrapper::num_globals)
         .def("list_globals", &KernelWrapper::list_globals)
+        .def("global_info", &KernelWrapper::global_info, "gid"_a)
         .def("dump_raw", &KernelWrapper::dump_raw, "term"_a);
 }
