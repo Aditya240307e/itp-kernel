@@ -1017,6 +1017,9 @@ struct ExecutionContext {
     std::unordered_map<uint64_t, uint32_t> loose_cache; // loose_range memo, keyed by NodeId; cleared on rewind
     std::unordered_map<uint64_t, std::vector<bool>> param_cache; // family_param_slots memo, keyed by (family, constructor count); cleared on rewind
     bool param_mode = false; // option "parameters": distinguish a family's PARAMETERS from its indices (family_param_slots); off = the reference's behaviour
+    bool prop_mode = false;  // option "prop_elim": level 0 is Prop. An inductive family that lives in Type0 and is not a SYNTACTIC SUBSINGLETON (it may be eliminated into any sort only if it has no constructor, or one whose every
+                             // field is a proof or occurs in the result indices) can only be eliminated into Type0. Large fields are then allowed in such families. Required before classical axioms (Berardi, Reynolds).
+    std::unordered_set<uint32_t> prop_elim_only;   // the families (global ids) subject to that restriction; filled by finish_inductive in prop_mode
 
     // Reclaims every term node and metavariable created since a prior
     // checkpoint(), for use at an episode boundary (an RL step, a
@@ -5691,7 +5694,7 @@ inline ElabResult check_match_branches(uint32_t type_global_id, NodeId motive, c
 /// uncaught exception rather than failing gracefully. Confirmed
 /// empirically, not a hypothetical: this is exactly what happened before
 /// this check existed.
-inline ElabResult verify_motive_shape(NodeId motive_id, uint32_t arity, ElabCtx& ec, ElabState& es);
+inline ElabResult verify_motive_shape(NodeId motive_id, uint32_t arity, ElabCtx& ec, ElabState& es, uint32_t* sort_level = nullptr);
 
 // ---- forward declarations for the S2 typing core (defined at the end of this file)
 inline TypeResult infer(NodeId t, ElabCtx& ec, ElabState& es);
@@ -8429,7 +8432,7 @@ inline void check_inductive_admission(uint32_t type_gid, const std::vector<CtorS
             for (NodeId ri : ctor.result_indices) {
                 if (inspect(ri, [&](Var v) { return !v.bound && v.n == j; }, [&](auto) { return false; })) { parameter_like = true; break; }
             }
-            if (!parameter_like && field_level[j] > *fam_level) {
+            if (!parameter_like && field_level[j] > *fam_level && !(ctx().prop_mode && *fam_level == 0)) {
                 throw std::logic_error("itp: constructor '" + ctor.name + "' of '" + fam + "': field " + std::to_string(j) +
                                        " lives in universe " + std::to_string(field_level[j]) + ", larger than the family's own "
                                        "universe " + std::to_string(*fam_level) + " (a large field in a small inductive is "
@@ -10449,6 +10452,28 @@ inline NodeId build_ctor_type(uint32_t type_global_id, const CtorSpec& ctor) {
         t = mk_pi(ctor.arg_types[j], abstract_fvars(t, std::vector<uint32_t>{static_cast<uint32_t>(j)}));
     return t;
 }
+/// prop_elim: decides, once the constructors are known, whether a Type0 family can only be eliminated into Type0. Subsingleton (unrestricted): no constructor, or exactly one whose every field is a proof (its
+/// type lives in Type0) or occurs as a bare result index. Anything unexpected (an ill-typed field) is treated as restricted. Families above Type0 are data and never restricted.
+inline void record_prop_elim_restriction(uint32_t type_gid, const std::vector<CtorSpec>& ctors) {
+    if (!ctx().prop_mode) return;
+    NodeId cur = ctx().globals.defs[type_gid].type;
+    while (cur.tag == NodeType::PI) cur = ctx().pis[cur.index].cod_id;
+    if (cur.tag != NodeType::TYPE || ctx().types[cur.index].universe_level != 0) return;
+    bool subsingleton = ctors.size() <= 1;
+    if (ctors.size() == 1) {
+        const CtorSpec& ctor = ctors[0]; ElabState es; ElabCtx ec;
+        for (std::size_t j = 0; j < ctor.arg_types.size() && subsingleton; ++j) {
+            auto sr = infer(ctor.arg_types[j], ec, es);
+            bool proof_field = false;
+            if (sr) { Value sv = eval(*sr, ec.values); auto* vt = std::get_if<VType>(&sv); proof_field = vt && vt->universe_level == 0; }
+            bool in_indices = false;
+            for (NodeId ri : ctor.result_indices) if (inspect(ri, [&](Var v) { return !v.bound && v.n == j; }, [&](auto) { return false; })) { in_indices = true; break; }
+            if (!proof_field && !in_indices) subsingleton = false;
+            ec = ec.extend(ctor.arg_types[j]);
+        }
+    }
+    if (!subsingleton) ctx().prop_elim_only.insert(type_gid);
+}
 inline InductiveHandle finish_inductive_unchecked(uint32_t type_global_id, std::vector<CtorSpec> ctors) {
     ExecutionContext& c = ctx();
     InductiveHandle handle; handle.type_global_id = type_global_id;
@@ -10457,6 +10482,7 @@ inline InductiveHandle finish_inductive_unchecked(uint32_t type_global_id, std::
         uint32_t arity = static_cast<uint32_t>(ctors[idx].arg_types.size());
         handle.ctor_global_ids.push_back(c.globals.declare_ctor(ctor_ty, ctors[idx].name, type_global_id, static_cast<uint32_t>(idx), arity));
     }
+    record_prop_elim_restriction(type_global_id, ctors);
     return handle;
 }
 inline void finish_recursive_function(uint32_t fn_gid, uint32_t ind_type_global_id, uint32_t decreasing_arg_level, NodeId body, bool = false) {
@@ -10603,7 +10629,7 @@ inline std::expected<uint32_t, TypeError> sort_level_of(NodeId t, ElabCtx& ec, E
 
 inline std::vector<NodeId> reversed(const std::vector<NodeId>& v) { return std::vector<NodeId>(v.rbegin(), v.rend()); }
 
-inline ElabResult verify_motive_shape(NodeId motive_id, uint32_t arity, ElabCtx& ec, ElabState& es) {
+inline ElabResult verify_motive_shape(NodeId motive_id, uint32_t arity, ElabCtx& ec, ElabState& es, uint32_t* sort_level) {
     TypeResult motive_ty_r = infer(motive_id, ec, es);
     if (!motive_ty_r) return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, motive_id, std::nullopt, "explicit motive_id is not well-typed"});
     Value motive_ty_val = eval(*motive_ty_r, ec.values);
@@ -10614,6 +10640,7 @@ inline ElabResult verify_motive_shape(NodeId motive_id, uint32_t arity, ElabCtx&
         Value next = eval(mpi->cod_id, mpi->env.extend(fresh_neutral(ec.size())));
         motive_ty_val = std::move(next);
     }
+    if (sort_level) if (auto* vt = std::get_if<VType>(&motive_ty_val)) *sort_level = vt->universe_level;     // the sort the motive's result type lives in: the ELIMINATION sort
     return {};
 }
 
@@ -10731,6 +10758,12 @@ inline MotiveParts motive_binders(uint32_t tgid, uint32_t n, const std::vector<N
 inline ElabResult check_match_branches(uint32_t type_global_id, NodeId motive, const std::vector<NodeId>& branches,
                                         const std::vector<NodeId>& concrete_indices, ElabCtx& ec, ElabState& es) {
     std::vector<uint32_t> ctor_gids = detail::ctor_gids_for_type(type_global_id);
+    if (ctx().prop_mode && ctx().prop_elim_only.count(type_global_id)) {      // a proposition that is not a syntactic subsingleton: eliminable only into Type0
+        uint32_t elim_level = 0;
+        if (verify_motive_shape(motive, static_cast<uint32_t>(concrete_indices.size()), ec, es, &elim_level) && elim_level != 0)
+            return std::unexpected(TypeError{TypeErrorKind::Other, motive, std::nullopt, "Match: large elimination from the proposition '" + ctx().globals.defs[type_global_id].name +
+                "' (an inductive in Type0 that is not a syntactic subsingleton) is only allowed into Type0"});
+    }
     std::vector<bool> param_slots_v = ctx().param_mode ? family_param_slots(type_global_id) : std::vector<bool>();
     if (ctor_gids.size() != branches.size())
         return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, motive, std::nullopt,
@@ -11177,6 +11210,11 @@ inline ElabResult cases(ProofState& ps, uint32_t hyp_level, std::optional<uint32
     NodeId motive_original = close_lambda_telescope(mdoms, G, n);
     if (!infer(motive_original, g.ec, ps.es))
         return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, g.target, std::nullopt, "cases: constructed motive failed to type-check -- the goal likely depends on the hypothesis in a way that cannot be abstracted cleanly"});
+    if (ctx().prop_mode && ctx().prop_elim_only.count(tgid)) {
+        uint32_t elim_level = 0;
+        if (verify_motive_shape(motive_original, arity, g.ec, ps.es, &elim_level) && elim_level != 0)
+            return std::unexpected(TypeError{TypeErrorKind::Other, g.target, std::nullopt, "cases: the hypothesis's type is a proposition that is not a syntactic subsingleton, so it can only be eliminated into a proposition, but the goal is not one"});
+    }
     std::vector<uint32_t> ctor_gids = detail::ctor_gids_for_type(tgid);
     std::vector<detail::InstantiatedCtor> insts; std::vector<CtorIndexForcing> forcings;
     for (uint32_t ctor_gid : ctor_gids) {
@@ -11377,6 +11415,11 @@ inline ElabResult induct(ProofState& ps, uint32_t hyp_level, std::optional<uint3
     NodeId motive = close_lambda_telescope(mdoms, G, n);
     if (!infer(motive, g.ec, ps.es))
         return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, g.target, std::nullopt, "induct: constructed motive failed to type-check -- the goal likely depends on the hypothesis in a way that cannot be abstracted cleanly"});
+    if (ctx().prop_mode && ctx().prop_elim_only.count(tgid)) {
+        uint32_t elim_level = 0;
+        if (verify_motive_shape(motive, arity, g.ec, ps.es, &elim_level) && elim_level != 0)
+            return std::unexpected(TypeError{TypeErrorKind::Other, g.target, std::nullopt, "induct: the hypothesis's type is a proposition that is not a syntactic subsingleton, so it can only be eliminated into a proposition, but the goal is not one"});
+    }
     // the Fix is generic over the INDEX slots only (parameters stay fixed): compact the binders. Without parameters this is the identity.
     std::vector<uint32_t> rank(arity, 0);
     std::unordered_map<uint32_t, NodeId> to_compact;

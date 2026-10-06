@@ -128,8 +128,9 @@ class Env:
 class Checker:
     MAX_DEPTH = 200
 
-    def __init__(self, env, params=False, fuel=400000):
+    def __init__(self, env, params=False, fuel=400000, prop_elim=False):
         self.env, self.g, self.params, self.fuel0 = env, env.g, params, fuel
+        self.prop_elim = prop_elim; self._restricted = {}
         self.fuel = fuel; self._arity = {}
 
     def tick(self):
@@ -165,6 +166,27 @@ class Checker:
             gl = self.g[h[1]]
             if gl.ctor_family is not None and len(args) == self.ctor_fields(h[1]): return h[1], args
         return None
+
+    # ------------------------------------------------------------ prop_elim: Type0 is Prop (independent implementation of the stated rule)
+    def elim_restricted(self, fam):
+        """a family in Type0 that is not a syntactic subsingleton can only be eliminated into Type0. Subsingleton = no constructor, or exactly one whose every field is a proof (its type lives in Type0)
+        or occurs as a bare result index. Families above Type0 are data and never restricted."""
+        if fam in self._restricted: return self._restricted[fam]
+        t = self.g[fam].type
+        while t[0] == 'pi': t = t[3]
+        r = False
+        if t[0] == 's' and t[1] == 0:
+            ctors = self.g[fam].ctors
+            if len(ctors) > 1: r = True
+            elif len(ctors) == 1:
+                try:
+                    fields, res = self.open_ctor(ctors[0]); ctx = {}
+                    for x, A in fields:
+                        if self.sort_of(ctx, A) != 0 and ('v', x) not in res: r = True
+                        ctx[x] = A
+                except (CheckError, Unsupported): r = True
+        self._restricted[fam] = r
+        return r
 
     # ------------------------------------------------------------ parameters (independent implementation of the stated rule)
     def uniform(self, t, fam, k, i, r):
@@ -325,6 +347,7 @@ class Checker:
             if cur[0] != 'pi': raise CheckError('motive has the wrong shape')
             cur = self.whnf(subst(cur[3], cur[1], ('v', fresh())))
         if cur[0] != 's': raise CheckError('motive does not return a sort')       # ... and end in a sort
+        if self.prop_elim and cur[1] != 0 and self.elim_restricted(fam): raise CheckError('large elimination from a proposition')
         if len(brs) != len(ctors): raise CheckError('wrong number of branches')
         conc = [self.index_nf(a) for a in idx]
         params = self.param_slots(fam) if self.params else [False] * k

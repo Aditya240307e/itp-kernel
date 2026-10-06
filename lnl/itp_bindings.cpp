@@ -77,8 +77,8 @@ struct KernelWrapper {
         return h;
     }
     uint32_t loose_range_of(itp::NodeId t) { auto g = activate(); return itp::loose_range(t); }
-    void set_option(const std::string& name, bool value) { auto g = activate(); if (name == "parameters") itp::ctx().param_mode = value; else throw ITPError("unknown option: " + name); }
-    bool get_option(const std::string& name) { auto g = activate(); if (name == "parameters") return itp::ctx().param_mode; throw ITPError("unknown option: " + name); }
+    void set_option(const std::string& name, bool value) { auto g = activate(); if (name == "parameters") itp::ctx().param_mode = value; else if (name == "prop_elim") itp::ctx().prop_mode = value; else throw ITPError("unknown option: " + name); }
+    bool get_option(const std::string& name) { auto g = activate(); if (name == "parameters") return itp::ctx().param_mode; if (name == "prop_elim") return itp::ctx().prop_mode; throw ITPError("unknown option: " + name); }
     std::vector<int> param_slots(uint32_t family_gid) { auto g = activate(); std::vector<int> out; for (bool b : itp::family_param_slots(family_gid)) out.push_back(b ? 1 : 0); return out; }
     itp::DiscriminationTree index_library() { auto g = activate(); return itp::index_library(); }
     std::vector<itp::NodeId> apply_candidates(ProofStateHandle& psh, const itp::DiscriminationTree& lib, std::optional<uint32_t> target_meta_id) {
