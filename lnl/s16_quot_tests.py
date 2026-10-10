@@ -79,8 +79,9 @@ def section_a():
             tid = t7.declare_family_new(kk, name, sort, ctors)
             return kk, lambda: tid
         return build
-    def legacy():
-        kk, gg = pw.build_prop_world(); kk.set_option('prop_elim', False); return kk, lambda: gg['Eq']
+    def legacy():       # the same equality family, but in a world without prop_elim (the option cannot be switched off once globals exist)
+        kk = H.Kernel(); eq = t7.declare_family_new(kk, 'Eq', ('pi', T1, ('pi', V(0), ('pi', V(0), T0))), [('refl', [T1, ('var', 0)], [('var', 0), ('var', 1), ('var', 1)])])
+        return kk, lambda: eq
     def second():
         kk, gg, _h = std_world(); return kk, lambda: gg['Eq']
     def nonexistent():

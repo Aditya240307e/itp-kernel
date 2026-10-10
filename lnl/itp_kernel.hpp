@@ -26,6 +26,7 @@
 #include <cstdint>
 #include <expected>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <sstream>
@@ -760,6 +761,14 @@ struct NodePool {
 /// print's own two forward declarations above its real definition).
 inline std::vector<bool> recursive_field_mask(uint32_t ind_type_global_id, uint32_t ctor_gid);
 
+/// "No global": the value of an `allowed_unfinished` parameter that allows none.
+constexpr uint32_t kNoGlobal = std::numeric_limits<uint32_t>::max();
+struct GlobalEnv;
+namespace detail {
+/// The first global mentioned by `t` that is reserved (declared, not yet finished) and is not `allowed`, or nullopt. Defined after the term machinery.
+inline std::optional<uint32_t> unfinished_global_in(const GlobalEnv& env, NodeId t, uint32_t allowed);
+}
+
 struct CtorInfo {
     uint32_t ind_type_global_id;
     uint32_t ctor_idx;
@@ -838,7 +847,17 @@ struct GlobalEnv {
     // growth.
     std::unordered_map<uint32_t, std::vector<uint32_t>> ctors_by_family;
 
-    uint32_t declare(NodeId type, std::optional<NodeId> value, std::string name) {
+    /// The ONE place a global is installed. The environment must stay well founded: a global's type and value may mention only globals that are already
+    /// complete (and, for a type's own constructors, the type being finished -- `allowed_unfinished`). A global that is merely RESERVED has a type but no body or
+    /// constructors yet; if a later declaration could mention it, two reserved globals could end up defined in terms of each other, and `f := g, g := f` (or a
+    /// type that occurs negatively in a field of a second type that occurs in its own) would give a closed proof of False that no later check can see.
+    uint32_t declare(NodeId type, std::optional<NodeId> value, std::string name, uint32_t allowed_unfinished = kNoGlobal) {
+        auto require_complete = [&](NodeId t) {
+            if (auto bad = detail::unfinished_global_in(*this, t, allowed_unfinished))
+                throw std::logic_error("itp: '" + name + "' cannot mention global '" + defs[*bad].name + "', which is declared but not yet finished (a type or value may use only finished globals and, while it is being finished, itself)");
+        };
+        require_complete(type);
+        if (value) require_complete(*value);
         defs.push_back(GlobalDef{type, std::move(value), std::nullopt, std::nullopt, std::move(name)});
         return static_cast<uint32_t>(defs.size() - 1);
     }
@@ -846,6 +865,11 @@ struct GlobalEnv {
     /// Must be called whenever a definition's `value` is installed, replaced or removed: a cached value may have unfolded the old body (or, for a global
     /// that was still being defined, folded it).
     void invalidate_value_caches() const { for (const GlobalDef& d : defs) d.cached_value.reset(); }
+    /// Function bodies installed into already existing globals (finish_recursive_function*), net of rollbacks. A checkpoint records it: rewinding over such an installation
+    /// would leave a surviving global with a body whose nodes have been reclaimed (declaring a NEW global is detected through the size of `defs`, this is not).
+    uint64_t body_installs = 0;
+    void install_body(uint32_t gid, NodeId body) { defs.at(gid).value = body; ++body_installs; invalidate_value_caches(); }
+    void uninstall_body(uint32_t gid) { defs.at(gid).value = std::nullopt; --body_installs; invalidate_value_caches(); }
 
     // Declares a constructor global AND indexes it, in one call -- the
     // single chokepoint every inductive declaration goes through,
@@ -868,7 +892,7 @@ struct GlobalEnv {
     // mask's own ctx().globals[ctor_gid].type lookup sees exactly the
     // type declare() just stored, immediately above.
     uint32_t declare_ctor(NodeId type, std::string name, uint32_t ind_type_global_id, uint32_t ctor_idx, uint32_t arity) {
-        uint32_t gid = declare(type, std::nullopt, std::move(name));
+        uint32_t gid = declare(type, std::nullopt, std::move(name), ind_type_global_id);
         std::vector<bool> mask = recursive_field_mask(ind_type_global_id, gid);
         defs[gid].ctor_info = CtorInfo{ind_type_global_id, ctor_idx, arity, std::move(mask)};
         ctors_by_family[ind_type_global_id].push_back(gid);
@@ -1027,6 +1051,15 @@ struct ExecutionContext {
     bool prop_mode = false;  // option "prop_elim": level 0 is Prop. An inductive family that lives in Type0 and is not a SYNTACTIC SUBSINGLETON (it may be eliminated into any sort only if it has no constructor, or one whose every
                              // field is a proof or occurs in the result indices) can only be eliminated into Type0. Large fields are then allowed in such families. Required before classical axioms (Berardi, Reynolds).
     std::unordered_set<uint32_t> prop_elim_only;   // the families (global ids) subject to that restriction; filled by finish_inductive in prop_mode
+    /// The ONLY way to change prop_mode. The option decides the rules every later declaration is checked by AND the meaning of every earlier one: whether level 0 is Prop (definitional proof
+    /// irrelevance), which families are restricted to small elimination (recorded only in prop mode), whether a Type0 family may have large fields. A world built under one setting and
+    /// read under the other is inconsistent -- a Prop inductive declared without its restriction and eliminated into Type once the option is on proves False together with proof irrelevance --
+    /// so it can be changed only while nothing is declared. (Setting the value it already has is always fine.)
+    void set_prop_mode(bool v) {
+        if (v != prop_mode && !globals.defs.empty())
+            throw std::logic_error("itp: the option prop_elim cannot be changed once globals exist (it decides how every declaration is checked and what the existing ones mean); set it before declaring anything");
+        prop_mode = v;
+    }
 
     // Reclaims every term node and metavariable created since a prior
     // checkpoint(), for use at an episode boundary (an RL step, a
@@ -1078,13 +1111,14 @@ struct ExecutionContext {
                  matches_n, metas_n, type_univs_n, fixes_n;
         MetaContext::Mark meta_mark;
         std::size_t globals_n; // safety check only; globals itself is never rewound
+        uint64_t body_installs_n; // safety check only (see GlobalEnv::body_installs)
     };
 
     Checkpoint checkpoint() const {
         return Checkpoint{
             vars.size(), apps.size(), lambdas.size(), lets.size(), pis.size(), types.size(),
             consts.size(), matches.size(), metas.size(), type_univs.size(), fixes.size(),
-            meta_ctx.checkpoint(), globals.defs.size()
+            meta_ctx.checkpoint(), globals.defs.size(), globals.body_installs
         };
     }
 
@@ -1096,6 +1130,9 @@ struct ExecutionContext {
     }
 
     void rewind(const Checkpoint& cp) {
+        if (globals.body_installs != cp.body_installs_n)
+            throw std::logic_error("ExecutionContext::rewind: a recursive function was finished since this checkpoint -- rewinding would silently orphan the nodes of its body. "
+                                   "Do not call rewind() for an episode whose result is being kept.");
         if (globals.defs.size() != cp.globals_n) {
             // A probe may be the first thing to need a derived global (cases() builds `same_ctor` lazily
             // the first time it exploits a refutation; since cases() can now succeed in more situations,
@@ -2977,6 +3014,19 @@ inline bool contains_meta_rec(NodeId t, std::unordered_set<uint64_t>& seen) {
     return any_child(t, [&](NodeId c) { return contains_meta_rec(c, seen); });
 }
 inline bool contains_meta(NodeId t) { std::unordered_set<uint64_t> seen; return contains_meta_rec(t, seen); }
+inline std::optional<uint32_t> unfinished_global_rec(const GlobalEnv& env, NodeId t, uint32_t allowed, std::unordered_set<uint64_t>& seen) {
+    ITP_STACK_CHECK();
+    if (t.tag == NodeType::CONST) {
+        const uint32_t g = ctx().consts[t.index].global_id;
+        if (g != allowed && g < env.defs.size() && env.defs[g].reserved != GlobalDef::Reserved::None) return g;
+        return std::nullopt;
+    }
+    if (!seen.insert((static_cast<uint64_t>(static_cast<uint32_t>(t.tag)) << 32) | t.index).second) return std::nullopt;
+    std::optional<uint32_t> found;
+    any_child(t, [&](NodeId c) { found = unfinished_global_rec(env, c, allowed, seen); return found.has_value(); });
+    return found;
+}
+inline std::optional<uint32_t> unfinished_global_in(const GlobalEnv& env, NodeId t, uint32_t allowed) { std::unordered_set<uint64_t> seen; return unfinished_global_rec(env, t, allowed, seen); }
 /// Number of leading lambdas of a body: the function's own parameters, one of which must be the decreasing argument.
 inline uint32_t lambda_arity(NodeId t) { uint32_t n = 0; while (t.tag == NodeType::LAMBDA) { ++n; t = ctx().lambdas[t.index].body_id; } return n; }
 /// ?m x_{l0} .. x_{lk} =?= other  (distinct context variables): the solution is the closed lambda over the spine variables.
@@ -3869,8 +3919,15 @@ inline std::expected<uint32_t, TypeError> declare_checked(NodeId type, NodeId va
     // one means whatever its solution happens to be at the moment, which a rewind can change). A declaration is closed and meta-free: callers extract/instantiate first.
     if (detail::contains_meta(type) || detail::contains_meta(value))
         return std::unexpected(TypeError{TypeErrorKind::Other, value, std::nullopt, "a declaration may not contain metavariables (instantiate or finish the proof first)"});
+    // ... and mentions only FINISHED globals (GlobalEnv::declare enforces this for every installation; here it is a TypeError, before the expensive check)
+    for (NodeId part : {type, value})
+        if (auto bad = detail::unfinished_global_in(ctx().globals, part, kNoGlobal))
+            return std::unexpected(TypeError{TypeErrorKind::Other, part, std::nullopt, "a declaration may not mention global '" + ctx().globals.defs[*bad].name + "', which is declared but not yet finished"});
     ElabState es;
     ElabCtx empty_ec;
+    // The declared type must itself be a type: `check` takes its expected type on trust, so an ill-typed term that merely EVALUATES to the right thing -- `(fun x : Nat => Nat) Type0` -- would be
+    // stored as the global's type (and the independent checker, which sorts every type, would reject the world).
+    if (auto sort = sort_level_of(type, empty_ec, es, "the declared type is not a type"); !sort) return std::unexpected(sort.error());
     ElabResult r = check(value, type, empty_ec, es);
     if (!r) return std::unexpected(r.error());
     return ctx().globals.declare(type, std::move(value), std::move(name));
@@ -4746,7 +4803,22 @@ inline std::optional<std::string> recursive_function_problem(uint32_t fn_gid, ui
     if (ind_gid >= defs.size() || !defs[ind_gid].is_inductive) return "the recursion is over global " + std::to_string(ind_gid) + ", which is not a finished inductive type";
     if (dec >= lambda_arity(body)) return "the decreasing argument " + std::to_string(dec) + " is not one of the function's own parameters (the body has " + std::to_string(lambda_arity(body)) + ")";
     if (contains_meta(body)) return "a function body may not contain metavariables";
+    if (auto bad = unfinished_global_in(ctx().globals, body, fn_gid))
+        return "the body mentions global '" + defs[*bad].name + "', which is declared but not yet finished (mutual recursion is not supported: encode it as one function, e.g. with an extra argument; a body may use only finished globals and itself)";
     return std::nullopt;
+}
+/// Throws unless every field type and result index of `ctors` mentions only finished globals and the type being finished, `tid`. (A second reserved type in a field type would let
+/// two types be defined in terms of each other, and strict positivity, which looks only for `tid`, would never see a negative occurrence passing through the other one.)
+inline void require_ctor_specs_complete(uint32_t tid, const std::vector<CtorSpec>& ctors) {
+    auto require = [&](NodeId t, const CtorSpec& c, const char* what) {
+        if (auto bad = unfinished_global_in(ctx().globals, t, tid))
+            throw std::logic_error("itp: finish_inductive: the " + std::string(what) + " of constructor '" + c.name + "' mentions global '" + ctx().globals.defs[*bad].name +
+                                   "', which is declared but not yet finished (mutually inductive types are not supported: use one indexed family)");
+    };
+    for (const CtorSpec& c : ctors) {
+        for (NodeId a : c.arg_types) require(a, c, "field type");
+        for (NodeId r : c.result_indices) require(r, c, "result index");
+    }
 }
 /// Throws unless `tid` names an inductive type that was reserved and not yet finished.
 inline void require_reserved_inductive(uint32_t tid) {
@@ -4782,17 +4854,20 @@ inline std::expected<void, TypeError> finish_recursive_function_checked(
         bool allow_unsafe_skip_guard_check = false) {
     if (auto problem = detail::recursive_function_problem(fn_gid, ind_type_global_id, decreasing_arg_level, body))
         return std::unexpected(TypeError{TypeErrorKind::Other, body, std::nullopt, *problem});
+    {   // the type the function was reserved with (reserve_* takes it on trust) must be a type before a body is checked against it
+        ElabState es0; ElabCtx ec0;
+        if (auto sort = sort_level_of(ctx().globals[fn_gid].type, ec0, es0, "the function's declared type is not a type"); !sort) return std::unexpected(sort.error());
+    }
     if (!allow_unsafe_skip_guard_check) {
         if (!is_structurally_decreasing(fn_gid, ind_type_global_id, decreasing_arg_level, to_levels(body, 0))) {
             return std::unexpected(TypeError{TypeErrorKind::Other, body, std::nullopt,
                 "function '" + ctx().globals[fn_gid].name + "' failed the structural recursion check"});
         }
     }
-    ctx().globals.defs[fn_gid].value = body;
-    ctx().globals.invalidate_value_caches();
+    ctx().globals.install_body(fn_gid, body);
     ElabState es;
     ElabCtx empty_ec;
-    auto roll_back = [&] { ctx().globals.defs[fn_gid].value = std::nullopt; ctx().globals.invalidate_value_caches(); };   // never leave a bad definition installed
+    auto roll_back = [&] { ctx().globals.uninstall_body(fn_gid); };   // never leave a bad definition installed
     ElabResult r;
     try { r = check(body, ctx().globals[fn_gid].type, empty_ec, es); }
     catch (...) { roll_back(); throw; }                  // an exception (e.g. the stack guard) must not leave it installed either
@@ -4808,18 +4883,12 @@ inline std::expected<void, TypeError> finish_recursive_function_checked(
 
 
 // ---------------------------------------------------------------------------
-// Mutually recursive functions
+// Mutually recursive functions are NOT supported
 // ---------------------------------------------------------------------------
 //
-// All functions checked together are required to recurse over the SAME
-// inductive type (a block mixing recursion over, say, Nat and List is not
-// supported); each function may recurse on a different argument position
-// of its own signature, and may call any other function in the block
-// (including itself) as long as, at that callee's own decreasing
-// position, it supplies something already established as structurally
-// smaller. Reserve every function's global id first, via
-// reserve_recursive_function, exactly as for a single recursive function
-// -- what changes is only how the bodies are checked and installed.
+// A recursive function is finished alone and may mention only finished globals and itself (recursive_function_problem, GlobalEnv::declare). Two reserved functions that
+// referred to each other would each pass their own structural check while `f := g, g := f` loops: a closed proof of False. Encode a mutual recursion as ONE function --
+// an extra argument (a carry flag, an even/odd tag) or a sum type -- which is also what keeps the kernel's termination check this simple.
 
 // ===========================================================================
 // S1: declaration helpers (UNCHECKED -- libraries are loaded from the trusted reference kernel; admission, positivity and
@@ -4889,6 +4958,7 @@ inline void record_prop_elim_restriction(uint32_t type_gid, const std::vector<Ct
 }
 inline InductiveHandle finish_inductive_unchecked(uint32_t type_global_id, std::vector<CtorSpec> ctors) {
     detail::require_reserved_inductive(type_global_id);
+    detail::require_ctor_specs_complete(type_global_id, ctors);        // all of them, before the first constructor is declared: a half-finished type would be worse than a refused one
     ExecutionContext& c = ctx();
     InductiveHandle handle; handle.type_global_id = type_global_id;
     for (std::size_t idx = 0; idx < ctors.size(); ++idx) {
@@ -4904,8 +4974,7 @@ inline InductiveHandle finish_inductive_unchecked(uint32_t type_global_id, std::
 inline void finish_recursive_function(uint32_t fn_gid, uint32_t ind_type_global_id, uint32_t decreasing_arg_level, NodeId body, bool = false) {
     if (auto problem = detail::recursive_function_problem(fn_gid, ind_type_global_id, decreasing_arg_level, body)) throw std::logic_error("itp: finish_recursive_function: " + *problem);
     ctx().globals.defs[fn_gid].reserved = GlobalDef::Reserved::None;
-    ctx().globals.defs[fn_gid].value = body;
-    ctx().globals.invalidate_value_caches();
+    ctx().globals.install_body(fn_gid, body);
     ctx().globals.defs[fn_gid].recursive_info = RecursiveFnInfo{ind_type_global_id, decreasing_arg_level, true};
 }
 inline uint32_t declare_unchecked(NodeId type, std::optional<NodeId> value, const std::string& name) {

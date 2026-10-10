@@ -37,6 +37,11 @@ inline void require_small(uint32_t v, const char* what) {
 inline void require_meta_free(itp::NodeId t, const char* what) {
     if (itp::detail::contains_meta(t)) throw ITPError(std::string("a metavariable occurs in the ") + what + ": declarations and final checks need meta-free terms (finish the proof / instantiate first)");
 }
+// A global that is only RESERVED (a type, but no body or constructors yet) has no meaning: a final check must not rest on one (see GlobalEnv::declare).
+inline void require_complete_globals(itp::NodeId t, const char* what) {
+    if (auto bad = itp::detail::unfinished_global_in(itp::ctx().globals, t, itp::kNoGlobal))
+        throw ITPError(std::string("the ") + what + " mentions global '" + itp::ctx().globals.defs[*bad].name + "', which is declared but not yet finished");
+}
 template <class R> void raise_if_error(const R& r) { if (!r) throw ITPError(r.error().message); }
 
 // Wraps itp::ProofState; keeps a raw pointer to its Kernel (start_proof binds nb::keep_alive<0,1> so the kernel outlives it).
@@ -96,7 +101,7 @@ struct KernelWrapper {
         return h;
     }
     uint32_t loose_range_of(itp::NodeId t) { auto g = activate(); return itp::loose_range(t); }
-    void set_option(const std::string& name, bool value) { auto g = activate(); if (name == "parameters") itp::ctx().param_mode = value; else if (name == "prop_elim") itp::ctx().prop_mode = value; else throw ITPError("unknown option: " + name); }
+    void set_option(const std::string& name, bool value) { auto g = activate(); if (name == "parameters") itp::ctx().param_mode = value; else if (name == "prop_elim") itp::ctx().set_prop_mode(value); else throw ITPError("unknown option: " + name); }
     bool get_option(const std::string& name) { auto g = activate(); if (name == "parameters") return itp::ctx().param_mode; if (name == "prop_elim") return itp::ctx().prop_mode; throw ITPError("unknown option: " + name); }
     std::vector<int> param_slots(uint32_t family_gid) { auto g = activate(); require_global(family_gid, "param_slots"); std::vector<int> out; for (bool b : itp::family_param_slots(family_gid)) out.push_back(b ? 1 : 0); return out; }
     itp::DiscriminationTree index_library() { auto g = activate(); return itp::index_library(); }
@@ -153,9 +158,19 @@ struct KernelWrapper {
     std::pair<bool, std::string> check_partial(itp::NodeId t, itp::NodeId expected, const std::vector<itp::NodeId>& hyp_types) { return check_impl(t, expected, hyp_types, true); }
     std::pair<bool, std::string> check_impl(itp::NodeId t, itp::NodeId expected, const std::vector<itp::NodeId>& hyp_types, bool allow_holes) {
         auto g = activate(); require_scoped_telescope(hyp_types, "hypothesis type"); require_scoped(t, hyp_types.size(), "term"); require_scoped(expected, hyp_types.size(), "expected type");
-        if (!allow_holes) { for (auto h : hyp_types) require_meta_free(h, "hypothesis type"); require_meta_free(t, "term"); require_meta_free(expected, "expected type"); }
+        if (!allow_holes) {
+            for (auto h : hyp_types) { require_meta_free(h, "hypothesis type"); require_complete_globals(h, "hypothesis type"); }
+            require_meta_free(t, "term"); require_complete_globals(t, "term");
+            require_meta_free(expected, "expected type"); require_complete_globals(expected, "expected type");
+        }
         itp::ElabCtx ec; itp::ElabState es;
-        for (auto h : hyp_types) ec = ec.extend(h);
+        // The statement and its context are CLAIMS, not proofs: a final check proves nothing unless they are well-formed types (`check` takes its expected type on trust, and an ill-typed
+        // term that merely evaluates to a type would be "proved"). Elaboration-time checks (holes allowed) work on contexts the tactics built.
+        for (auto h : hyp_types) {
+            if (!allow_holes) { auto s = itp::sort_level_of(h, ec, es, "a hypothesis type is not a type"); if (!s) return {false, "ill-formed context: " + s.error().message}; }
+            ec = ec.extend(h);
+        }
+        if (!allow_holes) { auto s = itp::sort_level_of(expected, ec, es, "the statement is not a type"); if (!s) return {false, "ill-formed statement: " + s.error().message}; }
         auto r = itp::check(t, expected, ec, es);
         if (r) return {true, "OK"};
         return {false, r.error().message};
@@ -232,6 +247,14 @@ struct KernelWrapper {
     }
     // Was this global finished as an inductive family (possibly with no constructors)? Match/cases/induct exist only for those; an opaque type constant (an axiom, Quot) is not one.
     bool is_inductive(uint32_t gid) { auto g = activate(); return itp::ctx().globals.defs.at(gid).is_inductive; }
+    // Is the global still being defined? 0 = no (finished, or an ordinary global), 1 = a reserved inductive type, 2 = a reserved recursive function. Nothing finished may mention a reserved global.
+    int reserved_kind(uint32_t gid) { auto g = activate(); require_global(gid, "reserved_kind"); return static_cast<int>(itp::ctx().globals.defs[gid].reserved); }
+    // The justification recorded when a recursive function was finished: (the inductive type it recurses over, the decreasing argument's position), or None for any other global.
+    std::optional<std::pair<uint32_t, uint32_t>> recursive_info(uint32_t gid) {
+        auto g = activate(); require_global(gid, "recursive_info"); const auto& ri = itp::ctx().globals.defs[gid].recursive_info;
+        if (!ri) return std::nullopt;
+        return std::make_pair(ri->ind_type_global_id, ri->decreasing_arg_level);
+    }
     // Raw dump with explicit variable kinds: b<i> = bound index, f<l> = context level.
     std::string dump_raw(itp::NodeId n) {
         auto g = activate();
@@ -362,6 +385,8 @@ NB_MODULE(itp_env_lnl, m) {
         .def("declare_quot", &KernelWrapper::declare_quot, "eq_gid"_a)
         .def("quot_role", &KernelWrapper::quot_role, "gid"_a)
         .def("is_inductive", &KernelWrapper::is_inductive, "gid"_a)
+        .def("reserved_kind", &KernelWrapper::reserved_kind, "gid"_a)
+        .def("recursive_info", &KernelWrapper::recursive_info, "gid"_a)
         .def("num_globals", &KernelWrapper::num_globals)
         .def("list_globals", &KernelWrapper::list_globals)
         .def("global_info", &KernelWrapper::global_info, "gid"_a)

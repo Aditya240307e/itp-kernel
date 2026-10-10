@@ -127,19 +127,46 @@ def canon(t, env=()):
 # ---------------------------------------------------------------- the global environment
 QUOT_ROLE_NAMES = {0: None, 1: 'type', 2: 'mk', 3: 'lift', 4: 'ind', 5: 'sound'}      # the kernel's numbering (Kernel.quot_role)
 
+def consts_in(t):
+    """the set of global ids a named term mentions (iterative: dumps of deep terms must not hit the interpreter's recursion limit)"""
+    out, stack = set(), [t]
+    while stack:
+        u = stack.pop(); k = u[0]
+        if k == 'c': out.add(u[1])
+        elif k == 'app': stack.append(u[1]); stack.append(u[2])
+        elif k in ('lam', 'pi'): stack.append(u[2]); stack.append(u[3])
+        elif k == 'match': stack.append(u[1]); stack.append(u[2]); stack.extend(u[3])
+        elif k == 'fix': stack.append(u[2]); stack.append(u[4])
+        elif k not in ('v', 's'): raise Unsupported(k)
+    return out
+
+def replace_const(t, gid, repl):
+    """t with every occurrence of the global `gid` replaced by the term `repl` (which must have no free variables that t binds)"""
+    k = t[0]
+    if k == 'c': return repl if t[1] == gid else t
+    if k in ('v', 's'): return t
+    if k == 'app': return ('app', replace_const(t[1], gid, repl), replace_const(t[2], gid, repl))
+    if k in ('lam', 'pi'): return (k, t[1], replace_const(t[2], gid, repl), replace_const(t[3], gid, repl))
+    if k == 'match': return ('match', replace_const(t[1], gid, repl), replace_const(t[2], gid, repl), tuple(replace_const(b, gid, repl) for b in t[3]))
+    if k == 'fix': return ('fix', t[1], replace_const(t[2], gid, repl), t[3], replace_const(t[4], gid, repl))
+    raise Unsupported(k)
+
 class Glob:
-    def __init__(self, gid, name, type_, value, ctor_family, ctor_idx, ctors, quot_role=None, inductive=None):
+    def __init__(self, gid, name, type_, value, ctor_family, ctor_idx, ctors, quot_role=None, inductive=None, recursion=None, reserved=0):
         self.gid, self.name, self.type, self.value, self.ctor_family, self.ctor_idx, self.ctors, self.quot_role = gid, name, type_, value, ctor_family, ctor_idx, ctors, quot_role
+        # recursion: (the inductive family, the decreasing argument's position) for a global the kernel finished as a structurally recursive function, else None.
+        # reserved: 0 = complete, 1/2 = still being defined (a reserved inductive type / recursive function); nothing may mention such a global.
+        self.recursion, self.reserved = (tuple(recursion) if recursion is not None else None), reserved
         # inductive: the global was declared as an inductive family (possibly with no constructors). None = the exporter did not say; then a family is
         # taken to be inductive when it is not a quotient constant and has constructors (the old behaviour, which cannot see an empty inductive).
         self.inductive = inductive
 
 class Env:
     def __init__(self): self.g = {}
-    def add(self, gid, name, type_tree, value_tree, ctor_family, ctor_idx, ctors, quot_role=0, inductive=None):
+    def add(self, gid, name, type_tree, value_tree, ctor_family, ctor_idx, ctors, quot_role=0, inductive=None, recursion=None, reserved=0):
         self.g[gid] = Glob(gid, name, from_hybrid(type_tree), None if value_tree is None else from_hybrid(value_tree),
                            None if ctor_family is None or ctor_family < 0 else ctor_family, None if ctor_idx is None or ctor_idx < 0 else ctor_idx, list(ctors),
-                           QUOT_ROLE_NAMES[quot_role], inductive)
+                           QUOT_ROLE_NAMES[quot_role], inductive, recursion, reserved)
 
 class Checker:
     MAX_DEPTH = 200
@@ -530,12 +557,73 @@ class Checker:
     def check_closed(self, term_tree, type_tree):
         return self.run(lambda: (self.sort_of({}, from_hybrid(type_tree)), self.check({}, from_hybrid(term_tree), from_hybrid(type_tree))))
 
+    def well_founded_problems(self):
+        """(gid, name, message) for every way the environment fails to be WELL FOUNDED. Typing each global against the whole environment cannot see this: `f := fun x => g x` and
+        `g := fun x => f x` each type-check, and `f 0 : False` follows from f's declared type. So: (1) no global may mention a global that is still being defined, (2) the graph of
+        'mentions' (in the type or the value) has no cycle, and (3) the only self-reference is a recursive function's call to itself (whose guard is recursion_problems' business)."""
+        bad, deps = [], {}
+        for gid, gl in self.g.items():
+            d = consts_in(gl.type)
+            if gl.value is not None: d |= consts_in(gl.value)
+            deps[gid] = d
+        for gid, d in deps.items():
+            for h in sorted(d):
+                if h not in self.g: bad.append((gid, self.g[gid].name, 'mentions the unknown global %d' % h))
+                elif self.g[h].reserved and h != gid: bad.append((gid, self.g[gid].name, "mentions global '%s', which is declared but not yet finished" % self.g[h].name))
+            if gid in d and self.g[gid].recursion is None: bad.append((gid, self.g[gid].name, 'refers to itself without being a structurally recursive function'))
+        # Tarjan's strongly connected components, iteratively; a self-loop is not a cycle here (it was judged above)
+        index, low, on, stack, counter, sccs = {}, {}, set(), [], [0], []
+        for root in self.g:
+            if root in index: continue
+            work = [(root, iter(sorted(h for h in deps[root] if h in self.g and h != root)))]
+            index[root] = low[root] = counter[0]; counter[0] += 1; stack.append(root); on.add(root)
+            while work:
+                v, it = work[-1]
+                advanced = False
+                for w in it:
+                    if w not in index:
+                        index[w] = low[w] = counter[0]; counter[0] += 1; stack.append(w); on.add(w)
+                        work.append((w, iter(sorted(h for h in deps[w] if h in self.g and h != w)))); advanced = True; break
+                    elif w in on: low[v] = min(low[v], index[w])
+                if advanced: continue
+                work.pop()
+                if work: low[work[-1][0]] = min(low[work[-1][0]], low[v])
+                if low[v] == index[v]:
+                    comp = []
+                    while True:
+                        w = stack.pop(); on.discard(w); comp.append(w)
+                        if w == v: break
+                    if len(comp) > 1: sccs.append(sorted(comp))
+        for comp in sccs: bad.append((comp[0], self.g[comp[0]].name, 'cyclic definitions: ' + ', '.join(self.g[c].name for c in comp)))
+        return bad
+
+    def recursion_problems(self):
+        """(gid, name, message) for every global the kernel recorded as structurally recursive whose body does not pass this checker's own guard. The body's calls to the global itself are
+        judged exactly like the self-calls of a `fix` term: the global becomes a variable, and every call must pass a strict subterm of the decreasing argument."""
+        bad = []
+        for gid, gl in self.g.items():
+            if gl.recursion is None: continue
+            fam, d = gl.recursion
+            if gl.value is None: bad.append((gid, gl.name, 'recorded as recursive but has no body')); continue
+            if fam not in self.g or not self.is_family(fam): bad.append((gid, gl.name, 'recursion over %s, which is not an inductive family' % fam)); continue
+            cur = gl.type
+            for _ in range(d):
+                if cur[0] != 'pi': cur = None; break
+                cur = cur[3]
+            dh = spine(cur[2])[0] if cur is not None and cur[0] == 'pi' else None
+            if dh != ('c', fam): bad.append((gid, gl.name, 'the decreasing argument %d is not of the recorded family' % d)); continue
+            sx = fresh('self')
+            if not self.guard_ok(d, gl.type, sx, replace_const(gl.value, gid, ('v', sx))): bad.append((gid, gl.name, 'structural recursion guard failed'))
+        return bad
+
     def check_definitions(self):
-        """re-check every definition of the environment (value : type) and that every family/constructor/axiom type is a type"""
+        """re-check every definition of the environment (value : type) and that every family/constructor/axiom type is a type; the environment must be well founded and its recursive globals guarded"""
         bad = []
         if self.quot_problem is not None:
             gid0 = min(gid for gid, gl in self.g.items() if gl.quot_role is not None)
             bad.append((gid0, self.g[gid0].name, 'quotients: ' + self.quot_problem))
+        bad += self.well_founded_problems()
+        bad += self.recursion_problems()
         for gid, gl in self.g.items():
             ok, msg = self.run(lambda: (self.sort_of({}, gl.type), None if gl.value is None else self.check({}, gl.value, gl.type)))
             if not ok: bad.append((gid, gl.name, msg))

@@ -13,7 +13,8 @@ def build_env(k):
     env = ic.Env()
     for gid in range(k.num_globals()):
         name, ty, val, cf, ci, ctors, rec = k.global_info(gid)
-        env.add(gid, name, parse_raw(k.dump_raw(ty), True), None if val is None else parse_raw(k.dump_raw(val), True), cf, ci, ctors, k.quot_role(gid) if hasattr(k, 'quot_role') else 0, k.is_inductive(gid) if hasattr(k, 'is_inductive') else None)
+        env.add(gid, name, parse_raw(k.dump_raw(ty), True), None if val is None else parse_raw(k.dump_raw(val), True), cf, ci, ctors, k.quot_role(gid) if hasattr(k, 'quot_role') else 0, k.is_inductive(gid) if hasattr(k, 'is_inductive') else None,
+                recursion=k.recursive_info(gid) if hasattr(k, 'recursive_info') else None, reserved=k.reserved_kind(gid) if hasattr(k, 'reserved_kind') else 0)
     return env
 
 def kernel_redeclare_verdicts(k):
