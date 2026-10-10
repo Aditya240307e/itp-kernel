@@ -764,6 +764,11 @@ struct GlobalDef {
     std::optional<RecursiveFnInfo> recursive_info; // present if declared via finish_recursive_function(_checked)
     std::string name;
     QuotRole quot_role = QuotRole::None; // set only by declare_quot
+    // Set ONLY when the global is finished as an inductive family (finish_inductive_unchecked / finish_mutual_inductive_block), including a
+    // family with no constructors. Match, cases and induct are meaningful only on such families. An opaque type constant -- an axiom whose type
+    // ends in a sort, or Quot -- is NOT inductive: treating it as one would make a branchless match on any of its inhabitants a proof of
+    // False (finding F26).
+    bool is_inductive = false;
 };
 
 struct GlobalEnv {
@@ -2610,6 +2615,20 @@ inline bool conv_value(const Value& a, const Value& b, uint32_t depth) {
             Value rhs = eval(cb.body_id, cb.env.extend(fresh));
             return conv_value(lhs, rhs, depth + 1);
         },
+        // An unapplied recursive function is a function value too: (\x. F x) == F by the same eta step. (Without these two cases the kernel
+        // was strictly less complete than the independent checker's eta rule, which covers every non-lambda.)
+        [&](const Closure& ca, const VFix& fb) -> bool {
+            Value fresh = fresh_neutral(depth);
+            Value lhs = eval(ca.body_id, ca.env.extend(fresh));
+            Value rhs = apply(Value{fb}, fresh);
+            return conv_value(lhs, rhs, depth + 1);
+        },
+        [&](const VFix& fa, const Closure& cb) -> bool {
+            Value fresh = fresh_neutral(depth);
+            Value lhs = apply(Value{fa}, fresh);
+            Value rhs = eval(cb.body_id, cb.env.extend(fresh));
+            return conv_value(lhs, rhs, depth + 1);
+        },
         [&](const auto&, const auto&) -> bool {
             return false; // any other mismatched shape is not convertible
         }
@@ -4193,6 +4212,7 @@ inline std::vector<InductiveHandle> finish_mutual_inductive_block(
             uint32_t ctor_gid = c.globals.declare_ctor(ctor_ty, spec.ctors[idx].name, spec.type_global_id, static_cast<uint32_t>(idx), arity);
             handle.ctor_global_ids.push_back(ctor_gid);
         }
+        c.globals.defs[spec.type_global_id].is_inductive = true;
         handles.push_back(std::move(handle));
     }
     return handles;
@@ -4754,6 +4774,7 @@ inline InductiveHandle finish_inductive_unchecked(uint32_t type_global_id, std::
         handle.ctor_global_ids.push_back(c.globals.declare_ctor(ctor_ty, ctors[idx].name, type_global_id, static_cast<uint32_t>(idx), arity));
     }
     record_prop_elim_restriction(type_global_id, ctors);
+    c.globals.defs[type_global_id].is_inductive = true;
     return handle;
 }
 inline void finish_recursive_function(uint32_t fn_gid, uint32_t ind_type_global_id, uint32_t decreasing_arg_level, NodeId body, bool = false) {
@@ -5213,6 +5234,8 @@ inline TypeResult infer(NodeId t, ElabCtx& ec, ElabState& es) {
             if (!scrut_neutral || scrut_neutral->head.kind != NeutralHead::Kind::GlobalConst)
                 return err(TypeErrorKind::MotiveInferenceFailure, m.scrutinee_id, "scrutinee's type is not an inductive type application");
             const uint32_t type_global_id = scrut_neutral->head.id;
+            if (!ctx().globals[type_global_id].is_inductive)
+                return err(TypeErrorKind::MotiveInferenceFailure, m.scrutinee_id, "scrutinee's type is not an inductive type application");
             std::vector<NodeId> concrete_indices;
             for (auto& frame : scrut_neutral->spine) {
                 auto* af = std::get_if<ApplyFrame>(&frame);
@@ -5269,6 +5292,8 @@ inline ElabResult check_match(NodeId t, NodeId expected_ty, ElabCtx& ec, ElabSta
     if (!scrut_neutral || scrut_neutral->head.kind != NeutralHead::Kind::GlobalConst)
         return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, m.scrutinee_id, expected_ty, "scrutinee's type is not an inductive type application"});
     const uint32_t type_global_id = scrut_neutral->head.id;
+    if (!ctx().globals[type_global_id].is_inductive)
+        return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, m.scrutinee_id, expected_ty, "scrutinee's type is not an inductive type application"});
     std::vector<NodeId> concrete_indices;
     for (auto& frame : scrut_neutral->spine) {
         auto* af = std::get_if<ApplyFrame>(&frame);
@@ -5529,6 +5554,8 @@ inline std::expected<detail::ScrutInfo, TypeError> scrutinee_info(const char* wh
     if (!nt || nt->head.kind != NeutralHead::Kind::GlobalConst)
         return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, scrut_ty, std::nullopt, std::string(who) + ": hypothesis's type is not an inductive type application"});
     detail::ScrutInfo si; si.type_gid = nt->head.id;
+    if (!ctx().globals[si.type_gid].is_inductive)
+        return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, scrut_ty, std::nullopt, std::string(who) + ": hypothesis's type is not an inductive type application"});
     for (auto& frame : nt->spine) {
         auto* af = std::get_if<ApplyFrame>(&frame);
         if (!af) return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, scrut_ty, std::nullopt, std::string(who) + ": scrutinee's type has a non-application eliminator frame; cannot enumerate its indices"});

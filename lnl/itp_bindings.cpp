@@ -196,6 +196,8 @@ struct KernelWrapper {
         std::vector<uint32_t> ctors; auto it = itp::ctx().globals.ctors_by_family.find(gid); if (it != itp::ctx().globals.ctors_by_family.end()) ctors = it->second;
         return {d.name, d.type, d.value, d.ctor_info ? static_cast<int>(d.ctor_info->ind_type_global_id) : -1, d.ctor_info ? static_cast<int>(d.ctor_info->ctor_idx) : -1, ctors, d.recursive_info.has_value()};
     }
+    // Was this global finished as an inductive family (possibly with no constructors)? Match/cases/induct exist only for those; an opaque type constant (an axiom, Quot) is not one.
+    bool is_inductive(uint32_t gid) { auto g = activate(); return itp::ctx().globals.defs.at(gid).is_inductive; }
     // Raw dump with explicit variable kinds: b<i> = bound index, f<l> = context level.
     std::string dump_raw(itp::NodeId n) {
         auto g = activate();
@@ -305,6 +307,7 @@ NB_MODULE(itp_env_lnl, m) {
         .def("abstract_fvars", &KernelWrapper::abstract_fvars, "term"_a, "levels"_a)
         .def("declare_quot", &KernelWrapper::declare_quot, "eq_gid"_a)
         .def("quot_role", &KernelWrapper::quot_role, "gid"_a)
+        .def("is_inductive", &KernelWrapper::is_inductive, "gid"_a)
         .def("num_globals", &KernelWrapper::num_globals)
         .def("list_globals", &KernelWrapper::list_globals)
         .def("global_info", &KernelWrapper::global_info, "gid"_a)

@@ -13,12 +13,22 @@ Specification summary (the points where kernels can differ):
   delta:      a constant with a value unfolds whenever it is the head of a term (recursive functions are ordinary lambda/match definitions).
   iota:       match on a fully applied constructor selects the branch and applies it to the constructor's arguments.
   fix:        (fix d T self. body) a_0 .. a_n unfolds to body[self := fix] a_0 .. a_n when a_d is a constructor application; guarded by structural recursion.
+  eta:        function eta in both directions: (lam x : A. b) is convertible with any term t that is not itself a lambda (after weak-head normalisation)
+              exactly when b is convertible with  t x  for a fresh variable x. The binder annotation is not compared (the two sides are assumed to have the same type).
   match:      scrutinee type  F c_0 .. c_{k-1}.  For constructor c with fields x_j : A_j and result indices r_i, scan the slots left to right with a map sigma:
               a slot whose pattern is a bare field variable v forces v := c_i (if v is already forced, the forced value is matched against c_i instead);
               two applications of the same constructor match argument by argument; two DIFFERENT constructors of one family refute the branch (the scan stops);
               anything else is ignored.  Field types are specialised by ALL forced entries; the result indices and the constructor application are specialised only by
               the fields that occur at most once as a bare result index, or that a PARAMETER slot determined (parameter mode).  The branch must have the type
               Pi (x_j : A_j sigma). motive r'_0 .. r'_{k-1} (c x'_0 ..).  The motive must be well typed and have k+1 Pi layers ending in a sort.
+  quotients:  the five roles type / mk / lift / ind / sound are ordinary constants (no value). The checker does NOT trust the kernel's labels: it derives j and the
+              equality family E from the declared type of `sound`, then demands that every labelled constant has EXACTLY the type below (alpha-equivalence), that E is
+              E : (A : Type j) -> A -> A -> Type 0 with the single constructor refl : (A : Type j) -> (a : A) -> E A a a, and that j >= 1. Only then does the one extra
+              reduction rule exist:   lift A r B f h (mk A' r' a) ~> f a   (the sixth argument is a mk applied to exactly three arguments). Types, with Prop = Type 0:
+                Quot : (A : Type j) -> (A -> A -> Prop) -> Type j          mk : (A : Type j) -> (r : A -> A -> Prop) -> A -> Quot A r
+                lift : (A : Type j) -> (r) -> (B : Type j) -> (f : A -> B) -> ((a b : A) -> r a b -> E B (f a) (f b)) -> Quot A r -> B
+                ind  : (A : Type j) -> (r) -> (P : Quot A r -> Prop) -> ((a : A) -> P (mk A r a)) -> (q : Quot A r) -> P q
+                sound: (A : Type j) -> (r) -> (a b : A) -> r a b -> E (Quot A r) (mk A r a) (mk A r b)
   parameters: a prefix of the family's slots; slot i is a parameter when in EVERY constructor result_i is a bare field variable different from the earlier parameters'
               variables and EVERY occurrence of the family in any field type is fully applied and passes that same variable at slot i.
 """
@@ -115,15 +125,21 @@ def canon(t, env=()):
     raise Unsupported(k)
 
 # ---------------------------------------------------------------- the global environment
+QUOT_ROLE_NAMES = {0: None, 1: 'type', 2: 'mk', 3: 'lift', 4: 'ind', 5: 'sound'}      # the kernel's numbering (Kernel.quot_role)
+
 class Glob:
-    def __init__(self, gid, name, type_, value, ctor_family, ctor_idx, ctors):
-        self.gid, self.name, self.type, self.value, self.ctor_family, self.ctor_idx, self.ctors = gid, name, type_, value, ctor_family, ctor_idx, ctors
+    def __init__(self, gid, name, type_, value, ctor_family, ctor_idx, ctors, quot_role=None, inductive=None):
+        self.gid, self.name, self.type, self.value, self.ctor_family, self.ctor_idx, self.ctors, self.quot_role = gid, name, type_, value, ctor_family, ctor_idx, ctors, quot_role
+        # inductive: the global was declared as an inductive family (possibly with no constructors). None = the exporter did not say; then a family is
+        # taken to be inductive when it is not a quotient constant and has constructors (the old behaviour, which cannot see an empty inductive).
+        self.inductive = inductive
 
 class Env:
     def __init__(self): self.g = {}
-    def add(self, gid, name, type_tree, value_tree, ctor_family, ctor_idx, ctors):
+    def add(self, gid, name, type_tree, value_tree, ctor_family, ctor_idx, ctors, quot_role=0, inductive=None):
         self.g[gid] = Glob(gid, name, from_hybrid(type_tree), None if value_tree is None else from_hybrid(value_tree),
-                           None if ctor_family is None or ctor_family < 0 else ctor_family, None if ctor_idx is None or ctor_idx < 0 else ctor_idx, list(ctors))
+                           None if ctor_family is None or ctor_family < 0 else ctor_family, None if ctor_idx is None or ctor_idx < 0 else ctor_idx, list(ctors),
+                           QUOT_ROLE_NAMES[quot_role], inductive)
 
 class Checker:
     MAX_DEPTH = 200
@@ -132,6 +148,8 @@ class Checker:
         self.env, self.g, self.params, self.fuel0 = env, env.g, params, fuel
         self.prop_elim = prop_elim; self._restricted = {}
         self.fuel = fuel; self._arity = {}
+        self.quot, self.quot_problem = None, None
+        self._validate_quot()
 
     def tick(self):
         self.fuel -= 1
@@ -145,8 +163,12 @@ class Checker:
             self._arity[fam] = n
         return self._arity[fam]
     def is_family(self, gid):
+        """an inductive family: declared as one (not an opaque type constant such as an axiom `Foo : Type` or Quot), with a type ending in a sort.
+        Matching on a value of an opaque type would otherwise be a branchless match, i.e. a proof of anything (finding F26)."""
         gl = self.g[gid]
-        if gl.value is not None or gl.ctor_family is not None: return False
+        if gl.value is not None or gl.ctor_family is not None or gl.quot_role is not None: return False
+        if gl.inductive is False: return False
+        if gl.inductive is None and not gl.ctors: return False
         t = gl.type
         while t[0] == 'pi': t = t[3]
         return t[0] == 's'
@@ -166,6 +188,54 @@ class Checker:
             gl = self.g[h[1]]
             if gl.ctor_family is not None and len(args) == self.ctor_fields(h[1]): return h[1], args
         return None
+
+    # ------------------------------------------------------------ quotients (independent implementation of the stated rule)
+    @staticmethod
+    def quot_types(eq, j, gq, gm):
+        """the canonical type of each role, as named terms (binder names are irrelevant: comparison is up to alpha)"""
+        P = lambda x, d, b: ('pi', x, d, b)
+        v = lambda x: ('v', x)
+        ap = lambda f, *xs: apply_args(f, list(xs))
+        T, Prop = ('s', j), ('s', 0)
+        A, r, B, f, h, q, a, b, Pm = v('A'), v('r'), v('B'), v('f'), v('h'), v('q'), v('a'), v('b'), v('P')
+        rel = P('x', A, P('y', A, Prop))
+        Q = lambda X, R: ap(('c', gq), X, R)
+        M = lambda X, R, x: ap(('c', gm), X, R, x)
+        E = lambda *xs: ap(('c', eq), *xs)
+        return {
+            'type': P('A', T, P('r', rel, T)),
+            'mk': P('A', T, P('r', rel, P('a', A, Q(A, r)))),
+            'lift': P('A', T, P('r', rel, P('B', T, P('f', P('x', A, B), P('h', P('a', A, P('b', A, P('p', ap(r, a, b), E(B, ap(f, a), ap(f, b))))), P('q', Q(A, r), B)))))),
+            'ind': P('A', T, P('r', rel, P('P', P('x', Q(A, r), Prop), P('h', P('a', A, ap(Pm, M(A, r, a))), P('q', Q(A, r), ap(Pm, q)))))),
+            'sound': P('A', T, P('r', rel, P('a', A, P('b', A, P('p', ap(r, a, b), E(Q(A, r), M(A, r, a), M(A, r, b))))))),
+        }
+
+    def _validate_quot(self):
+        roles = {}
+        for gid, gl in self.g.items():
+            if gl.quot_role is not None: roles.setdefault(gl.quot_role, []).append(gid)
+        if not roles: return
+        bad = lambda msg: setattr(self, 'quot_problem', msg)
+        if sorted(roles) != sorted(QUOT_ROLE_NAMES[i] for i in range(1, 6)) or any(len(v) != 1 for v in roles.values()): return bad('the quotient roles are not each held by exactly one global')
+        by = {r: v[0] for r, v in roles.items()}
+        if any(self.g[x].value is not None or self.g[x].ctor_family is not None for x in by.values()): return bad('a quotient constant has a value or is a constructor')
+        t = self.g[by['sound']].type
+        if t[0] != 'pi' or t[2][0] != 's': return bad('sound has an unexpected shape')
+        j = t[2][1]
+        for _ in range(5):
+            if t[0] != 'pi': return bad('sound has an unexpected shape')
+            t = t[3]
+        h, args = spine(t)
+        if h[0] != 'c' or len(args) != 3: return bad('sound does not conclude with an equality')
+        eq = h[1]; ge = self.g[eq]
+        if j < 1: return bad('the universe level of the quotient must be >= 1')
+        A, a, b = ('v', 'A'), ('v', 'a'), ('v', 'b')
+        if ge.value is not None or ge.ctor_family is not None or canon(ge.type) != canon(('pi', 'A', ('s', j), ('pi', 'a', A, ('pi', 'b', A, ('s', 0))))): return bad('the equality family has the wrong type')
+        if len(ge.ctors) != 1 or self.g[ge.ctors[0]].ctor_family != eq: return bad('the equality family must have exactly one constructor')
+        if canon(self.g[ge.ctors[0]].type) != canon(('pi', 'A', ('s', j), ('pi', 'a', A, apply_args(('c', eq), [A, a, a])))): return bad('the equality constructor is not refl : (A : Type j) -> (a : A) -> Eq A a a')
+        for role, expected in self.quot_types(eq, j, by['type'], by['mk']).items():
+            if canon(self.g[by[role]].type) != canon(expected): return bad('quotient constant %r does not have its specified type' % role)
+        self.quot = by
 
     # ------------------------------------------------------------ prop_elim: Type0 is Prop (independent implementation of the stated rule)
     def elim_restricted(self, fam):
@@ -230,6 +300,10 @@ class Checker:
             if k == 'c':
                 v = self.g[h[1]].value
                 if v is not None: t = apply_args(v, args); continue
+                if self.quot is not None and h[1] == self.quot['lift'] and len(args) >= 6:       # lift A r B f h (mk A' r' a) ~> f a
+                    qh, qargs = spine(self.whnf(args[5]))
+                    if qh[0] == 'c' and qh[1] == self.quot['mk'] and len(qargs) == 3:
+                        t = apply_args(('app', args[3], qargs[2]), args[6:]); continue
                 return t
             if k == 'fix':
                 _, d, fty, selfn, body = h
@@ -261,6 +335,10 @@ class Checker:
         if ka in ('lam', 'pi') and kb == ka:
             if not self.conv(a[2], b[2], depth + 1): return False
             z = ('v', fresh()); return self.conv(subst(a[3], a[1], z), subst(b[3], b[1], z), depth + 1)
+        if (ka == 'lam') != (kb == 'lam'):                  # eta:  (lam x. body) == t   iff   body == t x   (x fresh), t not a lambda
+            lam, other = (a, b) if ka == 'lam' else (b, a)
+            z = ('v', fresh()); body, app = subst(lam[3], lam[1], z), ('app', other, z)
+            return self.conv(body, app, depth + 1) if ka == 'lam' else self.conv(app, body, depth + 1)
         ha, aa = spine(a); hb, ab = spine(b)
         if len(aa) != len(ab): return False
         if ha[0] == 'v' and hb[0] == 'v': same = ha[1] == hb[1]
@@ -430,6 +508,9 @@ class Checker:
     def check_definitions(self):
         """re-check every definition of the environment (value : type) and that every family/constructor/axiom type is a type"""
         bad = []
+        if self.quot_problem is not None:
+            gid0 = min(gid for gid, gl in self.g.items() if gl.quot_role is not None)
+            bad.append((gid0, self.g[gid0].name, 'quotients: ' + self.quot_problem))
         for gid, gl in self.g.items():
             ok, msg = self.run(lambda: (self.sort_of({}, gl.type), None if gl.value is None else self.check({}, gl.value, gl.type)))
             if not ok: bad.append((gid, gl.name, msg))
