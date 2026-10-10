@@ -105,23 +105,53 @@ MUTANTS = {
  'M6 admission universe rule disabled': ('if (!parameter_like && field_level[j] > *fam_level && !(ctx().prop_mode && *fam_level == 0)) {', 'if (!parameter_like && field_level[j] > *fam_level + 1000 && !(ctx().prop_mode && *fam_level == 0)) {'),
  'M7 strict positivity always true': ("                if (!is_strictly_positive(type_global_id, arg_ty))\n                    throw std::logic_error(\"itp: constructor '\" + ctor.name + \"' fails strict positivity", "                if (false)\n                    throw std::logic_error(\"itp: constructor '\" + ctor.name + \"' fails strict positivity"),
  'M8 Match branch count not checked': ("    if (ctor_gids.size() != branches.size())\n        return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, motive, std::nullopt,\n            \"Match branch count", "    if (false)\n        return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, motive, std::nullopt,\n            \"Match branch count"),
+
+ 'M101 proof irrelevance is never tried': ("    return proof_irrelevance_fallback(a, b, ec, es, std::move(r), meta_mark, pending_mark);", "    (void)meta_mark; (void)pending_mark; return r;"),
+ 'M102 proof irrelevance also outside the Prop/Type world': ("    if (!ctx().prop_mode) return unify_structural(a, b, ec, es);\n    const auto meta_mark", "    const auto meta_mark"),
+ 'M103 irrelevance does not require the type to be a proposition (every type is irrelevant)': ("        if (!s || *s != 0 || !scratch.pending.empty()) return std::nullopt;", "        if (!s || !scratch.pending.empty()) return std::nullopt;"),
+ 'M104 irrelevance does not compare the two types': ("    if (ElabResult r = unify_values(eval(*ta, ec.values), eval(*tb, ec.values), ec, es); !r) { rollback(); return failure; }", "    (void)tb;"),
+ 'M105 irrelevance: a type in Type1 counts as a proposition': ("        if (!s || *s != 0 || !scratch.pending.empty()) return std::nullopt;", "        if (!s || *s > 1 || !scratch.pending.empty()) return std::nullopt;"),
+ 'M106 prefilter: constructor values are never proof candidates': ("            return r.tag == NodeType::TYPE && ctx().types[r.index].universe_level == 0;\n        },\n        [&](const VNeutral& n) {", "            return false && r.tag == NodeType::TYPE && ctx().types[r.index].universe_level == 0;\n        },\n        [&](const VNeutral& n) {"),
+ 'M107 prefilter: neutrals headed by a global are never proof candidates': ("                case NeutralHead::Kind::GlobalConst: return type_may_be_proposition(ctx().globals[n.head.id].type);", "                case NeutralHead::Kind::GlobalConst: return false;"),
+ 'M108 prefilter: neutrals headed by a local variable are never proof candidates': ("                case NeutralHead::Kind::LocalVar: return n.head.id < ec.size() && type_may_be_proposition(ec.types[n.head.id]);", "                case NeutralHead::Kind::LocalVar: return false;"),
+ 'M109 prefilter: a stuck match is never a proof candidate': ("if (!std::holds_alternative<ApplyFrame>(fr)) return true;     // a stuck match: its type is the motive's business, let infer decide", "if (!std::holds_alternative<ApplyFrame>(fr)) return false;"),
+ 'M110 irrelevance keeps the metavariables the failed structural attempt solved': ("        ctx().meta_ctx.rewind(meta_mark);\n        es.pending.erase(", "        es.pending.erase("),
+ 'M111 irrelevance keeps the constraints the failed structural attempt deferred': ("        es.pending.erase(es.pending.begin() + static_cast<std::ptrdiff_t>(pending_mark), es.pending.end());\n    };", "    };"),
+ 'M112 irrelevance nests at most once': ("inline constexpr int kMaxPiNesting = 8;", "inline constexpr int kMaxPiNesting = 1;"),
+ 'M113 irrelevance has no nesting bound': ("    if (pi_nesting() >= kMaxPiNesting) return failure;\n", ""),
+ 'C1 checker: proof irrelevance is never tried': ("        return self.prop_elim and ctx is not None and self.irrelevant(a, b, depth, ctx)", "        return False", 'indep_checker.py'),
+ 'C2 checker: proof irrelevance also without prop_elim': ("        return self.prop_elim and ctx is not None and self.irrelevant(a, b, depth, ctx)", "        return ctx is not None and self.irrelevant(a, b, depth, ctx)", 'indep_checker.py'),
+ 'C3 checker: irrelevance does not require the type to be a proposition': ("            if self.sort_of(ctx, pa) != 0: return False\n", "", 'indep_checker.py'),
+ 'C4 checker: irrelevance does not compare the two types': ("            return self.conv(pa, pb, depth + 1, ctx)\n        except (CheckError, Unsupported, KeyError, IndexError): return False", "            return True\n        except (CheckError, Unsupported, KeyError, IndexError): return False", 'indep_checker.py'),
+ 'C5 checker: the type checker converts without a context (no irrelevance while checking)': ("        if not self.conv(inferred, expected, 0, ctx): raise CheckError('type mismatch')", "        if not self.conv(inferred, expected): raise CheckError('type mismatch')", 'indep_checker.py'),
+ 'C6 checker: binders do not extend the context of the comparison': ("        ext = lambda z, A: None if ctx is None else {**ctx, z[1]: A}", "        ext = lambda z, A: ctx", 'indep_checker.py'),
+ 'C7 checker: a type in Type1 counts as a proposition': ("            if self.sort_of(ctx, pa) != 0: return False\n", "            if self.sort_of(ctx, pa) > 1: return False\n", 'indep_checker.py'),
+ 'C8 checker: eta is not applied (a lambda against a non-lambda)': ("        if (ka == 'lam') != (kb == 'lam'):                  # eta:", "        if False and (ka == 'lam') != (kb == 'lam'):                  # eta:", 'indep_checker.py'),
 }
 # Order matters only for speed (a mutant stops at the first gate that fails): fast, high-yield gates first, the 25-second oracle last.
-GATE_CMDS = (['s2_tests.py', '1500'], ['s16_quot_tests.py'], ['harness.py', '1500', '3'], ['s3_tests.py', '600'], ['s4_tests.py', '800'], ['s5_tests.py', '1200', '3'], ['s5_probe_tests.py', '500', '7'], ['s6_logic_tests.py'], ['s6_f6_tests.py'],
+GATE_CMDS = (['s2_tests.py', '1500'], ['s16_quot_tests.py'], ['s17_irrelevance_tests.py'], ['harness.py', '1500', '3'], ['s3_tests.py', '600'], ['s4_tests.py', '800'], ['s5_tests.py', '1200', '3'], ['s5_probe_tests.py', '500', '7'], ['s6_logic_tests.py'], ['s6_f6_tests.py'],
              ['s7_param_tests.py', '150', '600'], ['s8_indep_tests.py', '100'], ['s9_strong_tests.py'], ['s10_noconf_tests.py'], ['s11_eqgen_tests.py'], ['s12_probe_eq_tests.py', '150'], ['s13_prop_tests.py'],
              ['s14_prop_world_tests.py', '600'], ['s15_classical_tests.py', '300'], ['oracle_gate.py'])
 # a gate has failed when it exits non-zero or prints one of these markers
 FAIL_RE = re.compile(r"GATE: FAIL|Traceback")        # NOT words like ACCEPTED/FAILED: healthy gate output contains them ("ACCEPTED 0"); the exit status is the real signal
 # mutants that no gate can distinguish from the original BY CONSTRUCTION (equivalent mutants); each needs a reason
 KNOWN_EQUIVALENT = {
+    'M113 irrelevance has no nesting bound': "the bound is a resource guard against pathological input (inference calls the unifier calls inference ..); every well-typed comparison terminates without reaching it, so no test input can distinguish the two",
     'M12 apply skips drain_pending': "after a successful unify() at the tactic level no deferred constraint is ever pending (every argument meta is applied to the whole context, so its unification is a pattern); drain_pending is exercised by the unifier gate (S3), not by apply",
 }
 
+def mutant_parts(spec):
+    """a mutant is (old, new) for the kernel header, or (old, new, file) for another source file of this directory (a Python file needs no rebuild)"""
+    return spec[0], spec[1], (spec[2] if len(spec) > 2 else 'itp_kernel.hpp')
+
 def check_anchors():
-    """every mutant must replace text that occurs EXACTLY ONCE in the kernel header, and must change it; a stale anchor would silently turn a mutant into a no-op (or abort an hour-long run)"""
-    h = open(SRC + '/itp_kernel.hpp').read()
-    bad = [(n, h.count(old)) for n, (old, new) in MUTANTS.items() if h.count(old) != 1]
-    same = [n for n, (old, new) in MUTANTS.items() if old == new]
+    """every mutant must replace text that occurs EXACTLY ONCE in its file, and must change it; a stale anchor would silently turn a mutant into a no-op (or abort an hour-long run)"""
+    texts, bad, same = {}, [], []
+    for n, spec in MUTANTS.items():
+        old, new, f = mutant_parts(spec)
+        if f not in texts: texts[f] = open(os.path.join(SRC, f)).read()
+        if texts[f].count(old) != 1: bad.append((n, texts[f].count(old)))
+        if old == new: same.append(n)
     return bad, same
 
 def gate_failed(rc, text): return rc != 0 or bool(FAIL_RE.search(text))
@@ -140,14 +170,16 @@ def run(names):
             print("BASELINE IS RED on %s -- mutation results would be meaningless" % cmd[0]); print((r.stdout + r.stderr)[-500:]); sys.exit(2)
     print("baseline green on all %d gates" % len(cmds), flush=True)
     for nm in names:
-        old, new = MUTANTS[nm]; d = os.path.join(tempfile.gettempdir(), 'mut_' + re.sub(r'\W+', '_', nm)[:24])
+        old, new, target = mutant_parts(MUTANTS[nm]); d = os.path.join(tempfile.gettempdir(), 'mut_' + re.sub(r'\W+', '_', nm)[:24])
+        rebuild = target.endswith(('.hpp', '.cpp'))
         if os.path.exists(d): shutil.rmtree(d)
-        shutil.copytree(SRC, d, ignore=shutil.ignore_patterns('*.so', '__pycache__'))
-        h = open(d + '/itp_kernel.hpp').read(); assert h.count(old) == 1, (nm, h.count(old))
-        open(d + '/itp_kernel.hpp', 'w').write(h.replace(old, new))
+        shutil.copytree(SRC, d, ignore=shutil.ignore_patterns('*.so', '__pycache__') if rebuild else shutil.ignore_patterns('__pycache__'))
+        h = open(d + '/' + target).read(); assert h.count(old) == 1, (nm, h.count(old))
+        open(d + '/' + target, 'w').write(h.replace(old, new))
         env = dict(os.environ, ITP_NB_DOMAIN='lnl'); t0 = time.time()
-        b = subprocess.run([sys.executable, 'build_kernel.py'], cwd=d, env=env, capture_output=True, text=True)
-        if 'Build succeeded' not in b.stdout: results.append((nm, 'BUILD FAILED', b.stdout[-200:] + b.stderr[-200:])); print("  %-62s BUILD FAILED" % nm, flush=True); continue
+        if rebuild:
+            b = subprocess.run([sys.executable, 'build_kernel.py'], cwd=d, env=env, capture_output=True, text=True)
+            if 'Build succeeded' not in b.stdout: results.append((nm, 'BUILD FAILED', b.stdout[-200:] + b.stderr[-200:])); print("  %-62s BUILD FAILED" % nm, flush=True); continue
         env = gate_env(d)
         caught_by = []
         for cmd in cmds:

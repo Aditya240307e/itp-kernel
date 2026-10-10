@@ -8,7 +8,7 @@ canaries. The library is: Nat, Eq, Le, add, And/Or/Ex/True/False/Not/Iff, a doze
 ## What is missing, with rough effort (expert person-months; treat as +-2x)
 | Area | What | Effort |
 |---|---|---|
-| Kernel | universe polymorphism or cumulativity; proof irrelevance; structures/records with eta; quotients (partly there); mutual/nested inductives; well-founded recursion; **Nat/Int literals with accelerated arithmetic** (our Nat is unary: 2024 is 2024 constructors, so number-theory problems with concrete numbers are out of reach) | 2-4 |
+| Kernel | universe polymorphism or cumulativity (see the status log: checked instantiation); structures/records with eta; mutual/nested inductives; well-founded recursion; **Nat/Int literals with accelerated arithmetic** (our Nat is unary: 2024 is 2024 constructors, so number-theory problems with concrete numbers are out of reach) | 2-4 |
 | Elaboration | implicit arguments, instance resolution (or a disciplined structure-passing style), coercions N->Z->Q->R, notation, have/show/obtain/rcases/use/constructor, usable error messages | 2-4 |
 | Automation | omega (linear integer arithmetic), ring/ring_nf, linarith/nlinarith, norm_num, simp, decide, positivity, field_simp, a general proof search; geometry needs coordinates/complex numbers or a dedicated deductive engine | 6-12 |
 | Library | Z, Q, R (construct, or axiomatise as a complete ordered field: cheap but a trust risk), divisibility/gcd/primes/modular arithmetic, finite sets and sums, sequences/limits, polynomials, then linear algebra, groups/rings, topology | 12-24 for a competition subset; several person-years for undergraduate breadth |
@@ -30,3 +30,14 @@ engineering, and the search/learning part could dominate beyond that; without it
 3. Structures/records, implicit arguments, a minimal instance mechanism.
 4. omega, ring, linarith (certificates checked by the kernel).
 5. Decide: build the library ourselves, or invest in Lean-kernel compatibility and import Mathlib.
+
+## Status log (kernel features, newest first)
+- **Definitional proof irrelevance** (gate S17, mutants M101-M113 and C1-C8). In the Prop/Type world two proofs of one proposition are convertible. The kernel decides it in the unifier: the structural comparison runs first;
+  only a pair it rejects is a candidate, and then both sides must infer (by the ordinary inference rule) to types whose sort is Type0, and the two types must unify. A syntactic prefilter only skips inference for data
+  and type formers. Partial effects of the rejected structural attempt (metavariable assignments, deferred constraints) are rolled back first. The independent checker implements the same rule with a conversion that
+  carries the typing context. `conv_value` stays untyped and does no irrelevance (proofs inside a stuck match's captured environment are compared structurally: incomplete, never unsound). Without prop_elim there is no Prop
+  and no irrelevance. Consequences: subtypes and structures with proof fields have the expected equality, a type may depend on a proof, and UIP / K are provable by `refl`.
+- **Quotients** (gate S16): five kernel-built constants plus one reduction rule; funext is derivable from Quot.sound; the independent checker validates the roles and does not trust the labels.
+- **Universe polymorphism: decision.** The kernel keeps concrete universes. A library declaration that is polymorphic is a construction function in the library layer, instantiated (and kernel-checked) once per level vector it is
+  used at; no level variable ever reaches the kernel or the independent checker, so the trusted base does not grow. The competition and undergraduate libraries live in one data universe (Type1) plus Prop; Type2 is needed only for
+  structure types (Group, Ring, ...). Real level expressions (Lean style) are the price of Mathlib import and can be added later without touching the rest.

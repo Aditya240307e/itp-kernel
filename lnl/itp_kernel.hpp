@@ -3001,7 +3001,112 @@ inline ElabResult solve_pattern(uint32_t meta_id, const std::vector<uint32_t>& v
 } // namespace detail
 
 
-inline ElabResult unify_values(const Value& a_in, const Value& b_in, ElabCtx& ec, ElabState& es) {
+// ---------------------------------------------------------------------------
+// Definitional proof irrelevance (option prop_elim only: level 0 is Prop)
+// ---------------------------------------------------------------------------
+//
+//        G |- p : P      G |- q : P      G |- P : Prop
+//        ------------------------------------------------           (PI)
+//                        G |- p == q
+//
+// No other universe is irrelevant: two terms of a type in Type j, j >= 1, are equal only if they are convertible.
+//
+// How it is decided. Never by guessing what a term's type is. A pair the structural comparison could not equate is a CANDIDATE only if both
+// sides pass a one-sided prefilter (it may only say "certainly not a proof", judged from syntax), and then the verdict comes from the
+// type checker itself: quote the value, infer its type, demand that this type is a proposition (its own sort is Type0), do the same for the
+// other side, and unify the two types. There is no hand-written classification of proofs that could drift away from the typing rules; the
+// prefilter exists to keep failing comparisons of DATA (the common case in proof search) from paying for an inference.
+//
+// Order. The structural comparison runs first and (PI) only when it fails, so the common, successful path pays nothing. Failure may have left
+// partial effects (metas assigned on the way to the mismatch); they are rolled back before (PI) is tried, so that an equality obtained by
+// irrelevance does not carry commitments from a comparison that did not hold.
+//
+// Scope. This is the unifier, i.e. the type checker's notion of definitional equality. conv_value is untyped (it never sees a type) and does
+// no proof irrelevance; it only decides pairs the unifier already knows to be of the same type and compares captured environments. Proofs
+// inside a stuck Match's captured environment are therefore compared structurally (incomplete, never unsound).
+//
+// Termination. (PI) calls infer, which calls check, which calls the unifier. Every such call is on a subterm of the pair being compared or
+// on a type of one, but the argument is not a well-founded measure the compiler can see, so the nesting is bounded; beyond the bound the
+// answer is "not irrelevant" (fails closed).
+inline TypeResult infer(NodeId t, ElabCtx& ec, ElabState& es);
+inline std::expected<uint32_t, TypeError> sort_level_of(NodeId t, ElabCtx& ec, ElabState& es, const char* what);
+inline ElabResult unify_values(const Value& a_in, const Value& b_in, ElabCtx& ec, ElabState& es);
+
+inline int& pi_nesting() { static thread_local int n = 0; return n; }
+inline constexpr int kMaxPiNesting = 8;
+struct PiNestingGuard { PiNestingGuard() { ++pi_nesting(); } ~PiNestingGuard() { --pi_nesting(); } };
+
+/// Prefilter on the TYPE of a value, from syntax alone. false = the value certainly is not a proof (true = maybe).
+/// A type that ends, after its Pi telescope, in a sort belongs to a type former (a type, a proposition, a predicate): never a proof. A type headed by
+/// a family that lives in Type k, k >= 1, belongs to data. Only a type headed by a Prop-valued family, or by something the syntax cannot classify (a
+/// variable, a definition, a match), can belong to a proof.
+inline bool type_may_be_proposition(NodeId ty) {
+    while (ty.tag == NodeType::PI) ty = ctx().pis[ty.index].cod_id;
+    if (ty.tag == NodeType::TYPE) return false;
+    NodeId head = ty;
+    while (head.tag == NodeType::APP) head = ctx().apps[head.index].fn_id;
+    if (head.tag == NodeType::CONST) {
+        NodeId r = ctx().globals[ctx().consts[head.index].global_id].type;
+        while (r.tag == NodeType::PI) r = ctx().pis[r.index].cod_id;
+        if (r.tag == NodeType::TYPE) return ctx().types[r.index].universe_level == 0;
+    }
+    return true;
+}
+
+inline bool may_be_proof(const Value& v, const ElabCtx& ec) {
+    return inspect_value(v,
+        [](const VType&) { return false; },
+        [](const VPi&) { return false; },
+        [](const Closure&) { return false; },     // a lambda is compared under its binder (and by eta); the proofs are then its leaves
+        [](const VFix&) { return false; },
+        [](const VCtor& c) {
+            NodeId r = ctx().globals[c.ind_type_global_id].type;
+            while (r.tag == NodeType::PI) r = ctx().pis[r.index].cod_id;
+            return r.tag == NodeType::TYPE && ctx().types[r.index].universe_level == 0;
+        },
+        [&](const VNeutral& n) {
+            for (const auto& fr : n.spine) if (!std::holds_alternative<ApplyFrame>(fr)) return true;     // a stuck match: its type is the motive's business, let infer decide
+            switch (n.head.kind) {
+                case NeutralHead::Kind::GlobalConst: return type_may_be_proposition(ctx().globals[n.head.id].type);
+                case NeutralHead::Kind::LocalVar: return n.head.id < ec.size() && type_may_be_proposition(ec.types[n.head.id]);
+                default: return false;                                                                          // metas are handled by the pending-constraint machinery
+            }
+        });
+}
+
+/// The type of `v` when `v` is a proof (its type is a proposition), else nullopt. The answer comes from infer, in a scratch ElabState: if typing
+/// `v` needed deferred constraints the verdict is "cannot tell" (nullopt).
+inline std::optional<NodeId> proof_type_of(const Value& v, ElabCtx& ec) {
+    try {
+        ElabState scratch;
+        TypeResult ty = infer(quote(v, ec.size()), ec, scratch);
+        if (!ty || !scratch.pending.empty()) return std::nullopt;
+        auto s = sort_level_of(*ty, ec, scratch, "the type of a proof candidate is not a type");
+        if (!s || *s != 0 || !scratch.pending.empty()) return std::nullopt;
+        return *ty;
+    } catch (const std::exception&) { return std::nullopt; }
+}
+
+/// (PI) on a pair the structural comparison rejected. `failure` is the structural verdict, returned unchanged when the pair is not a pair of
+/// proofs of one proposition.
+inline ElabResult proof_irrelevance_fallback(const Value& a_in, const Value& b_in, ElabCtx& ec, ElabState& es, ElabResult failure,
+                                             const MetaContext::Mark& meta_mark, std::size_t pending_mark) {
+    Value a = resolve_solved_meta_head(a_in), b = resolve_solved_meta_head(b_in);
+    if (!may_be_proof(a, ec) || !may_be_proof(b, ec)) return failure;
+    if (pi_nesting() >= kMaxPiNesting) return failure;
+    PiNestingGuard guard;
+    auto rollback = [&] {      // back to the state before the structural attempt: neither a failed attempt nor a failed (PI) leaves metas assigned or constraints deferred
+        ctx().meta_ctx.rewind(meta_mark);
+        es.pending.erase(es.pending.begin() + static_cast<std::ptrdiff_t>(pending_mark), es.pending.end());
+    };
+    rollback();
+    auto ta = proof_type_of(a, ec); if (!ta) { rollback(); return failure; }
+    auto tb = proof_type_of(b, ec); if (!tb) { rollback(); return failure; }
+    if (ElabResult r = unify_values(eval(*ta, ec.values), eval(*tb, ec.values), ec, es); !r) { rollback(); return failure; }
+    return {};
+}
+
+inline ElabResult unify_structural(const Value& a_in, const Value& b_in, ElabCtx& ec, ElabState& es) {
     Value a = resolve_solved_meta_head(a_in);
     Value b = resolve_solved_meta_head(b_in);
     auto is_meta_headed = [](const Value& v) {
@@ -3198,6 +3303,15 @@ inline ElabResult unify_values(const Value& a_in, const Value& b_in, ElabCtx& ec
     );
 }
 
+
+/// Definitional equality as the type checker uses it: structural comparison, then (in the Prop/Type world) proof irrelevance.
+inline ElabResult unify_values(const Value& a, const Value& b, ElabCtx& ec, ElabState& es) {
+    if (!ctx().prop_mode) return unify_structural(a, b, ec, es);
+    const auto meta_mark = ctx().meta_ctx.checkpoint(); const std::size_t pending_mark = es.pending.size();
+    ElabResult r = unify_structural(a, b, ec, es);
+    if (r) return r;
+    return proof_irrelevance_fallback(a, b, ec, es, std::move(r), meta_mark, pending_mark);
+}
 
 inline ElabResult unify(NodeId a_id, NodeId b_id, ElabCtx& ec, ElabState& es) {
     return unify_values(eval(a_id, ec.values), eval(b_id, ec.values), ec, es);
