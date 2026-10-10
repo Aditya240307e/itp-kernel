@@ -17,7 +17,31 @@ struct ITPError : std::runtime_error { using std::runtime_error::runtime_error; 
 
 
 struct KernelWrapper;
+// Is this id a node of the ACTIVE kernel's pools? (Call after `auto g = activate();`.) A NodeId is a (tag, index) pair into per-kind pools, so an id that did not come from this kernel -- or that was
+// reclaimed by a rewind -- may index past a pool; the kernel reads pools directly, so such an id must be refused here, never followed. This cannot detect an id from ANOTHER kernel that happens to be in
+// range (that is aliasing, not a crash); the Python authoring layer wraps ids with their owner for that.
+inline bool node_ok(itp::NodeId n) {
+    auto& c = itp::ctx();
+    switch (n.tag) {
+        case itp::NodeType::VAR:       return n.index < c.vars.storage.size();
+        case itp::NodeType::APP:       return n.index < c.apps.storage.size();
+        case itp::NodeType::LAMBDA:    return n.index < c.lambdas.storage.size();
+        case itp::NodeType::PI:        return n.index < c.pis.storage.size();
+        case itp::NodeType::TYPE:      return n.index < c.types.storage.size();
+        case itp::NodeType::CONST:     return n.index < c.consts.storage.size();
+        case itp::NodeType::MATCH:     return n.index < c.matches.storage.size();
+        case itp::NodeType::META:      return n.index < c.metas.storage.size();
+        case itp::NodeType::TYPE_UNIV: return n.index < c.type_univs.storage.size();
+        case itp::NodeType::LET:       return n.index < c.lets.storage.size();
+        case itp::NodeType::FIX:       return n.index < c.fixes.storage.size();
+    }
+    return false;
+}
+inline void require_node(itp::NodeId n, const char* what) {
+    if (!node_ok(n)) throw ITPError(std::string("invalid term handle (") + what + "): it does not name a node of this kernel (a handle from another kernel, or one reclaimed by a rewind)");
+}
 inline void require_scoped(itp::NodeId t, uint32_t nfree, const char* what) {
+    require_node(t, what);
     if (!itp::detail::well_scoped(t, nfree))
         throw ITPError(std::string("ill-scoped term (") + what + "): it has an unbound bound variable, or a context variable beyond the " + std::to_string(nfree) + " in scope");
 }
@@ -100,7 +124,7 @@ struct KernelWrapper {
         ProofStateHandle h; h.ps->goals.push_back(itp::Goal{meta, ec, std::move(hyps), target}); h.root_meta_id = meta; h.kernel = this;
         return h;
     }
-    uint32_t loose_range_of(itp::NodeId t) { auto g = activate(); return itp::loose_range(t); }
+    uint32_t loose_range_of(itp::NodeId t) { auto g = activate(); require_node(t, "loose_range_of"); return itp::loose_range(t); }
     void set_option(const std::string& name, bool value) { auto g = activate(); if (name == "parameters") itp::ctx().param_mode = value; else if (name == "prop_elim") itp::ctx().set_prop_mode(value); else throw ITPError("unknown option: " + name); }
     bool get_option(const std::string& name) { auto g = activate(); if (name == "parameters") return itp::ctx().param_mode; if (name == "prop_elim") return itp::ctx().prop_mode; throw ITPError("unknown option: " + name); }
     std::vector<int> param_slots(uint32_t family_gid) { auto g = activate(); require_global(family_gid, "param_slots"); std::vector<int> out; for (bool b : itp::family_param_slots(family_gid)) out.push_back(b ? 1 : 0); return out; }
@@ -115,13 +139,13 @@ struct KernelWrapper {
     itp::NodeId mk_type(uint32_t l) { auto g = activate(); require_small(l, "universe level"); return itp::mk_type(l); }
     itp::NodeId mk_bvar(uint32_t i) { auto g = activate(); require_small(i, "bound variable index"); return itp::mk_bvar(i); }
     itp::NodeId mk_fvar(uint32_t l) { auto g = activate(); require_small(l, "context variable level"); return itp::mk_fvar(l); }
-    itp::NodeId mk_app(itp::NodeId f, itp::NodeId a) { auto g = activate(); return itp::mk_app(f, a); }
-    itp::NodeId mk_lambda(itp::NodeId t, itp::NodeId b) { auto g = activate(); return itp::mk_lambda(t, b); }
-    itp::NodeId mk_pi(itp::NodeId d, itp::NodeId c) { auto g = activate(); return itp::mk_pi(d, c); }
-    itp::NodeId mk_let(itp::NodeId t, itp::NodeId v, itp::NodeId b) { auto g = activate(); return itp::mk_let(t, v, b); }
+    itp::NodeId mk_app(itp::NodeId f, itp::NodeId a) { auto g = activate(); require_node(f, "function"); require_node(a, "argument"); return itp::mk_app(f, a); }
+    itp::NodeId mk_lambda(itp::NodeId t, itp::NodeId b) { auto g = activate(); require_node(t, "binder type"); require_node(b, "body"); return itp::mk_lambda(t, b); }
+    itp::NodeId mk_pi(itp::NodeId d, itp::NodeId c) { auto g = activate(); require_node(d, "domain"); require_node(c, "codomain"); return itp::mk_pi(d, c); }
+    itp::NodeId mk_let(itp::NodeId t, itp::NodeId v, itp::NodeId b) { auto g = activate(); require_node(t, "let type"); require_node(v, "let value"); require_node(b, "let body"); return itp::mk_let(t, v, b); }
     itp::NodeId mk_const(uint32_t gid) { auto g = activate(); require_global(gid, "mk_const"); return itp::mk_const(gid); }
-    itp::NodeId mk_match(itp::NodeId s, itp::NodeId m, std::vector<itp::NodeId> bs) { auto g = activate(); return itp::mk_match(s, m, std::move(bs)); }
-    itp::NodeId mk_fix(itp::NodeId fn_type, uint32_t dec, itp::NodeId body) { auto g = activate(); require_small(dec, "decreasing argument"); return itp::mk_fix(fn_type, dec, body); }
+    itp::NodeId mk_match(itp::NodeId s, itp::NodeId m, std::vector<itp::NodeId> bs) { auto g = activate(); require_node(s, "scrutinee"); require_node(m, "motive"); for (auto b : bs) require_node(b, "branch"); return itp::mk_match(s, m, std::move(bs)); }
+    itp::NodeId mk_fix(itp::NodeId fn_type, uint32_t dec, itp::NodeId body) { auto g = activate(); require_small(dec, "decreasing argument"); require_node(fn_type, "fix type"); require_node(body, "fix body"); return itp::mk_fix(fn_type, dec, body); }
 
     uint32_t reserve_inductive_type(const std::string& name, itp::NodeId sort) { auto g = activate(); require_scoped(sort, 0, "inductive sort"); require_meta_free(sort, "inductive sort"); return itp::reserve_inductive_type(name, sort); }
     itp::InductiveHandle finish_inductive(uint32_t tid, std::vector<itp::CtorSpec> ctors) { auto g = activate();
@@ -197,7 +221,7 @@ struct KernelWrapper {
         return {static_cast<bool>(r), r ? std::string("OK") : r.error().message, static_cast<uint32_t>(es.pending.size())};
     }
     itp::NodeId close_telescope(const std::string& kind, const std::vector<itp::NodeId>& doms, itp::NodeId body, uint32_t base) {
-        auto g = activate(); require_small(base, "telescope base");
+        auto g = activate(); require_small(base, "telescope base"); for (auto d : doms) require_node(d, "telescope domain"); require_node(body, "telescope body");
         if (kind != "lam" && kind != "pi") throw ITPError("close_telescope: kind must be 'lam' or 'pi', not '" + kind + "'");
         return kind == "lam" ? itp::close_lambda_telescope(doms, body, base) : itp::close_pi_telescope(doms, body, base);
     }
@@ -207,7 +231,7 @@ struct KernelWrapper {
         auto g = activate(); require_small(n0, "context size"); require_scoped(a, n0, "lhs"); require_scoped(b, n0, "rhs"); itp::Env env = fresh_env(n0);
         return itp::conv_value(itp::eval(a, env), itp::eval(b, env), n0);
     }
-    uint32_t loose_range(itp::NodeId t) { auto g = activate(); return itp::loose_range(t); }
+    uint32_t loose_range(itp::NodeId t) { auto g = activate(); require_node(t, "loose_range"); return itp::loose_range(t); }
     // Test hook for the release machinery: builds a chain of `depth` nested values ITERATIVELY (kind 0: one-argument constructors, a unary numeral; 1: an environment with `depth` bindings;
     // 2: closures each capturing an environment that holds the previous closure) and then drops it. With a recursive destructor this overflows any stack long before a million levels;
     // the trampoline in detail::run_release makes it a loop. Returns the depth, so the call cannot be optimised away.
@@ -220,11 +244,11 @@ struct KernelWrapper {
         return depth;
     }
     itp::NodeId lift(itp::NodeId t, uint32_t d, uint32_t cutoff) {
-        auto g = activate(); require_small(d, "lift amount"); require_small(cutoff, "lift cutoff");
+        auto g = activate(); require_node(t, "lift"); require_small(d, "lift amount"); require_small(cutoff, "lift cutoff");
         if (static_cast<uint64_t>(itp::loose_range(t)) + d > itp::kMaxUniverseLevel) throw ITPError("lift: the result would have a bound variable index beyond the supported range");
         return itp::lift(t, d, cutoff); }
-    itp::NodeId instantiate(itp::NodeId t, const std::vector<itp::NodeId>& vals) { auto g = activate(); return itp::instantiate(t, vals); }
-    itp::NodeId abstract_fvars(itp::NodeId t, const std::vector<uint32_t>& fvars) { auto g = activate(); return itp::abstract_fvars(t, fvars); }
+    itp::NodeId instantiate(itp::NodeId t, const std::vector<itp::NodeId>& vals) { auto g = activate(); require_node(t, "instantiate"); for (auto v : vals) require_node(v, "instantiate value"); return itp::instantiate(t, vals); }
+    itp::NodeId abstract_fvars(itp::NodeId t, const std::vector<uint32_t>& fvars) { auto g = activate(); require_node(t, "abstract_fvars"); return itp::abstract_fvars(t, fvars); }
     // Quotients: declares Quot, Quot.mk, Quot.lift, Quot.ind and Quot.sound with kernel-built types (see itp::declare_quot); eq_gid must be the standard equality family.
     std::tuple<uint32_t, uint32_t, uint32_t, uint32_t, uint32_t> declare_quot(uint32_t eq_gid) {
         auto g = activate(); require_global(eq_gid, "declare_quot"); auto r = itp::declare_quot(eq_gid);
@@ -257,7 +281,7 @@ struct KernelWrapper {
     }
     // Raw dump with explicit variable kinds: b<i> = bound index, f<l> = context level.
     std::string dump_raw(itp::NodeId n) {
-        auto g = activate();
+        auto g = activate(); require_node(n, "dump_raw");
         std::string out;   // appended to in place: building each level's string from its children's copied the whole text at every level (quadratic on deep terms)
         std::function<void(itp::NodeId)> go = [&](itp::NodeId t) {
             ITP_STACK_CHECK();
@@ -280,6 +304,25 @@ struct KernelWrapper {
         };
         go(n);
         return out;
+    }
+    // The structure of ONE node, for Python code that has to read a term (tactics, the ring normaliser, feature extraction). The result is a tuple whose first entry names the kind and whose other
+    // entries are children (handles), numbers or a list:  ('type', level)  ('bvar', index)  ('fvar', level)  ('app', f, a)  ('lam', type, body)  ('pi', dom, cod)  ('let', type, value, body)
+    // ('const', gid)  ('match', scrutinee, motive, [branches])  ('fix', fn_type, decreasing_arg, body)  ('meta', id)  ('tuniv', index).  O(1) for every kind except match (its branch list).
+    // Rebuilding a node from its view with the mk_* functions gives back the same handle (terms are hash-consed): the round trip is the gate's test.
+    nb::object view(itp::NodeId n) {
+        auto g = activate(); require_node(n, "view");
+        return itp::inspect(n,
+            [&](itp::Var v) -> nb::object { return nb::make_tuple(v.bound ? "bvar" : "fvar", v.n); },
+            [&](itp::App a) -> nb::object { return nb::make_tuple("app", a.fn_id, a.arg_id); },
+            [&](itp::Lambda l) -> nb::object { return nb::make_tuple("lam", l.type_id, l.body_id); },
+            [&](itp::Pi p) -> nb::object { return nb::make_tuple("pi", p.dom_id, p.cod_id); },
+            [&](itp::Let l) -> nb::object { return nb::make_tuple("let", l.type_id, l.value_id, l.body_id); },
+            [&](itp::Type t) -> nb::object { return nb::make_tuple("type", t.universe_level); },
+            [&](itp::Const c) -> nb::object { return nb::make_tuple("const", c.global_id); },
+            [&](itp::Meta m) -> nb::object { return nb::make_tuple("meta", m.meta_id); },
+            [&](itp::Match m) -> nb::object { return nb::make_tuple("match", m.scrutinee_id, m.motive_id, nb::cast(std::vector<itp::NodeId>(m.branches->begin(), m.branches->end()))); },
+            [&](itp::Fix f) -> nb::object { return nb::make_tuple("fix", f.fn_type, f.decreasing_arg, f.body); },
+            [&](itp::TypeUniv t) -> nb::object { return nb::make_tuple("tuniv", t.param_index); });
     }
 };
 
@@ -390,5 +433,6 @@ NB_MODULE(itp_env_lnl, m) {
         .def("num_globals", &KernelWrapper::num_globals)
         .def("list_globals", &KernelWrapper::list_globals)
         .def("global_info", &KernelWrapper::global_info, "gid"_a)
-        .def("dump_raw", &KernelWrapper::dump_raw, "term"_a);
+        .def("dump_raw", &KernelWrapper::dump_raw, "term"_a)
+        .def("view", &KernelWrapper::view, "term"_a);
 }
