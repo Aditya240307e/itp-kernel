@@ -176,6 +176,13 @@ struct KernelWrapper {
     itp::NodeId lift(itp::NodeId t, uint32_t d, uint32_t cutoff) { auto g = activate(); return itp::lift(t, d, cutoff); }
     itp::NodeId instantiate(itp::NodeId t, const std::vector<itp::NodeId>& vals) { auto g = activate(); return itp::instantiate(t, vals); }
     itp::NodeId abstract_fvars(itp::NodeId t, const std::vector<uint32_t>& fvars) { auto g = activate(); return itp::abstract_fvars(t, fvars); }
+    // Quotients: declares Quot, Quot.mk, Quot.lift, Quot.ind and Quot.sound with kernel-built types (see itp::declare_quot); eq_gid must be the standard equality family.
+    std::tuple<uint32_t, uint32_t, uint32_t, uint32_t, uint32_t> declare_quot(uint32_t eq_gid) {
+        auto g = activate(); auto r = itp::declare_quot(eq_gid);
+        if (!r) throw ITPError(r.error().message);
+        return {r->type, r->mk, r->lift, r->ind, r->sound};
+    }
+    int quot_role(uint32_t gid) { auto g = activate(); return static_cast<int>(itp::ctx().globals.defs.at(gid).quot_role); }   // 0 none, 1 Quot, 2 mk, 3 lift, 4 ind, 5 sound
     uint32_t num_globals() { auto g = activate(); return static_cast<uint32_t>(itp::ctx().globals.defs.size()); }
     std::vector<std::tuple<uint32_t, std::string, itp::NodeId, bool>> list_globals() {
         auto g = activate(); std::vector<std::tuple<uint32_t, std::string, itp::NodeId, bool>> out;
@@ -296,6 +303,8 @@ NB_MODULE(itp_env_lnl, m) {
         .def("lift", &KernelWrapper::lift, "term"_a, "d"_a, "cutoff"_a = 0)
         .def("instantiate", &KernelWrapper::instantiate, "term"_a, "vals"_a)
         .def("abstract_fvars", &KernelWrapper::abstract_fvars, "term"_a, "levels"_a)
+        .def("declare_quot", &KernelWrapper::declare_quot, "eq_gid"_a)
+        .def("quot_role", &KernelWrapper::quot_role, "gid"_a)
         .def("num_globals", &KernelWrapper::num_globals)
         .def("list_globals", &KernelWrapper::list_globals)
         .def("global_info", &KernelWrapper::global_info, "gid"_a)

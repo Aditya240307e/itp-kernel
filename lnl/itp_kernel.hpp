@@ -752,12 +752,18 @@ struct RecursiveFnInfo {
     bool guard_check_was_skipped; // true iff declared via allow_unsafe_skip_guard_check=true
 };
 
+/// Which quotient primitive a global is (see declare_quot). A role is assigned ONLY inside declare_quot, which builds the global's type
+/// itself. Mk and Lift drive the one reduction rule (apply); Type, Ind and Sound are recorded so that the independent checker can find
+/// the whole family and re-verify every type.
+enum class QuotRole : uint8_t { None = 0, Type, Mk, Lift, Ind, Sound };
+
 struct GlobalDef {
     NodeId type;
     std::optional<NodeId> value;       // present for a definition (delta-reducible); absent for an axiom
     std::optional<CtorInfo> ctor_info; // present if this global is a constructor
     std::optional<RecursiveFnInfo> recursive_info; // present if declared via finish_recursive_function(_checked)
     std::string name;
+    QuotRole quot_role = QuotRole::None; // set only by declare_quot
 };
 
 struct GlobalEnv {
@@ -1799,6 +1805,25 @@ auto inspect_value(const Value& a, const Value& b, Visitors... vs) {
     return std::visit(match_on{vs...}, a, b);
 }
 
+/// The quotient computation rule, the one reduction rule that is not beta, delta or iota:
+///
+///     Quot.lift A r B f h (Quot.mk A' r' a)   ~>   f a
+///
+/// `n` is a neutral headed by a Quot.lift that has just received its sixth argument. The rule fires only when ALL six frames are plain
+/// applications and the sixth is a saturated Quot.mk (a neutral headed by a global with role Mk, with exactly three plain arguments);
+/// it returns (f, a). Nothing about h is looked at: that h proves f respects r is enforced where it belongs, by the ordinary
+/// application typing rule against Quot.lift's declared type. A and r need not be compared with A' and r' either, because in a
+/// well-typed term they are equal (subject reduction), exactly as for every other iota rule.
+inline std::optional<std::pair<Value, Value>> quot_lift_redex(const VNeutral& n) {
+    if (n.spine.size() != 6) return std::nullopt;
+    for (const auto& fr : n.spine) if (!std::holds_alternative<ApplyFrame>(fr)) return std::nullopt;
+    const auto* q = std::get_if<VNeutral>(&std::get<ApplyFrame>(n.spine[5]).arg);
+    if (!q || q->head.kind != NeutralHead::Kind::GlobalConst || q->spine.size() != 3) return std::nullopt;
+    if (ctx().globals[q->head.id].quot_role != QuotRole::Mk) return std::nullopt;
+    for (const auto& fr : q->spine) if (!std::holds_alternative<ApplyFrame>(fr)) return std::nullopt;
+    return std::make_pair(std::get<ApplyFrame>(n.spine[3]).arg, std::get<ApplyFrame>(q->spine[2]).arg);
+}
+
 inline Value apply(Value fn, Value arg) {
     return inspect_value(fn,
         [&](Closure clo) -> Value {
@@ -1823,6 +1848,9 @@ inline Value apply(Value fn, Value arg) {
                         return Value{VCtor{def.ctor_info->ind_type_global_id, def.ctor_info->ctor_idx,
                                            std::move(ctor_args)}};
                     }
+                }
+                if (def.quot_role == QuotRole::Lift) {
+                    if (auto redex = quot_lift_redex(n)) return apply(std::move(redex->first), std::move(redex->second));
                 }
             }
             return Value{std::move(n)};
@@ -4871,6 +4899,98 @@ inline std::expected<uint32_t, TypeError> sort_level_of(NodeId t, ElabCtx& ec, E
 }
 
 inline std::vector<NodeId> reversed(const std::vector<NodeId>& v) { return std::vector<NodeId>(v.rbegin(), v.rend()); }
+
+// ---------------------------------------------------------------------------
+// Quotients
+// ---------------------------------------------------------------------------
+//
+// A quotient is not a term former. It is five ordinary global constants -- whose types THIS function builds, so nobody can hand the
+// kernel different ones -- and one reduction rule (quot_lift_redex, applied in apply()). With Eq : (A : Type j) -> A -> A -> Prop:
+//
+//   Quot       : (A : Type j) -> (A -> A -> Prop) -> Type j
+//   Quot.mk    : (A : Type j) -> (r : A -> A -> Prop) -> A -> Quot A r
+//   Quot.lift  : (A : Type j) -> (r : A -> A -> Prop) -> (B : Type j) -> (f : A -> B)
+//                  -> ((a b : A) -> r a b -> Eq B (f a) (f b)) -> Quot A r -> B
+//   Quot.ind   : (A : Type j) -> (r : A -> A -> Prop) -> (P : Quot A r -> Prop)
+//                  -> ((a : A) -> P (Quot.mk A r a)) -> (q : Quot A r) -> P q
+//   Quot.sound : (A : Type j) -> (r : A -> A -> Prop) -> (a b : A) -> r a b -> Eq (Quot A r) (Quot.mk A r a) (Quot.mk A r b)
+//
+//   computation:   Quot.lift A r B f h (Quot.mk A r a)  ~>  f a
+//
+// Why constants and not a node kind: the respects-proof h is then checked by the ordinary application rule against the type of
+// Quot.lift, so there is no special typing rule that could forget to look at it (the first design in this project had exactly such a
+// rule, and did). The standard soundness argument for Lean's Quot applies: h is what makes the computation rule agree with Quot.sound,
+// and the motive of Quot.ind is a proposition because a motive in Type would let a function that does not respect r be defined, and
+// then Quot.sound would equate its values on related arguments.
+//
+// Preconditions, all checked: the Prop/Type world (prop_elim), so that Prop is Type0 and h is genuinely a proof; eq_gid is EXACTLY the
+// equality family  Eq : (A : Type j) -> A -> A -> Prop  with the single constructor  refl : (A : Type j) -> (a : A) -> Eq A a a  (the
+// constants' types mention it, and a different family would give Quot.sound and the hypothesis of Quot.lift another meaning); no
+// quotient is declared yet (a second family would give the one reduction rule two meanings). j is read off Eq and must be >= 1.
+// Every type built is type-checked before the function returns; on any failure nothing is left declared.
+struct QuotHandle { uint32_t type = 0, mk = 0, lift = 0, ind = 0, sound = 0; };
+
+inline std::expected<QuotHandle, TypeError> declare_quot(uint32_t eq_gid) {
+    ExecutionContext& c = ctx();
+    auto fail = [&](const std::string& msg) { return std::unexpected(TypeError{TypeErrorKind::Other, mk_type(0), std::nullopt, "declare_quot: " + msg}); };
+    if (!c.prop_mode) return fail("quotients live in the Prop/Type world (option prop_elim): the hypothesis of Quot.lift must be a proof and the motive of Quot.ind a proposition");
+    for (const GlobalDef& d : c.globals.defs) {
+        if (d.quot_role != QuotRole::None) return fail("quotients are already declared");
+        if (d.name == "Quot" || d.name == "Quot.mk" || d.name == "Quot.lift" || d.name == "Quot.ind" || d.name == "Quot.sound") return fail("a global named " + d.name + " already exists");
+    }
+    if (eq_gid >= c.globals.defs.size()) return fail("no such global");
+    const GlobalDef& eq = c.globals[eq_gid];
+    if (eq.value || eq.ctor_info || eq.type.tag != NodeType::PI) return fail("the equality family must be an inductive type of type (A : Type j) -> A -> A -> Prop");
+    const NodeId first_dom = c.pis[eq.type.index].dom_id;
+    if (first_dom.tag != NodeType::TYPE || c.types[first_dom.index].universe_level == 0) return fail("the first argument of the equality family must be a type in Type j with j >= 1");
+    const uint32_t j = c.types[first_dom.index].universe_level;
+    const NodeId Tj = mk_type(j), Prop = mk_type(0), EQ = mk_const(eq_gid);
+    // Locally nameless: the telescope variables are context variables (names 0.., inner binders 100..); close_pi_telescope binds them.
+    const NodeId A = mk_fvar(0), r = mk_fvar(1);
+    if (eq.type != close_pi_telescope({Tj, A, A}, Prop, 0)) return fail("the equality family must have the type (A : Type j) -> A -> A -> Prop");
+    const auto& eq_ctors = c.globals.ctors_of(eq_gid);
+    if (eq_ctors.size() != 1) return fail("the equality family must have exactly one constructor, refl");
+    if (c.globals[eq_ctors[0]].type != close_pi_telescope({Tj, A}, apply_all(EQ, {A, r, r}), 0)) return fail("the constructor of the equality family must be refl : (A : Type j) -> (a : A) -> Eq A a a");
+
+    const uint32_t g_type = static_cast<uint32_t>(c.globals.defs.size()), g_mk = g_type + 1, g_lift = g_type + 2, g_ind = g_type + 3, g_sound = g_type + 4;
+    const NodeId Q = mk_const(g_type), MK = mk_const(g_mk);
+    const NodeId rel = close_pi_telescope({A, A}, Prop, 100);                                  // A -> A -> Prop   (A = context variable 0)
+    const NodeId QAr = apply_all(Q, {A, r});                                                    // Quot A r
+    const NodeId a2 = mk_fvar(2), b3 = mk_fvar(3);
+
+    const NodeId type_ty = close_pi_telescope({Tj, rel}, Tj, 0);
+    const NodeId mk_ty = close_pi_telescope({Tj, rel, A}, QAr, 0);                              // A, r, a  =>  Quot A r
+    // lift: A r B f h q  with  f : A -> B ,  h : (a b : A) -> r a b -> Eq B (f a) (f b)
+    const NodeId B = mk_fvar(2), f = mk_fvar(3);
+    const NodeId f_ty = close_pi_telescope({A}, B, 100);
+    const NodeId h_ty = close_pi_telescope({A, A, apply_all(r, {mk_fvar(100), mk_fvar(101)})},
+                                           apply_all(EQ, {B, mk_app(f, mk_fvar(100)), mk_app(f, mk_fvar(101))}), 100);
+    const NodeId lift_ty = close_pi_telescope({Tj, rel, Tj, f_ty, h_ty, QAr}, B, 0);
+    // ind: A r P h q  with  P : Quot A r -> Prop ,  h : (a : A) -> P (Quot.mk A r a)
+    const NodeId P = mk_fvar(2);
+    const NodeId P_ty = close_pi_telescope({QAr}, Prop, 100);
+    const NodeId ih_ty = close_pi_telescope({A}, mk_app(P, apply_all(MK, {A, r, mk_fvar(100)})), 100);
+    const NodeId ind_ty = close_pi_telescope({Tj, rel, P_ty, ih_ty, QAr}, mk_app(P, mk_fvar(4)), 0);
+    // sound: A r a b h  with  h : r a b
+    const NodeId sound_ty = close_pi_telescope({Tj, rel, A, A, apply_all(r, {a2, b3})},
+                                               apply_all(EQ, {QAr, apply_all(MK, {A, r, a2}), apply_all(MK, {A, r, b3})}), 0);
+
+    const std::size_t old_n = c.globals.defs.size();
+    auto declare = [&](NodeId ty, const char* name, QuotRole role) { uint32_t g = c.globals.declare(ty, std::nullopt, name); c.globals.defs[g].quot_role = role; return g; };
+    if (declare(type_ty, "Quot", QuotRole::Type) != g_type || declare(mk_ty, "Quot.mk", QuotRole::Mk) != g_mk || declare(lift_ty, "Quot.lift", QuotRole::Lift) != g_lift ||
+        declare(ind_ty, "Quot.ind", QuotRole::Ind) != g_ind || declare(sound_ty, "Quot.sound", QuotRole::Sound) != g_sound)
+        throw std::logic_error("declare_quot: global ids are not consecutive");
+    for (uint32_t g : {g_type, g_mk, g_lift, g_ind, g_sound}) {
+        ElabState es; ElabCtx ec;
+        auto s = sort_level_of(c.globals[g].type, ec, es, "the type built for a quotient constant is not a type");
+        if (!s) {
+            const std::string msg = c.globals[g].name + ": " + s.error().message;
+            c.globals.defs.erase(c.globals.defs.begin() + static_cast<std::ptrdiff_t>(old_n), c.globals.defs.end());
+            return fail("internal error, the type built for " + msg);
+        }
+    }
+    return QuotHandle{g_type, g_mk, g_lift, g_ind, g_sound};
+}
 
 inline ElabResult verify_motive_shape(NodeId motive_id, uint32_t arity, ElabCtx& ec, ElabState& es, uint32_t* sort_level) {
     TypeResult motive_ty_r = infer(motive_id, ec, es);
