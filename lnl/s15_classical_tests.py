@@ -10,9 +10,10 @@ import oracle_prop as op_
 import s8_indep_tests as t8
 import s11_eqgen_tests as t11
 import indep_checker as ic
+import canary_lib as canlib
 
 def canary(N, seed, which='false'):
-    k, g = pw.build_prop_world(classical=True); rng = random.Random(seed)
+    k, g = pw.build_prop_world(classical=True)
     C = lambda n: ('const', g[n]); NAT, ZERO, S, EQ, FALSE, OR = C('Nat'), C('Zero'), C('Succ'), C('Eq'), C('False'), C('Or')
     T0, T1 = pw.T0, pw.T1; eq = lambda A, a, b: app(EQ, A, a, b)
     false_stmts = {'False': FALSE, '0 = 1': eq(NAT, ZERO, app(S, ZERO)), 'forall P : Prop, P': ('pi', T0, V(0)), 'forall P Q, Or P Q -> P': ('pi', T0, ('pi', T0, ('pi', app(OR, V(0), V(1)), V(0)))),
@@ -23,32 +24,9 @@ def canary(N, seed, which='false'):
                   'forall P Q, Or P Q -> Or Q P': ('pi', T0, ('pi', T0, ('pi', app(OR, V(0), V(1)), app(OR, V(1), V(0))))), 'forall P, False -> P': ('pi', T0, ('pi', FALSE, V(0)))}
     if which == 'true': false_stmts = true_stmts
     consts = [g[n] for n in ('refl', 'cong', 'symm', 'trans', 'transport', 'le_n', 'le_S', 'le_trans', 'Succ', 'add', 'conj', 'inl', 'inr', 'ex_intro', 'tt', 'em', 'propext', 'funext', 'choice', 'by_contra', 'or_elim', 'false_elim')]
-    ind = {g[n] for n in ('Nat', 'Eq', 'Le', 'And', 'Or', 'Ex', 'False', 'True')}; head = lambda x: head(x[1]) if x[0] == 'app' else x
-    tried = completed = verified_true = 0
-    for name, st in false_stmts.items():
-        stmt = build_new(k, l2h(st, 0))
-        for _ in range(N):
-            ps = k.start_proof(stmt); tried += 1
-            for _step in range(9):
-                if ps.num_goals() == 0: break
-                nh = ps.goal_num_hyps(0); tgt = parse_raw(k.dump_raw(ps.goal_target(0)), True)
-                hyps = [parse_raw(k.dump_raw(ps.goal_hyp_type(0, j)), True) for j in range(nh)]
-                indh = [j for j, h in enumerate(hyps) if head(h)[0] == 'const' and head(h)[1] in ind]; r = rng.random()
-                try:
-                    if tgt[0] == 'pi' and r < 0.4: ps.intro('x')
-                    elif indh and r < 0.65:
-                        j = rng.choice(indh)
-                        if rng.random() < 0.6: ps.cases(j)
-                        else: ps.induct(j, eq_gid=g['Eq'], refl_gid=g['refl'])
-                    elif nh and r < 0.82: ps.apply(build_new(k, ('fvar', rng.randrange(nh))))
-                    else: ps.apply(build_new(k, ('const', rng.choice(consts))))
-                except Exception: ps = None; break
-            if ps is not None and ps.num_goals() == 0 and ps.is_complete():
-                completed += 1
-                if k.check_open(ps.extract(), stmt, [])[0]:
-                    if which == 'false': return tried, completed, name
-                    verified_true += 1
-    return (tried, completed, None) if which == 'false' else (tried, completed, verified_true)
+    ind = {g[n] for n in ('Nat', 'Eq', 'Le', 'And', 'Or', 'Ex', 'False', 'True')}
+    tried, completed, verified, first = canlib.run(k, g, false_stmts, consts, ind, N, seed, stop_on_verified=(which == 'false'))
+    return (tried, completed, first) if which == 'false' else (tried, completed, verified)
 
 if __name__ == '__main__':
     FAIL = []; t0 = time.time()

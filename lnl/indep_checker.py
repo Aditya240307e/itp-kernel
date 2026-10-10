@@ -181,6 +181,8 @@ class Checker:
         while ty[0] == 'pi':
             x = fresh('f'); fields.append((x, ty[2])); ty = subst(ty[3], ty[1], ('v', x))
         h, res = spine(ty)
+        fam = self.g[cg].ctor_family
+        if h != ('c', fam) or len(res) != self.arity(fam): raise CheckError('malformed constructor: its result is not its family applied to exactly %d arguments' % self.arity(fam))
         return fields, res
     def ctor_app(self, t):
         h, args = spine(t)
@@ -501,6 +503,7 @@ class Checker:
         except CheckError as e: return False, str(e)
         except Unsupported as e: return False, 'unsupported node ' + str(e)
         except RecursionError: return False, 'recursion limit (treated as a rejection)'
+        except (IndexError, KeyError, TypeError, AttributeError, ValueError) as e: return False, 'internal error on a malformed input (treated as a rejection): %s: %s' % (type(e).__name__, e)
 
     def check_closed(self, term_tree, type_tree):
         return self.run(lambda: (self.sort_of({}, from_hybrid(type_tree)), self.check({}, from_hybrid(term_tree), from_hybrid(type_tree))))

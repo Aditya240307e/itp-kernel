@@ -6,6 +6,35 @@ REF_DIR = os.environ.get('ITP_REF_DIR', os.path.join(os.path.dirname(PY_ROOT), '
 def gate_env(lnl_dir, **extra):   # one place that says where the three source trees live, for the baseline and for every mutant copy
     return dict(os.environ, LNL_DIR=lnl_dir, ITP_PY_ROOT=PY_ROOT, ITP_REF_DIR=REF_DIR, PYTHONPATH=os.pathsep.join([REF_DIR, PY_ROOT, lnl_dir]), **extra)
 MUTANTS = {
+ 'M83 declare_quot ignores a name clash': ('        if (d.name == "Quot" || d.name == "Quot.mk" || d.name == "Quot.lift" || d.name == "Quot.ind" || d.name == "Quot.sound") return fail("a global named " + d.name + " already exists");\n', ''),
+ 'M100 F27: no function eta in conv_value: Fix vs Closure': ('        [&](const VFix& fa, const Closure& cb) -> bool {\n', '        [&](const VFix& fa, const Closure& cb) -> bool {\n            return false;\n'),
+ 'M99 F27: no function eta in conv_value: Closure vs Fix': ('        [&](const Closure& ca, const VFix& fb) -> bool {\n', '        [&](const Closure& ca, const VFix& fb) -> bool {\n            return false;\n'),
+ 'M98 F27: no function eta in conv_value: neutral vs Closure': ('        [&](const VNeutral& na, const Closure& cb) -> bool {\n', '        [&](const VNeutral& na, const Closure& cb) -> bool {\n            return false;\n'),
+ 'M97 F27: no function eta in conv_value: Closure vs neutral': ('        [&](const Closure& ca, const VNeutral& nb) -> bool {\n', '        [&](const Closure& ca, const VNeutral& nb) -> bool {\n            return false;\n'),
+ 'M96 F27: no function eta in the unifier (type checking): Fix vs Closure': ('        [&](const VFix& fa, const Closure& cb) -> ElabResult {\n', '        [&](const VFix& fa, const Closure& cb) -> ElabResult {\n            return mismatch("eta disabled");\n'),
+ 'M95 F27: no function eta in the unifier (type checking): Closure vs Fix': ('        [&](const Closure& ca, const VFix& fb) -> ElabResult {\n', '        [&](const Closure& ca, const VFix& fb) -> ElabResult {\n            return mismatch("eta disabled");\n'),
+ 'M94 F27: no function eta in the unifier (type checking): neutral vs Closure': ('        [&](const VNeutral& na, const Closure& cb) -> ElabResult {\n', '        [&](const VNeutral& na, const Closure& cb) -> ElabResult {\n            return mismatch("eta disabled");\n'),
+ 'M93 F27: no function eta in the unifier (type checking): Closure vs neutral': ('        [&](const Closure& ca, const VNeutral& nb) -> ElabResult {\n', '        [&](const Closure& ca, const VNeutral& nb) -> ElabResult {\n            return mismatch("eta disabled");\n'),
+ 'M92 F26: a finished inductive family is not marked inductive': ('    c.globals.defs[type_global_id].is_inductive = true;\n    return handle;', '    return handle;'),
+ 'M91 F26: the quotient constants are declared inductive': ('uint32_t g = c.globals.declare(ty, std::nullopt, name); c.globals.defs[g].quot_role = role; return g; };', 'uint32_t g = c.globals.declare(ty, std::nullopt, name); c.globals.defs[g].quot_role = role; c.globals.defs[g].is_inductive = true; return g; };'),
+ 'M90 F26: cases and induct accept a hypothesis of an opaque type': ('    if (!ctx().globals[si.type_gid].is_inductive)\n        return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, scrut_ty, std::nullopt, std::string(who) + ": hypothesis\'s type is not an inductive type application"});\n', ''),
+ 'M89 F26: check(Match) accepts a scrutinee of an opaque type': ('    const uint32_t type_global_id = scrut_neutral->head.id;\n    if (!ctx().globals[type_global_id].is_inductive)\n        return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, m.scrutinee_id, expected_ty, "scrutinee\'s type is not an inductive type application"});\n', '    const uint32_t type_global_id = scrut_neutral->head.id;\n'),
+ 'M88 F26: infer(Match) accepts a scrutinee of an opaque type': ('            const uint32_t type_global_id = scrut_neutral->head.id;\n            if (!ctx().globals[type_global_id].is_inductive)\n                return err(TypeErrorKind::MotiveInferenceFailure, m.scrutinee_id, "scrutinee\'s type is not an inductive type application");\n', '            const uint32_t type_global_id = scrut_neutral->head.id;\n'),
+ 'M87 Quot.lift is declared without its role': ('declare(lift_ty, "Quot.lift", QuotRole::Lift)', 'declare(lift_ty, "Quot.lift", QuotRole::None)'),
+ 'M86 Quot.sound: the premise has its arguments swapped (r b a)': ('close_pi_telescope({Tj, rel, A, A, apply_all(r, {a2, b3})},', 'close_pi_telescope({Tj, rel, A, A, apply_all(r, {b3, a2})},'),
+ 'M85 declare_quot does not check the type of the equality family': ('    if (eq.type != close_pi_telescope({Tj, A, A}, Prop, 0)) return fail(', '    if (false && eq.type != close_pi_telescope({Tj, A, A}, Prop, 0)) return fail('),
+ 'M84 declare_quot accepts an equality family with several constructors': ('if (eq_ctors.size() != 1) return fail(', 'if (eq_ctors.size() < 1) return fail('),
+ 'M82 declare_quot may be called twice': ('        if (d.quot_role != QuotRole::None) return fail("quotients are already declared");\n', ''),
+ 'M81 declare_quot accepts j = 0': ('if (first_dom.tag != NodeType::TYPE || c.types[first_dom.index].universe_level == 0) return fail(', 'if (first_dom.tag != NodeType::TYPE) return fail('),
+ "M80 declare_quot does not check the equality family's constructor": ('    if (c.globals[eq_ctors[0]].type != close_pi_telescope({Tj, A}, apply_all(EQ, {A, r, r}), 0)) return fail(', '    if (false && c.globals[eq_ctors[0]].type != close_pi_telescope({Tj, A}, apply_all(EQ, {A, r, r}), 0)) return fail('),
+ 'M79 declare_quot accepts a world without prop_elim': ('if (!c.prop_mode) return fail("quotients live in the Prop/Type world', 'if (false && !c.prop_mode) return fail("quotients live in the Prop/Type world'),
+ 'M78 quotient rule is never applied': ('                if (def.quot_role == QuotRole::Lift) {', '                if (false && def.quot_role == QuotRole::Lift) {'),
+ 'M77 quotient rule fires on ANY global applied to three arguments (the Mk role is not checked)': ('    if (ctx().globals[q->head.id].quot_role != QuotRole::Mk) return std::nullopt;\n', ''),
+ 'M76 quotient rule: a is taken from the wrong frame': ('return std::make_pair(std::get<ApplyFrame>(n.spine[3]).arg, std::get<ApplyFrame>(q->spine[2]).arg);', 'return std::make_pair(std::get<ApplyFrame>(n.spine[3]).arg, std::get<ApplyFrame>(q->spine[1]).arg);'),
+ 'M75 quotient rule: f is taken from the wrong frame': ('return std::make_pair(std::get<ApplyFrame>(n.spine[3]).arg, std::get<ApplyFrame>(q->spine[2]).arg);', 'return std::make_pair(std::get<ApplyFrame>(n.spine[2]).arg, std::get<ApplyFrame>(q->spine[2]).arg);'),
+ 'M74 Quot.ind: the motive may land in Type j': ('const NodeId P_ty = close_pi_telescope({QAr}, Prop, 100);', 'const NodeId P_ty = close_pi_telescope({QAr}, Tj, 100);'),
+ 'M73 Quot.sound concludes mk a = mk a': ('apply_all(EQ, {QAr, apply_all(MK, {A, r, a2}), apply_all(MK, {A, r, b3})}), 0);', 'apply_all(EQ, {QAr, apply_all(MK, {A, r, a2}), apply_all(MK, {A, r, a2})}), 0);'),
+ 'M72 Quot.lift: h only asks f a = f a (a vacuous respects-proof)': ('apply_all(EQ, {B, mk_app(f, mk_fvar(100)), mk_app(f, mk_fvar(101))}), 100);', 'apply_all(EQ, {B, mk_app(f, mk_fvar(100)), mk_app(f, mk_fvar(100))}), 100);'),
  'M71 apply does not check that the solutions unification found have their arguments\' types (F25)': ("        if (!solutions_ok) return std::unexpected(TypeError{TypeErrorKind::Mismatch, g.target, std::nullopt, \"apply: the solution unification found for an argument of the lemma does not have that argument's type (\" + why + \")\"});\n", ""),
  'M67 prop_elim: Match does not enforce the elimination restriction': ("    if (ctx().prop_mode && ctx().prop_elim_only.count(type_global_id)) {      // a proposition that is not a syntactic subsingleton: eliminable only into Type0", "    if (false && ctx().prop_mode && ctx().prop_elim_only.count(type_global_id)) {      // a proposition that is not a syntactic subsingleton: eliminable only into Type0"),
  'M68 prop_elim: a family with two constructors counts as a subsingleton': ("    bool subsingleton = ctors.size() <= 1;\n    if (ctors.size() == 1) {", "    bool subsingleton = ctors.size() <= 2;\n    if (ctors.size() == 1) {"),
@@ -16,7 +45,7 @@ MUTANTS = {
  'M63 induct with equations does not wrap its Fix in the extraction barrier (F23)': ("        if (sty.tag == NodeType::TYPE) proof = mk_app(mk_app(mk_const(get_or_build_barrier(ctx().types[sty.index].universe_level)), fn_type), proof);\n", ""),
  'M64 the library index offers the barrier as a candidate for every goal': ("        if (ctx().globals.defs[gid].name.rfind(\"__barrier_\", 0) == 0) continue;      // an identity at every type: it would be a candidate for every goal\n", ""),
  'M62 cases: refutation is not exploited when hypotheses are reverted, in parameter mode (F22)': ("    if (!reverted_js.empty() && !ctx().param_mode) exploit_ci.reset();\n", "    if (!reverted_js.empty()) exploit_ci.reset();\n"),
- 'M61 induct accepts a concrete index in parameter mode (F12 guard removed)': ("            if (!distinct_var)\n                return std::unexpected(TypeError{TypeErrorKind::Other, g.hyps[hyp_level].type, std::nullopt, \"induct: index slot \" + std::to_string(i) +", "            if (false)\n                return std::unexpected(TypeError{TypeErrorKind::Other, g.hyps[hyp_level].type, std::nullopt, \"induct: index slot \" + std::to_string(i) +"),
+ 'M61 induct accepts a concrete index in parameter mode (F12 guard removed)': ('    if (n_bad > 0 && !use_eq && ctx().param_mode) {\n        uint32_t first_bad = 0;', '    if (false && n_bad > 0 && !use_eq && ctx().param_mode) {\n        uint32_t first_bad = 0;'),
  'M60 a lambda checked against a Pi need not have a well-typed binder annotation (F21)': ("        if (dom_j != expected_dom) { auto sdom = sort_level_of(dom_j, cur_ec, es, \"Lambda domain must be a type\"); if (!sdom) return std::unexpected(sdom.error()); }\n", ""),
  'M59 UNSOUND unifier: different constructors unify (the canary must notice)': ("return mismatch(\"different constructors\");", "return ElabResult{};"),
  'M49 parameter analysis ignores uniformity of recursive occurrences': ("            for (NodeId ft : inst.arg_types) if (!uniform_family_occurrences(ft, family_gid, arity, i, r)) { ok = false; break; }", "            for (NodeId ft : inst.arg_types) if (false && !uniform_family_occurrences(ft, family_gid, arity, i, r)) { ok = false; break; }"),
@@ -37,7 +66,7 @@ MUTANTS = {
  'M45 lambda binder domain need not be a type (F19)': ("auto s = sort_level_of(dj, cur, es, \"Lambda domain must be a type\"); if (!s) return std::unexpected(s.error());", "auto s = sort_level_of(dj, cur, es, \"Lambda domain must be a type\"); if (!s) s = 0u;"),
  'M46 intro on a non-literal Pi uses the raw ids (F17, the reference behaviour)': ("dom_ty = quote(eval(pi->dom_id, pi->env), n);\n        new_target = quote(eval(pi->cod_id, pi->env.extend(fresh_neutral(n))), n + 1);", "dom_ty = pi->dom_id;\n        new_target = pi->cod_id;"),
  'M41 identical metas no longer unify (the quirk returns)': ("    if (is_meta_headed(a) && is_meta_headed(b) && quote(a, ec.size()) == quote(b, ec.size())) return {};\n", ""),
- 'M37 rewind does not clear the loose_range memo': ("        loose_cache.clear();\n        vars.rewind(cp.vars_n);", "        vars.rewind(cp.vars_n);"),
+ 'M37 rewind does not clear the loose_range memo': ('        loose_cache.clear(); param_cache.clear();', '        param_cache.clear();'),
  'M39 rewind does not roll back the metas': ("        meta_ctx.rewind(cp.meta_mark);", ""),
  'M40 rewind keeps stale same_ctor cache entries': ("it = (it->first >= keep || it->second >= keep) ? same_ctor_gid_by_family.erase(it) : std::next(it);", "it = std::next(it);"),
  'M32 index keys: a bound variable head ignores the context size': ("return pack_head_key(HeadKind::LocalVar, base + depth - 1 - v.n);", "return pack_head_key(HeadKind::LocalVar, depth - 1 - v.n);"),
@@ -50,7 +79,7 @@ MUTANTS = {
  'M23 induct (goal side): scrutinee applied to the field binders': ("NodeId agent_ctor_app = forced_ctor_app(ctor_gid, n, ctor_arity, inst_agent, forcing_agent, &actual);", "NodeId agent_ctor_app = mk_const(ctor_gid); for (uint32_t fi = 0; fi < ctor_arity; ++fi) agent_ctor_app = mk_app(agent_ctor_app, mk_fvar(actual[fi]));"),
  'M24 induct (runtime side): scrutinee applied to the field binders': ("NodeId true_ctor_app = forced_ctor_app(ctor_gid, body_base, ctor_arity, inst, forcing_body);", "NodeId true_ctor_app = mk_const(ctor_gid); for (uint32_t ai = 0; ai < ctor_arity; ++ai) true_ctor_app = mk_app(true_ctor_app, mk_fvar(body_base + ai));"),
  'M25 kernel Match typing: expected type uses the field binders': ("NodeId ctor_app = forced_ctor_app(ctor_gids[ci], ec.size(), arity, inst, forcing);", "NodeId ctor_app = mk_const(ctor_gids[ci]); for (uint32_t ai = 0; ai < arity; ++ai) ctor_app = mk_app(ctor_app, mk_fvar(ec.size() + ai));"),
- 'M26 forced application ignores the repeated-field rule': ("const bool use_forced = it != forcing.forced.end() && occurrence_count[base + ai] <= 1;", "const bool use_forced = it != forcing.forced.end();"),
+ 'M26 forced application ignores the repeated-field rule': ('const bool use_forced = it != forcing.forced.end() && (occurrence_count[base + ai] <= 1 || forcing.param_vars.count(base + ai));', 'const bool use_forced = it != forcing.forced.end();'),
  'M27 rewrite: goal not instantiated before abstraction (F13)': ("NodeId target_z = resolve_metas(g.target);", "NodeId target_z = g.target;"),
  'M28 rewrite: motive not type-checked (F13)': ("    if (!infer(motive, g.ec, ps.es))\n        return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, g.target, std::nullopt,\n            \"rewrite_eq: the motive", "    if (false)\n        return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, g.target, std::nullopt,\n            \"rewrite_eq: the motive"),
  'M29 conversion nesting bound removed (the segfault)': ("    if (conv_nesting() > kMaxConvNesting) return false;\n", ""),
@@ -60,12 +89,12 @@ MUTANTS = {
  'M17 induct: field levels assumed consecutive (ignore the IH shift)': ("actual[fi] = branch_ec.size();", "actual[fi] = n + fi;"),
  'M18 cases: delta not suppressed in unreverted branch targets': ("NoDeltaScope keep_constants_folded;\n            branch_expected = quote(eval(branch_expected, be_env), n + ctor_arity);", "branch_expected = quote(eval(branch_expected, be_env), n + ctor_arity);"),
  'M19 induct: revert closure is a single pass, not a fixpoint': ("needs_revert[j] = true; changed = true;", "needs_revert[j] = true;"),
- 'M20 cases: refutation exploitation disabled': ("if (!reverted_js.empty()) exploit_ci.reset();", "exploit_ci.reset();"),
+ 'M20 cases: refutation exploitation disabled': ('if (!reverted_js.empty() && !ctx().param_mode) exploit_ci.reset();', 'exploit_ci.reset();'),
  'M21 induct: reverted layer opened with the wrong variable': ("remaining = instantiate1(p.cod_id, mk_fvar(base_level + static_cast<uint32_t>(ri)));", "remaining = instantiate1(p.cod_id, mk_fvar(base_level + static_cast<uint32_t>(ri) + 1));"),
  'M9 solve_pattern occurs check disabled': ("    if (occurs_meta(meta_id, other_id))\n        return std::unexpected(TypeError{TypeErrorKind::OccursCheckFailure, other_id, std::nullopt, \"metavariable occurs in its own proposed solution\"});", "    if (false)\n        return std::unexpected(TypeError{TypeErrorKind::OccursCheckFailure, other_id, std::nullopt, \"metavariable occurs in its own proposed solution\"});"),
  'M10 intro does not instantiate the codomain': ("dom_ty = p.dom_id; new_target = instantiate1(p.cod_id, mk_fvar(n));", "dom_ty = p.dom_id; new_target = p.cod_id;"),
  'M11 rewrite substitutes x instead of y': ("NodeId new_target = replace_fvars(body_open, {{n, y}});", "NodeId new_target = replace_fvars(body_open, {{n, x}});"),
- 'M12 apply skips drain_pending': ("    if (ElabResult r = drain_pending(g.ec, ps.es); !r) return r;\n    std::vector<Goal> new_goals;", "    std::vector<Goal> new_goals;"),
+ 'M12 apply skips drain_pending': ('    if (ElabResult r = drain_pending(g.ec, ps.es); !r) return r;\n    {   // F25:', '    {   // F25:'),
  'M13 close_lambda_telescope domain prefix off by one': ("result = mk_lambda(abstract_fvars(opened_doms[j], std::vector<uint32_t>(fvl.begin(), fvl.begin() + j)), result);", "result = mk_lambda(abstract_fvars(opened_doms[j], std::vector<uint32_t>(fvl.begin(), fvl.begin() + std::min<int>(j + 1, (int)m))), result);"),
  'M14 meta applied to all but the last context variable': ("    for (uint32_t i = 0; i < n; ++i) r = mk_app(r, mk_fvar(i));\n    return r;", "    for (uint32_t i = 0; i + 1 < n; ++i) r = mk_app(r, mk_fvar(i));\n    return r;"),
  'M1 guard disabled (fix_guard_ok always true)': ("    return is_locally_structurally_decreasing(n0, tid, f.decreasing_arg, to_levels(f.body, n0 + 1));", "    (void)tid; return true;"),
@@ -73,13 +102,34 @@ MUTANTS = {
  'M3 lambda domain not unified with the expected domain': ("        if (ElabResult r = unify(dom_j, expected_dom, cur_ec, es); !r) return r;\n        Value next", "        (void)expected_dom;\n        Value next"),
  'M4 closing a Pi telescope off by one (wrong fvar prefix)': ("result = mk_pi(abstract_fvars(opened_doms[j], std::vector<uint32_t>(fvl.begin(), fvl.begin() + j))", "result = mk_pi(abstract_fvars(opened_doms[j], std::vector<uint32_t>(fvl.begin(), fvl.begin() + std::min<int>(j + 1, (int)m)))"),
  'M5 application argument not checked': ("            if (ElabResult r = check(a.arg_id, dom_ty, ec, es); !r) return std::unexpected(r.error());\n            return quote(eval(pi->cod_id, pi->env.extend(eval(a.arg_id, ec.values))), ec.size());", "            (void)dom_ty;\n            return quote(eval(pi->cod_id, pi->env.extend(eval(a.arg_id, ec.values))), ec.size());"),
- 'M6 admission universe rule disabled': ("if (!parameter_like && field_level[j] > *fam_level) {", "if (!parameter_like && field_level[j] > *fam_level + 1000) {"),
+ 'M6 admission universe rule disabled': ('if (!parameter_like && field_level[j] > *fam_level && !(ctx().prop_mode && *fam_level == 0)) {', 'if (!parameter_like && field_level[j] > *fam_level + 1000 && !(ctx().prop_mode && *fam_level == 0)) {'),
  'M7 strict positivity always true': ("                if (!is_strictly_positive(type_global_id, arg_ty))\n                    throw std::logic_error(\"itp: constructor '\" + ctor.name + \"' fails strict positivity", "                if (false)\n                    throw std::logic_error(\"itp: constructor '\" + ctor.name + \"' fails strict positivity"),
  'M8 Match branch count not checked': ("    if (ctor_gids.size() != branches.size())\n        return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, motive, std::nullopt,\n            \"Match branch count", "    if (false)\n        return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, motive, std::nullopt,\n            \"Match branch count"),
 }
-GATE_CMDS = (['s2_tests.py', '1500'], ['harness.py', '1500', '3'], ['s3_tests.py', '600'], ['s4_tests.py', '800'], ['oracle_gate.py'], ['s5_tests.py', '1200', '3'], ['s5_probe_tests.py', '500', '7'], ['s6_logic_tests.py'], ['s6_f6_tests.py'], ['s7_param_tests.py', '150', '600'], ['s8_indep_tests.py', '100'], ['s9_strong_tests.py'], ['s10_noconf_tests.py'], ['s11_eqgen_tests.py'], ['s12_probe_eq_tests.py', '150'], ['s13_prop_tests.py'], ['s14_prop_world_tests.py', '600'], ['s15_classical_tests.py', '300'])
+# Order matters only for speed (a mutant stops at the first gate that fails): fast, high-yield gates first, the 25-second oracle last.
+GATE_CMDS = (['s2_tests.py', '1500'], ['s16_quot_tests.py'], ['harness.py', '1500', '3'], ['s3_tests.py', '600'], ['s4_tests.py', '800'], ['s5_tests.py', '1200', '3'], ['s5_probe_tests.py', '500', '7'], ['s6_logic_tests.py'], ['s6_f6_tests.py'],
+             ['s7_param_tests.py', '150', '600'], ['s8_indep_tests.py', '100'], ['s9_strong_tests.py'], ['s10_noconf_tests.py'], ['s11_eqgen_tests.py'], ['s12_probe_eq_tests.py', '150'], ['s13_prop_tests.py'],
+             ['s14_prop_world_tests.py', '600'], ['s15_classical_tests.py', '300'], ['oracle_gate.py'])
+# a gate has failed when it exits non-zero or prints one of these markers
+FAIL_RE = re.compile(r"GATE: FAIL|Traceback")        # NOT words like ACCEPTED/FAILED: healthy gate output contains them ("ACCEPTED 0"); the exit status is the real signal
+# mutants that no gate can distinguish from the original BY CONSTRUCTION (equivalent mutants); each needs a reason
+KNOWN_EQUIVALENT = {
+    'M12 apply skips drain_pending': "after a successful unify() at the tactic level no deferred constraint is ever pending (every argument meta is applied to the whole context, so its unification is a pattern); drain_pending is exercised by the unifier gate (S3), not by apply",
+}
+
+def check_anchors():
+    """every mutant must replace text that occurs EXACTLY ONCE in the kernel header, and must change it; a stale anchor would silently turn a mutant into a no-op (or abort an hour-long run)"""
+    h = open(SRC + '/itp_kernel.hpp').read()
+    bad = [(n, h.count(old)) for n, (old, new) in MUTANTS.items() if h.count(old) != 1]
+    same = [n for n, (old, new) in MUTANTS.items() if old == new]
+    return bad, same
+
+def gate_failed(rc, text): return rc != 0 or bool(FAIL_RE.search(text))
 
 def run(names):
+    bad, same = check_anchors()
+    if bad or same:
+        print("STALE MUTANT ANCHORS (fix them before running):"); [print("   %d occurrences: %s" % (c, n)) for n, c in bad]; [print("   no-op mutant: %s" % n) for n in same]; sys.exit(2)
     results = []
     cmds = [c for c in GATE_CMDS if not os.environ.get('MUT_ONLY') or c[0] in os.environ['MUT_ONLY'].split(',')]
     # the UNMUTATED build must be green on every gate, otherwise every mutant would look "caught" and the results would mean nothing
@@ -88,7 +138,7 @@ def run(names):
         r = subprocess.run([sys.executable, SRC + '/' + cmd[0]] + cmd[1:], cwd=SRC, env=base_env, capture_output=True, text=True, timeout=250)
         if r.returncode != 0:
             print("BASELINE IS RED on %s -- mutation results would be meaningless" % cmd[0]); print((r.stdout + r.stderr)[-500:]); sys.exit(2)
-    print("baseline green on all gates", flush=True)
+    print("baseline green on all %d gates" % len(cmds), flush=True)
     for nm in names:
         old, new = MUTANTS[nm]; d = os.path.join(tempfile.gettempdir(), 'mut_' + re.sub(r'\W+', '_', nm)[:24])
         if os.path.exists(d): shutil.rmtree(d)
@@ -97,20 +147,33 @@ def run(names):
         open(d + '/itp_kernel.hpp', 'w').write(h.replace(old, new))
         env = dict(os.environ, ITP_NB_DOMAIN='lnl'); t0 = time.time()
         b = subprocess.run([sys.executable, 'build_kernel.py'], cwd=d, env=env, capture_output=True, text=True)
-        if 'Build succeeded' not in b.stdout: results.append((nm, 'BUILD FAILED', b.stdout[-200:] + b.stderr[-200:])); continue
+        if 'Build succeeded' not in b.stdout: results.append((nm, 'BUILD FAILED', b.stdout[-200:] + b.stderr[-200:])); print("  %-62s BUILD FAILED" % nm, flush=True); continue
         env = gate_env(d)
-        outs = []
+        caught_by = []
         for cmd in cmds:
             try:
                 r = subprocess.run([sys.executable, d + '/' + cmd[0]] + cmd[1:], cwd=d, env=env, capture_output=True, text=True, timeout=100)
-                outs.append((r.returncode, r.stdout + r.stderr))
+                rc, text = r.returncode, r.stdout + r.stderr
             except subprocess.TimeoutExpired:
-                outs.append((99, 'Traceback: HANG (timeout) -- the mutant does not terminate'))
-        text = '\n'.join(o[1] for o in outs)
-        caught = any(o[0] != 0 for o in outs) or bool(re.search(r"\bBAD\b|PROBLEM|FAILED|disagreements [1-9]|Traceback|ACCEPTED|S2 GATE: FAIL|S3 GATE: FAIL|S4 GATE: FAIL|ORACLE GATE: FAIL|S5 GATE: FAIL|S5 PROBE GATE: FAIL|S6 LOGIC GATE: FAIL|S6 F6 GATE: FAIL|S7 PARAM GATE: FAIL|S8 INDEP GATE: FAIL|S9 STRONG GATE: FAIL|S10 NOCONF GATE: FAIL|S11 EQGEN GATE: FAIL|S12 PROBE-EQ GATE: FAIL|S13 PROP-ELIM GATE: FAIL|S14 PROP-WORLD GATE: FAIL|S15 CLASSICAL GATE: FAIL", text))
-        first = next((l.strip()[:110] for l in text.split('\n') if re.search(r"\bBAD\b|PROBLEM|FAILED|disagreements [1-9]|Traceback|ACCEPTED|S2 GATE: FAIL|S3 GATE: FAIL|S4 GATE: FAIL|ORACLE GATE: FAIL|S5 GATE: FAIL|S5 PROBE GATE: FAIL|S6 LOGIC GATE: FAIL|S6 F6 GATE: FAIL|S7 PARAM GATE: FAIL|S8 INDEP GATE: FAIL|S9 STRONG GATE: FAIL|S10 NOCONF GATE: FAIL|S11 EQGEN GATE: FAIL|S12 PROBE-EQ GATE: FAIL|S13 PROP-ELIM GATE: FAIL|S14 PROP-WORLD GATE: FAIL|S15 CLASSICAL GATE: FAIL", l)), '')
-        results.append((nm, 'CAUGHT' if caught else 'SURVIVED  <-- test gap', first)); print("  %-62s %s  (%.0fs)%s" % (nm, results[-1][1], time.time() - t0, ('  | ' + first) if os.environ.get('MUT_VERBOSE') else ''), flush=True)
+                rc, text = 99, 'Traceback: HANG (timeout) -- the mutant does not terminate'
+            if gate_failed(rc, text):
+                first = next((l.strip()[:110] for l in text.split('\n') if FAIL_RE.search(l)), '')
+                caught_by.append((cmd[0], first))
+                if not os.environ.get('MUT_FULL'): break           # MUT_FULL=1 runs every gate to show how many independently catch the mutant
+        if caught_by: status = 'CAUGHT'
+        elif nm in KNOWN_EQUIVALENT: status = 'SURVIVED (documented equivalent mutant)'
+        else: status = 'SURVIVED  <-- test gap'
+        results.append((nm, status, caught_by)); print("  %-62s %s  (%.0fs)%s" % (nm, status, time.time() - t0, ('  | ' + ', '.join(c[0] for c in caught_by)) if caught_by and os.environ.get('MUT_VERBOSE') else ''), flush=True)
     return results
+
 if __name__ == '__main__':
-    names = [n for n in MUTANTS if any(n.startswith(p) for p in sys.argv[1:])] if len(sys.argv) > 1 else list(MUTANTS)
-    for nm, st, first in run(names): print("     ", nm[:50], "->", st, "|", first)
+    if '--check' in sys.argv:
+        bad, same = check_anchors(); print("%d mutants; %d stale anchors; %d no-op mutants" % (len(MUTANTS), len(bad), len(same)))
+        for n, c in bad: print("   %d occurrences: %s" % (c, n))
+        sys.exit(1 if bad or same else 0)
+    prefixes = [a for a in sys.argv[1:] if not a.startswith('--')]
+    names = [n for n in MUTANTS if any(n.startswith(p) for p in prefixes)] if prefixes else list(MUTANTS)
+    res = run(names)
+    caught = sum(1 for r in res if r[1] == 'CAUGHT'); eq = sum(1 for r in res if r[1].startswith('SURVIVED (doc')); gaps = [r[0] for r in res if r[1].startswith('SURVIVED  <--') or r[1] == 'BUILD FAILED']
+    print("\n%d mutants: %d caught, %d documented equivalent, %d unexplained%s" % (len(res), caught, eq, len(gaps), ('   <-- ' + '; '.join(gaps)) if gaps else ''))
+    sys.exit(1 if gaps else 0)

@@ -715,7 +715,7 @@ struct NodePool {
 /// inductive type, rather than a plain axiom or definition.
 /// Forward-declared here (full definition much later, alongside the
 /// structural-decreasing checkers that were its original motivation) so
-/// that finish_inductive/finish_mutual_inductive_block, both defined
+/// that finish_inductive_unchecked, defined
 /// before it in file order, can call it once at declaration time to
 /// precompute and cache each constructor's own recursive-field mask --
 /// matching this file's existing forward-declaration convention (see
@@ -764,7 +764,7 @@ struct GlobalDef {
     std::optional<RecursiveFnInfo> recursive_info; // present if declared via finish_recursive_function(_checked)
     std::string name;
     QuotRole quot_role = QuotRole::None; // set only by declare_quot
-    // Set ONLY when the global is finished as an inductive family (finish_inductive_unchecked / finish_mutual_inductive_block), including a
+    // Set ONLY when the global is finished as an inductive family (finish_inductive_unchecked), including a
     // family with no constructors. Match, cases and induct are meaningful only on such families. An opaque type constant -- an axiom whose type
     // ends in a sort, or Quot -- is NOT inductive: treating it as one would make a branchless match on any of its inhabitants a proof of
     // False (finding F26).
@@ -774,8 +774,8 @@ struct GlobalDef {
 struct GlobalEnv {
     std::vector<GlobalDef> defs;
     // Every family's own constructor global_ids, in ctor_idx order --
-    // both declaration sites (finish_inductive, finish_mutual_inductive_
-    // block) declare a family's constructors via `for (idx = 0; idx <
+    // the one declaration site (finish_inductive_unchecked) declares a
+    // family's constructors via `for (idx = 0; idx <
     // ctors.size(); ++idx)`, so idx increases monotonically and matches
     // ctor_idx exactly; appending at declare_ctor's own call point keeps
     // this vector indexed by ctor_idx for free, with no separate sort
@@ -799,8 +799,8 @@ struct GlobalEnv {
     const GlobalDef& operator[](uint32_t id) const { return defs.at(id); }
 
     // Declares a constructor global AND indexes it, in one call -- the
-    // single chokepoint both finish_inductive and finish_mutual_
-    // inductive_block go through, specifically so "declared a
+    // single chokepoint every inductive declaration goes through,
+    // specifically so "declared a
     // constructor but forgot to index it" is structurally impossible
     // rather than merely unlikely (the two operations can no longer
     // happen independently, unlike the two-line "declare() then
@@ -3177,6 +3177,23 @@ inline ElabResult unify_values(const Value& a_in, const Value& b_in, ElabCtx& ec
             ElabCtx ec2 = ec.extend(dom_ty);
             return unify_values(lhs, rhs, ec2, es);
         },
+        // eta for an unapplied recursive function (mirrors conv_value; F27)
+        [&](const Closure& ca, const VFix& fb) -> ElabResult {
+            Value fresh = fresh_neutral(ec.size());
+            Value lhs = eval(ca.body_id, ca.env.extend(fresh));
+            Value rhs = apply(Value{fb}, fresh);
+            NodeId dom_ty = quote(eval(ca.dom_id, ca.env), ec.size());
+            ElabCtx ec2 = ec.extend(dom_ty);
+            return unify_values(lhs, rhs, ec2, es);
+        },
+        [&](const VFix& fa, const Closure& cb) -> ElabResult {
+            Value fresh = fresh_neutral(ec.size());
+            Value lhs = apply(Value{fa}, fresh);
+            Value rhs = eval(cb.body_id, cb.env.extend(fresh));
+            NodeId dom_ty = quote(eval(cb.dom_id, cb.env), ec.size());
+            ElabCtx ec2 = ec.extend(dom_ty);
+            return unify_values(lhs, rhs, ec2, es);
+        },
         [&](const auto&, const auto&) -> ElabResult { return mismatch("mismatched value shapes"); }
     );
 }
@@ -4019,7 +4036,7 @@ inline uint32_t reserve_inductive_type(const std::string& name, NodeId sort) {
 }
 
 /// Admission checks for an inductive declaration (Finding F1). Run by finish_inductive and
-/// finish_mutual_inductive_block unless the explicit unsafe flag is passed.
+/// finish_inductive unless the explicit unsafe flag is passed.
 ///
 /// Before this existed, admission checked strict positivity and NOTHING else: the family's own
 /// declared type, every constructor argument type and every result index were taken on trust.
@@ -4156,67 +4173,6 @@ inline InductiveHandle declare_inductive(const std::string& name, NodeId sort, s
 }
 
 
-// ---------------------------------------------------------------------------
-// Mutual inductive blocks
-// ---------------------------------------------------------------------------
-//
-// Reduction needs no changes to support this, for the same reason indexed
-// families needed none: Match dispatches purely by ctor_idx, so mutuality
-// is entirely a declaration-time concern. The reserve/finish pattern
-// already supports building this by hand (reserve every type in the block
-// first, so each type's constructors can freely reference any of the
-// others via Const, then finish each one) -- what that does NOT do safely
-// on its own is positivity: finish_inductive only checks that ITS OWN
-// type doesn't occur negatively in its constructors, saying nothing about
-// whether, in a block of Even/Odd, Odd occurs negatively inside Even's
-// constructors. A hypothetical `MkEven : (Odd -> Bool) -> Even` would
-// pass finish_inductive(even_id, ...) unchallenged, since Even itself
-// never appears in that argument type. finish_mutual_inductive_block
-// closes this by checking every constructor's argument types against
-// EVERY type in the block, not just its own.
-
-struct MutualIndSpec {
-    uint32_t type_global_id; // already reserved via reserve_inductive_type
-    std::vector<CtorSpec> ctors;
-};
-
-inline std::vector<InductiveHandle> finish_mutual_inductive_block(
-    const std::vector<uint32_t>& all_type_ids, std::vector<MutualIndSpec> specs,
-    bool allow_unsafe_skip_positivity = false) {
-    if (!allow_unsafe_skip_positivity) {
-        for (const auto& spec : specs) {
-            for (const auto& ctor : spec.ctors) {
-                for (NodeId arg_ty : ctor.arg_types) {
-                    for (uint32_t other_id : all_type_ids) {
-                        if (!is_strictly_positive(other_id, arg_ty)) {
-                            throw std::logic_error(
-                                "itp: constructor '" + ctor.name + "' of a mutual inductive block fails strict "
-                                "positivity with respect to one of the types in the block");
-                        }
-                    }
-                }
-            }
-        }
-    }
-    if (!allow_unsafe_skip_positivity) {
-        for (const auto& spec : specs) check_inductive_admission(spec.type_global_id, spec.ctors);
-    }
-    ExecutionContext& c = ctx();
-    std::vector<InductiveHandle> handles;
-    for (const auto& spec : specs) {
-        InductiveHandle handle;
-        handle.type_global_id = spec.type_global_id;
-        for (std::size_t idx = 0; idx < spec.ctors.size(); ++idx) {
-            NodeId ctor_ty = build_ctor_type(spec.type_global_id, spec.ctors[idx]);
-            uint32_t arity = static_cast<uint32_t>(spec.ctors[idx].arg_types.size());
-            uint32_t ctor_gid = c.globals.declare_ctor(ctor_ty, spec.ctors[idx].name, spec.type_global_id, static_cast<uint32_t>(idx), arity);
-            handle.ctor_global_ids.push_back(ctor_gid);
-        }
-        c.globals.defs[spec.type_global_id].is_inductive = true;
-        handles.push_back(std::move(handle));
-    }
-    return handles;
-}
 
 
 // ---------------------------------------------------------------------------
