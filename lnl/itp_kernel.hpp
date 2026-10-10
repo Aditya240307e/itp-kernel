@@ -38,8 +38,41 @@
 #include <variant>
 #include <cstdio>
 #include <vector>
+#include <pthread.h>
 
 namespace itp {
+
+// ---------------------------------------------------------------------------
+// Stack safety
+// ---------------------------------------------------------------------------
+//
+// eval, quote, conversion, unification and the type checker are recursive, and a term can be as deep as its author likes (a unary numeral
+// 50000 successors deep, a long list, a nest of binders). Before this guard such an input overflowed the C stack and killed the whole process
+// with a segmentation fault -- including a Python training run that merely tried a deep term. Every function that can recurse on the
+// depth of a term now starts with ITP_STACK_CHECK(), which compares the stack pointer with this thread's floor and throws StackExhausted
+// (a std::runtime_error, so Python sees RuntimeError) instead. A kernel that cannot finish a check rejects it: failing closed never accepts
+// anything. The floor keeps a generous margin for the exception machinery itself. The cost is one thread-local read and a compare.
+struct StackExhausted : std::runtime_error {
+    StackExhausted() : std::runtime_error("itp: stack exhausted -- a term is nested too deeply for this thread's stack "
+                                          "(run the kernel on a thread with a bigger stack, e.g. threading.stack_size(...), or raise ulimit -s)") {}
+};
+inline char*& stack_floor_slot() { static thread_local char* floor_addr = nullptr; return floor_addr; }
+/// The lowest address this thread may use before the guard fires. Computed lazily per thread; call refresh_stack_floor() after changing the stack
+/// limit of the main thread (the Python module raises it at import).
+inline void refresh_stack_floor() { stack_floor_slot() = nullptr; }
+[[gnu::noinline]] inline void stack_check_slow(const char* sp) {
+    char*& slot = stack_floor_slot();
+    if (!slot) {
+        pthread_attr_t attr; void* lowest = nullptr; size_t size = 0;
+        if (pthread_getattr_np(pthread_self(), &attr) == 0) { pthread_attr_getstack(&attr, &lowest, &size); pthread_attr_destroy(&attr); }
+        if (!lowest || size == 0) { slot = reinterpret_cast<char*>(1); return; }                       // unknown stack: do not guard
+        const size_t margin = size / 8 < (size_t{1} << 20) ? size / 8 : (size_t{1} << 20);       // 1 MiB (or an eighth of a tiny stack)
+        slot = static_cast<char*>(lowest) + margin;
+    }
+    if (sp < slot) throw StackExhausted();
+}
+#define ITP_STACK_CHECK() do { char itp_sp_marker_; const char* itp_sp_ = &itp_sp_marker_; \
+    if (__builtin_expect(itp_sp_ < ::itp::stack_floor_slot() || !::itp::stack_floor_slot(), 0)) ::itp::stack_check_slow(itp_sp_); } while (0)
 
 // ---------------------------------------------------------------------------
 // Term representation
@@ -769,6 +802,9 @@ struct GlobalDef {
     // ends in a sort, or Quot -- is NOT inductive: treating it as one would make a branchless match on any of its inhabitants a proof of
     // False (finding F26).
     bool is_inductive = false;
+    // The evaluated value of `value` (see eval(Const)). Evaluating a definition re-ran its whole body at every reference -- including every proof used as an
+    // argument. Filled lazily by eval, dropped by GlobalEnv::invalidate_value_caches() whenever any definition's body is installed, replaced or rolled back.
+    mutable std::shared_ptr<const struct CachedValue> cached_value;
 };
 
 struct GlobalEnv {
@@ -797,6 +833,9 @@ struct GlobalEnv {
         return static_cast<uint32_t>(defs.size() - 1);
     }
     const GlobalDef& operator[](uint32_t id) const { return defs.at(id); }
+    /// Must be called whenever a definition's `value` is installed, replaced or removed: a cached value may have unfolded the old body (or, for a global
+    /// that was still being defined, folded it).
+    void invalidate_value_caches() const { for (const GlobalDef& d : defs) d.cached_value.reset(); }
 
     // Declares a constructor global AND indexes it, in one call -- the
     // single chokepoint every inductive declaration goes through,
@@ -1064,6 +1103,7 @@ struct ExecutionContext {
             }
             const uint32_t keep = static_cast<uint32_t>(cp.globals_n);
             globals.defs.erase(globals.defs.begin() + keep, globals.defs.end());
+            globals.invalidate_value_caches();
             for (auto it = globals.ctors_by_family.begin(); it != globals.ctors_by_family.end();)
                 it = (it->first >= keep) ? globals.ctors_by_family.erase(it) : std::next(it);
             for (auto it = same_ctor_gid_by_family.begin(); it != same_ctor_gid_by_family.end();)
@@ -1295,78 +1335,51 @@ struct ApplyFrame; struct MatchFrame;
 
 using Value = std::variant<VType, Closure, VNeutral, VPi, VCtor, VFix>;
 using EliminatorFrame = std::variant<ApplyFrame, MatchFrame>;
+namespace detail {
+void release_chain(std::vector<Value>& seq);               // see SharedSeq: dismantle uniquely owned nested sequences without recursion
+void release_chain(std::vector<EliminatorFrame>& seq);
+}
 
 // ---------------------------------------------------------------------------
-// Env: a persistent, structurally shared environment
+// Env: an immutable, structurally shared environment
 // ---------------------------------------------------------------------------
 //
-// A plain std::vector<Value>, copied on every extension, costs O(depth)
-// per extension and O(n^2) total across a term of binder-depth n --
-// confirmed by direct measurement, not just asymptotic argument: at
-// n=16000, building a deeply nested term took roughly 6.7 seconds with a
-// vector-based environment. Environments must be persistent (a Closure
-// captured earlier must not observe a later extension made from what
-// looks like "the same" prefix, since multiple live closures can diverge
-// from a shared prefix independently), which is exactly what motivates a
-// structurally-shared representation instead of a plain mutable vector.
+// An Env maps de Bruijn LEVELS (0 = the first binder ever crossed) to Values; evaluation extends it once per binder.
+// It is a persistent singly linked list with Myers' skew-binary jump pointers: extending is ONE allocation (and two non-atomic reference
+// counts), looking up one of the innermost bindings -- where bound variables almost always are -- is a pointer hop or two,
+// and any binding is reachable in O(log n) hops. Environments captured by closures share their common prefix and never see
+// each other's later extensions.
 //
-// A naive persistent singly-linked list gets extension down to O(1), but
-// pushes lookup cost up to O(depth) -- and that is a real, not
-// theoretical, regression: a workload with many lookups of an old
-// (deeply-nested) binding measured at over 5 seconds with a linked list,
-// worse than the vector-based O(n^2) it was meant to replace. Env is
-// instead a persistent vector: a shallow, wide tree (branching factor 32,
-// the same technique behind Clojure's PersistentVector), giving both
-// extension and lookup O(log32 n) -- in practice a handful of pointer
-// hops even at depths in the hundreds of thousands, measured directly
-// against both the vector and linked-list alternatives across build-
-// heavy, lookup-heavy, and balanced workloads, with Env's worst case
-// across all three under 40ms where the alternatives each had a workload
-// that took multiple seconds.
-//
-// Leaf slots are stored as shared_ptr<const Value>, not Value directly.
-// This is required by the same mutual-recursion constraint as the
-// Value alternatives above (EnvNode's structural definition only needs Value
-// forward-declared this way, not complete, so it can be fully defined
-// here rather than deferred like ApplyFrame/MatchFrame below) -- but it
-// is also the right choice on its own terms: it keeps a leaf node's path-
-// copy cost at a constant "32 pointer copies" regardless of how large or
-// expensive Value itself is to copy, which matters because Value has
-// gained alternatives over the life of this header (Meta, TypeUniv, Fix)
-// and is expected to gain more; an unboxed design would have
-// silently gotten more expensive to path-copy every time Value grew.
-// Internal (non-leaf) and leaf nodes are kept structurally distinct via a
-// variant rather than a struct that always has room for both regardless
-// of which kind a given node actually is -- an earlier draft of this
-// design did the latter, wasting up to ~2KB per node and destroying cache
-// locality for no benefit, caught before it was ever implemented here.
+// History, measured: a plain vector was O(n) per extension (6.7 s to build a term nested 16000 binders deep); a plain linked
+// list made lookups of old bindings O(n) (over 5 s on a lookup-heavy workload); the 32-way persistent trie that followed fixed
+// both asymptotically but copied a 32-slot leaf (32 reference counts up, 32 down) on EVERY extension, i.e. on every beta step.
+// The jump-pointer list keeps the asymptotics of the trie and costs a constant handful of operations per extension.
 
-static constexpr uint32_t kEnvBits = 5;
+static constexpr uint32_t kEnvBits = 5;                      // (LocalCtx below is still a 32-way trie of NodeIds: copying 32 plain ids is cheap)
 static constexpr uint32_t kEnvBranch = 1u << kEnvBits; // 32
 
-struct EnvNode; // forward-declared for self-reference in EnvInternalSlots
-using EnvLeafSlots = std::array<std::shared_ptr<const Value>, kEnvBranch>;
-using EnvInternalSlots = std::array<std::shared_ptr<const EnvNode>, kEnvBranch>;
+struct EnvCell; // defined once Value is complete
 
-/// A node is EITHER a leaf (holds values) OR internal (holds children),
-/// never both -- which kind is determined by comparing the traversal
-/// depth against Env::shift, tracked externally, not stored per node.
-struct EnvNode {
-    std::variant<EnvLeafSlots, EnvInternalSlots> slots;
+/// An owning pointer to an EnvCell with an intrusive, NON-atomic reference count (see "Reference counting" below).
+class EnvRef {
+public:
+    const EnvCell* p = nullptr;
+    EnvRef() = default;
+    static EnvRef adopt(const EnvCell* q) { EnvRef r; r.p = q; return r; }       // takes over a reference the caller already owns
+    EnvRef(const EnvRef& o);
+    EnvRef(EnvRef&& o) noexcept : p(o.p) { o.p = nullptr; }
+    EnvRef& operator=(const EnvRef& o);
+    EnvRef& operator=(EnvRef&& o) noexcept;
+    ~EnvRef();
 };
 
 struct Env {
-    std::shared_ptr<const EnvNode> root; // nullptr when empty
-    uint32_t count = 0;
-    uint32_t shift = 0; // 0 when root is a leaf; +kEnvBits per additional tree level
+    EnvRef top; // the innermost binding; empty when the environment is empty
 
-    uint32_t size() const { return count; }
-
-    // Bodies are defined after Value's alternatives (Closure, VPi, ...)
-    // are complete, since they call make_shared<const Value> -- the same
-    // forward-declare-then-define-later pattern eval()/quote()/
-    // conv_value() already use below, applied here for the same reason.
-    const Value& operator[](uint32_t level) const;
+    // Bodies are defined after Value's alternatives (Closure, VPi, ...) are complete, since a cell holds a Value.
+    uint32_t size() const;
+    const Value& operator[](uint32_t level) const;      // level 0 is the OUTERMOST binding
+    const Value& from_top(uint32_t i) const;            // i = 0 is the innermost binding
     Env extend(Value v) const;
 };
 
@@ -1523,9 +1536,106 @@ struct VType {
 /// pending applications and MatchFrame for a pending case split, since
 /// each needs to be reconstructed and compared differently by quote and
 /// conv_value.
+// ---------------------------------------------------------------------------
+// Reference counting for the structures inside Values
+// ---------------------------------------------------------------------------
+//
+// Env cells and sequence blocks are shared constantly and destroyed constantly, so they carry an intrusive, NON-atomic count (one word in the object,
+// no control block, no lock-prefixed instructions) and cost one allocation each. That is sound because the structures of a kernel context are only ever
+// touched by one thread at a time: contexts are thread_local, and the Python bindings hold the GIL for every call. (If the bindings ever release the
+// GIL, every worker must own its kernel and its proof states outright -- the same rule the unsynchronised pools already impose.)
+//
+// Dropping the last reference to a long chain (a numeral n deep is n nested blocks) must not recurse n deep. run_release trampolines: past a small
+// nesting depth it queues the object, and the outermost release finishes the job.
+namespace detail {
+struct DeferredRelease { void* p; void (*destroy)(void*); };
+inline int g_release_depth = 0;
+inline std::vector<DeferredRelease>& release_queue() { static std::vector<DeferredRelease>* q = new std::vector<DeferredRelease>(); return *q; }   // (never destroyed: releases can happen during teardown)
+inline constexpr int kMaxReleaseDepth = 48;
+inline void run_release(void* p, void (*destroy)(void*)) {
+    if (g_release_depth >= kMaxReleaseDepth) { release_queue().push_back({p, destroy}); return; }
+    ++g_release_depth;
+    destroy(p);
+    if (g_release_depth == 1) { auto& q = release_queue(); while (!q.empty()) { DeferredRelease d = q.back(); q.pop_back(); d.destroy(d.p); } }
+    --g_release_depth;
+}
+} // namespace detail
+
+// ---------------------------------------------------------------------------
+// Shared immutable sequences: what keeps a Value O(1) to copy
+// ---------------------------------------------------------------------------
+//
+// A Value is copied constantly: an argument is passed on, stored in a spine, put in an environment, returned. While a VCtor owned its
+// argument vector BY VALUE, copying a numeral of depth n copied n nested vectors, so evaluating `S (S (... Z))` was O(n^2) and
+// typing it O(n^3) (measured on the first benchmark: `infer` of a 400-deep numeral took 1.6 s, of an 800-deep one 12.9 s).
+// A SharedSeq is an immutable, reference-counted array in ONE allocation (header, then the elements): a copy copies one pointer, "appending"
+// builds a NEW array (spines are short), and an array that has been shared is never written.
+template <class T> class SharedSeq {
+    struct alignas(8) Block { uint32_t refs; uint32_t n; };      // followed by n elements (the header is exactly 8 bytes, so 8-aligned elements start aligned)
+    Block* b_ = nullptr;
+    static T* items(const Block* b) { return reinterpret_cast<T*>(const_cast<Block*>(b) + 1); }
+    static Block* alloc(std::size_t count) {
+        static_assert(sizeof(Block) == 8 && alignof(T) <= 8 && sizeof(Block) % alignof(T) == 0, "elements must be properly aligned right after the header");
+        Block* b = static_cast<Block*>(::operator new(sizeof(Block) + count * sizeof(T)));
+        b->refs = 1; b->n = 0;
+        return b;
+    }
+    static void destroy(void* p) {
+        Block* b = static_cast<Block*>(p); T* it = items(b);
+        for (uint32_t i = 0; i < b->n; ++i) it[i].~T();
+        ::operator delete(b);
+    }
+    void release() { if (b_ && --b_->refs == 0) detail::run_release(b_, &destroy); }
+public:
+    SharedSeq() = default;
+    SharedSeq(std::vector<T> v) {
+        if (v.empty()) return;
+        b_ = alloc(v.size());
+        for (T& x : v) { new (items(b_) + b_->n) T(std::move(x)); ++b_->n; }
+    }
+    template <class... A> static SharedSeq of(A&&... xs) {
+        SharedSeq s; s.b_ = alloc(sizeof...(A));
+        ((new (items(s.b_) + s.b_->n) T(std::forward<A>(xs)), ++s.b_->n), ...);
+        return s;
+    }
+    SharedSeq(const SharedSeq& o) : b_(o.b_) { if (b_) ++b_->refs; }
+    SharedSeq(SharedSeq&& o) noexcept : b_(o.b_) { o.b_ = nullptr; }
+    SharedSeq& operator=(const SharedSeq& o) { SharedSeq tmp(o); std::swap(b_, tmp.b_); return *this; }
+    SharedSeq& operator=(SharedSeq&& o) noexcept { SharedSeq tmp(std::move(o)); std::swap(b_, tmp.b_); return *this; }
+    ~SharedSeq() { release(); }
+    std::size_t size() const { return b_ ? b_->n : 0; }
+    bool empty() const { return !b_; }
+    const T& operator[](std::size_t i) const { return items(b_)[i]; }
+    const T& back() const { return items(b_)[b_->n - 1]; }
+    const T* begin() const { return b_ ? items(b_) : nullptr; }
+    const T* end() const { return b_ ? items(b_) + b_->n : nullptr; }
+    SharedSeq appended(T x) const {
+        SharedSeq s; const uint32_t n = static_cast<uint32_t>(size()); s.b_ = alloc(std::size_t{n} + 1);
+        for (uint32_t i = 0; i < n; ++i) { new (items(s.b_) + i) T(items(b_)[i]); ++s.b_->n; }
+        new (items(s.b_) + n) T(std::move(x)); ++s.b_->n;
+        return s;
+    }
+};
+
+/// The branches of a Match, shared with the syntax node they came from (a stuck match keeps them without copying).
+struct NodeSeq {
+    std::shared_ptr<const std::vector<NodeId>> p;
+    NodeSeq() = default;
+    NodeSeq(std::shared_ptr<const std::vector<NodeId>> q) : p(std::move(q)) {}
+    std::size_t size() const { return p ? p->size() : 0; }
+    NodeId operator[](std::size_t i) const { return (*p)[i]; }
+    typename std::vector<NodeId>::const_iterator begin() const { return p ? p->cbegin() : typename std::vector<NodeId>::const_iterator{}; }
+    typename std::vector<NodeId>::const_iterator end() const { return p ? p->cend() : typename std::vector<NodeId>::const_iterator{}; }
+    friend bool operator==(const NodeSeq& a, const NodeSeq& b) {
+        if (a.p == b.p) return true;
+        if (a.size() != b.size()) return false;
+        return std::equal(a.begin(), a.end(), b.begin());
+    }
+};
+
 struct VNeutral {
     NeutralHead head;
-    std::vector<EliminatorFrame> spine;
+    SharedSeq<EliminatorFrame> spine;
 };
 
 struct Closure {
@@ -1565,45 +1675,13 @@ struct VPi {
 struct VCtor {
     uint32_t ind_type_global_id;
     uint32_t ctor_idx;
-    std::vector<Value> args;
+    SharedSeq<Value> args;       // shared and immutable: copying a VCtor is O(1), whatever the depth of its arguments
 
-    // All special members are DECLARED here but DEFINED later in the
-    // file, after Value's alternatives are complete -- mirroring the
-    // same forward-declare-then-define-
-    // later pattern already used for Env's own methods below. This is
-    // load-bearing, not stylistic: VCtor is itself one of Value's
-    // alternatives, and
-    // the destructor's body performs real operations on
-    // std::vector<Value> (push_back, pop_back) to iteratively flatten a
-    // nested chain rather than let it recurse through the default
-    // destructor (see the comment on that definition, further down,
-    // for why). Because VCtor's members are ordinary (non-template)
-    // inline member functions, their bodies are type-checked immediately
-    // at the point they're written -- unlike eval()/quote()/Env's own
-    // methods, which are function TEMPLATES-in-spirit only in the sense
-    // that inline free functions get the same treatment as long as their
-    // declaration and definition are split. A defaulted comparison,
-    // copy, or move here would trip the identical problem (checking a
-    // defaulted operation's validity touches std::vector<Value>'s own
-    // operations, which need Value complete) -- confirmed directly: the
-    // very first version of this fix defaulted just the comparison
-    // operator and moved on, and hit the same "incomplete type"
-    // error, just relocated to the very next special member down. Every
-    // member that could plausibly touch Value is deferred here, not just
-    // the one that happened to be checked first.
-    VCtor() = default; // does not touch args at all; safe to default in place
-    VCtor(uint32_t ind, uint32_t ctor, std::vector<Value> a);
-    VCtor(const VCtor&);
-    VCtor(VCtor&&) noexcept;
-    VCtor& operator=(const VCtor&);
-    VCtor& operator=(VCtor&&) noexcept;
-    ~VCtor(); // no operator==: Value-domain structs are never compared via == anywhere
-    // in this codebase -- semantic comparison always goes through conv_value, and
-    // Value-domain values are never hash-consed (unlike the syntax/arena node
-    // structs above, which need operator== for NodePool::intern's equality
-    // check). Adding one here was a reflexive copy of that unrelated pattern;
-    // nothing calls it, and completing it correctly would require adding
-    // operator== to every other Value alternative too, for no actual benefit.
+    VCtor() = default;
+    VCtor(uint32_t ind, uint32_t ctor, std::vector<Value> a) : ind_type_global_id(ind), ctor_idx(ctor), args(std::move(a)) {}
+    VCtor(uint32_t ind, uint32_t ctor, SharedSeq<Value> a) : ind_type_global_id(ind), ctor_idx(ctor), args(std::move(a)) {}
+    // no operator==: Value-domain structs are never compared via == anywhere in this codebase -- semantic comparison always goes through
+    // conv_value, and Value-domain values are never hash-consed (unlike the syntax/arena node structs above).
 };
 
 /// The evaluated form of a Fix node: "the fixpoint, ready to be
@@ -1633,151 +1711,62 @@ struct ApplyFrame {
 /// compare two pending matches in conv_value.
 struct MatchFrame {
     NodeId motive_id;
-    std::vector<NodeId> branches;
+    NodeSeq branches;
     Env captured_env;
 };
 
-// Env's method bodies, and its two path-copying helpers, are defined here
-// -- after Value's alternatives are complete (needed for make_shared<const
-// Value>), before eval()/quote()/conv_value() are defined below (which
-// need Env's interface usable).
+// Env's cell and method bodies are defined here -- after Value's alternatives are complete, before eval()/quote()/conv_value() are
+// defined below (which need these interfaces usable).
 
-namespace detail {
-
-/// Builds a brand-new (never-shared) subtree, from `sh` down to a leaf,
-/// containing exactly one value at `idx`. Every node built here is
-/// exclusively owned at construction time (nothing else could reference
-/// it yet), so this never needs to copy-on-write -- distinct from
-/// path_copy_insert below, which handles the existing, possibly-shared
-/// tree. Conflating these two cases (routing a freshly allocated node
-/// through the copy-on-write path anyway) was a real bug in an earlier
-/// draft of this design: it allocated a node, then immediately allocated
-/// a second one to "copy" the first before ever sharing it, discarding
-/// the first allocation for no reason.
-inline std::shared_ptr<const EnvNode> env_build_fresh_spine(uint32_t sh, uint32_t idx, Value v) {
-    auto node = std::make_shared<EnvNode>(); // mutable shared_ptr<EnvNode>; no const_cast needed anywhere here
-    if (sh == 0) {
-        node->slots = EnvLeafSlots{};
-        std::get<EnvLeafSlots>(node->slots)[idx & (kEnvBranch - 1)] = std::make_shared<const Value>(std::move(v));
-    } else {
-        node->slots = EnvInternalSlots{};
-        uint32_t slot = (idx >> sh) & (kEnvBranch - 1);
-        std::get<EnvInternalSlots>(node->slots)[slot] = env_build_fresh_spine(sh - kEnvBits, idx, std::move(v));
+/// One binding of an Env. `depth` counts the bindings up to and including this one (so the cell for level L has depth L + 1);
+/// `jump` points to an ancestor chosen by the skew-binary rule, which makes any ancestor reachable in O(log n) hops.
+struct EnvCell {
+    mutable uint32_t refs = 1;
+    uint32_t depth;
+    Value v;
+    EnvRef parent, jump;
+    EnvCell(Value val, const EnvRef& par) : depth(par.p ? par.p->depth + 1 : 1), v(std::move(val)), parent(par) {
+        // Myers' rule: if the parent's own jump spans exactly as many levels as the jump above it, skip over both; otherwise jump to the parent.
+        const EnvCell* p = parent.p; const EnvCell* pj = p ? p->jump.p : nullptr; const EnvCell* pjj = pj ? pj->jump.p : nullptr;
+        const uint32_t dp = p ? p->depth : 0, dpj = pj ? pj->depth : 0, dpjj = pjj ? pjj->depth : 0;
+        jump = (dp - dpj == dpj - dpjj) ? (pj ? pj->jump : EnvRef()) : parent;   // (no parent: both spans are 0, and the jump is empty too)
     }
-    return node; // implicit, safe shared_ptr<EnvNode> -> shared_ptr<const EnvNode> conversion
-}
+};
+namespace detail { inline void destroy_env_cell(void* p) { delete static_cast<EnvCell*>(p); } }
+inline EnvRef::EnvRef(const EnvRef& o) : p(o.p) { if (p) ++p->refs; }
+inline EnvRef& EnvRef::operator=(const EnvRef& o) { EnvRef tmp(o); std::swap(p, tmp.p); return *this; }
+inline EnvRef& EnvRef::operator=(EnvRef&& o) noexcept { EnvRef tmp(std::move(o)); std::swap(p, tmp.p); return *this; }
+inline EnvRef::~EnvRef() { if (p && --p->refs == 0) detail::run_release(const_cast<EnvCell*>(p), &detail::destroy_env_cell); }
 
-/// Path-copies the spine from `node` down to index `idx`, duplicating
-/// only the nodes along that one path (everything else is shared by
-/// reference with the pre-extension tree, which is what makes multiple
-/// live Env values safely coexist).
-inline std::shared_ptr<const EnvNode> env_path_copy_insert(
-    const std::shared_ptr<const EnvNode>& node, uint32_t sh, uint32_t idx, Value v) {
-    auto copy = std::make_shared<EnvNode>(*node); // duplicate only this level
-    if (sh == 0) {
-        std::get<EnvLeafSlots>(copy->slots)[idx & (kEnvBranch - 1)] = std::make_shared<const Value>(std::move(v));
-    } else {
-        uint32_t slot = (idx >> sh) & (kEnvBranch - 1);
-        auto& children = std::get<EnvInternalSlots>(copy->slots);
-        children[slot] = children[slot]
-            ? env_path_copy_insert(children[slot], sh - kEnvBits, idx, std::move(v))
-            : env_build_fresh_spine(sh - kEnvBits, idx, std::move(v)); // genuinely new territory: no copy needed
-    }
-    return copy;
-}
-
-} // namespace detail
+inline uint32_t Env::size() const { return top.p ? top.p->depth : 0; }
 
 inline const Value& Env::operator[](uint32_t level) const {
-    if (level >= count) {
-        std::fprintf(stderr, "DBG Env::operator[] OUT OF BOUNDS: level=%u count=%u\n", level, count);
+    const uint32_t target = level + 1;
+    if (!top.p || target > top.p->depth) {
+        std::fprintf(stderr, "DBG Env::operator[] OUT OF BOUNDS: level=%u count=%u\n", level, size());
         std::abort();
     }
-    const EnvNode* cur = root.get();
-    uint32_t sh = shift;
-    while (sh > 0) {
-        cur = std::get<EnvInternalSlots>(cur->slots)[(level >> sh) & (kEnvBranch - 1)].get();
-        sh -= kEnvBits;
+    const EnvCell* c = top.p;
+    while (c->depth > target) {
+        const EnvCell* j = c->jump.p;
+        c = (j && j->depth >= target) ? j : c->parent.p;
     }
-    return *std::get<EnvLeafSlots>(cur->slots)[level & (kEnvBranch - 1)];
+    return c->v;
 }
 
-inline Env Env::extend(Value v) const {
-    if (!root) {
-        auto leaf = std::make_shared<EnvNode>();
-        leaf->slots = EnvLeafSlots{};
-        std::get<EnvLeafSlots>(leaf->slots)[0] = std::make_shared<const Value>(std::move(v));
-        return Env{leaf, 1, 0};
+inline const Value& Env::from_top(uint32_t i) const {
+    if (i < 8) {                                   // bound variables are almost always among the innermost few bindings
+        const EnvCell* c = top.p;
+        while (i-- && c) c = c->parent.p;
+        if (c) return c->v;
     }
-    uint32_t capacity = kEnvBranch << shift;
-    if (count < capacity) {
-        // Existing tree may be shared by other Env values still
-        // referencing the pre-extension version: must copy-on-write.
-        return Env{detail::env_path_copy_insert(root, shift, count, std::move(v)), count + 1, shift};
-    }
-    // Full: grow one level taller. The new root and the entire fresh
-    // subtree beneath it (down to the new leaf) are exclusively ours --
-    // nothing else can reference any of it yet -- so the whole spine is
-    // built via env_build_fresh_spine, not routed through the copy-on-
-    // write path meant for the (possibly-shared) existing tree.
-    uint32_t new_shift = shift + kEnvBits;
-    auto new_root = std::make_shared<EnvNode>();
-    new_root->slots = EnvInternalSlots{};
-    std::get<EnvInternalSlots>(new_root->slots)[0] = root; // old (possibly-shared) subtree: referenced, not copied
-    uint32_t slot_for_new = (count >> new_shift) & (kEnvBranch - 1);
-    std::get<EnvInternalSlots>(new_root->slots)[slot_for_new] =
-        detail::env_build_fresh_spine(new_shift - kEnvBits, count, std::move(v));
-    return Env{new_root, count + 1, new_shift};
+    return (*this)[size() - 1 - i];
 }
 
-// VCtor's special members, defined here (not inline in the class body
-// above) because their bodies need Value complete -- see the comment on
-// the class definition for why. This is the exact same defer-until-
-// Value-is-complete pattern Env's own methods use just above.
-inline VCtor::VCtor(uint32_t ind, uint32_t ctor, std::vector<Value> a)
-    : ind_type_global_id(ind), ctor_idx(ctor), args(std::move(a)) {}
-inline VCtor::VCtor(const VCtor&) = default;
-inline VCtor::VCtor(VCtor&&) noexcept = default;
-inline VCtor& VCtor::operator=(const VCtor&) = default;
-inline VCtor& VCtor::operator=(VCtor&&) noexcept = default;
-// A custom destructor is required here, not the compiler-generated
-// default: `args` can itself contain another VCtor (a long list or a
-// large unary number, once evaluated into actual Values rather than left
-// as syntax, is a genuine chain of VCtors each owning the next by
-// value). The default recursive destructor -- each VCtor's destruction
-// destroying its args vector, which destroys the nested VCtor, which
-// destroys ITS args, and so on -- walks that chain one C++ stack frame
-// per element. Confirmed by direct measurement, not just argument: a
-// 100,000-deep chain survives destruction; a 500,000-deep one segfaults,
-// specifically during destruction and not during construction or
-// evaluation (those were tested and ruled out separately). The fix
-// flattens the chain into an explicit, heap-allocated worklist and
-// destroys it iteratively instead of relying on the C++ call stack.
-//
-// This addresses VCtor chains specifically, which is the common,
-// naturally-arising case (any inductively-defined data value more than
-// trivially deep is represented this way). It does not address every
-// theoretically possible route to a similar cascade; if a workload is
-// ever found that stresses one, it would need the same treatment,
-// applied there specifically.
-inline VCtor::~VCtor() {
-    if (args.empty()) return; // common case: nothing to flatten, avoid the worklist entirely
-    std::vector<Value> worklist;
-    for (auto& v : args) worklist.push_back(std::move(v));
-    args.clear();
-    while (!worklist.empty()) {
-        Value v = std::move(worklist.back());
-        worklist.pop_back();
-        if (auto* vc = std::get_if<VCtor>(&v)) {
-            for (auto& child : vc->args) worklist.push_back(std::move(child));
-            vc->args.clear();
-        }
-        // v destructs here at end of scope; any nested VCtor content
-        // was already flattened into the worklist above, so this is
-        // now a cheap, non-recursive destruction regardless of how
-        // deep the original chain was.
-    }
-}
+inline Env Env::extend(Value v) const { return Env{EnvRef::adopt(new EnvCell(std::move(v), top))}; }
+
+/// The payload of GlobalDef::cached_value.
+struct CachedValue { Value v; };
 
 Value eval(NodeId term, const Env& env);
 NodeId quote(const Value& v, uint32_t depth);
@@ -1830,62 +1819,59 @@ inline std::optional<std::pair<Value, Value>> quot_lift_redex(const VNeutral& n)
 }
 
 inline Value apply(Value fn, Value arg) {
-    return inspect_value(fn,
-        [&](Closure clo) -> Value {
-            return eval(clo.body_id, clo.env.extend(std::move(arg)));
-        },
-        [&](VNeutral n) -> Value {
-            // A constructor reference that becomes fully saturated by this
-            // application is promoted from a neutral to a VCtor.
-            n.spine.push_back(EliminatorFrame{ApplyFrame{arg}});
-            if (n.head.kind == NeutralHead::Kind::GlobalConst) {
-                const GlobalDef& def = ctx().globals[n.head.id];
-                if (def.ctor_info) {
-                    uint32_t applied = 0;
-                    std::vector<Value> ctor_args;
-                    for (const auto& frame : n.spine) {
-                        if (auto* af = std::get_if<ApplyFrame>(&frame)) {
-                            ctor_args.push_back(af->arg);
-                            ++applied;
-                        }
-                    }
-                    if (applied == def.ctor_info->arity) {
-                        return Value{VCtor{def.ctor_info->ind_type_global_id, def.ctor_info->ctor_idx,
-                                           std::move(ctor_args)}};
+    ITP_STACK_CHECK();
+    if (const Closure* clo = std::get_if<Closure>(&fn)) return eval(clo->body_id, clo->env.extend(std::move(arg)));
+    if (const VNeutral* n0 = std::get_if<VNeutral>(&fn)) {
+        if (n0->head.kind == NeutralHead::Kind::GlobalConst) {
+            const GlobalDef& def = ctx().globals[n0->head.id];
+            if (def.ctor_info) {
+                const CtorInfo& ci = *def.ctor_info;
+                // A constructor reference that becomes fully saturated by this application is promoted from a neutral to a VCtor.
+                // The common case -- a unary constructor such as Succ applied to its argument -- skips the intermediate spine entirely.
+                if (ci.arity == 1 && n0->spine.empty()) return Value{VCtor{ci.ind_type_global_id, ci.ctor_idx, SharedSeq<Value>::of(std::move(arg))}};
+                VNeutral n{n0->head, n0->spine.appended(EliminatorFrame{ApplyFrame{std::move(arg)}})};
+                uint32_t applied = 0;
+                std::vector<Value> ctor_args;
+                for (const auto& frame : n.spine) {
+                    if (auto* af = std::get_if<ApplyFrame>(&frame)) {
+                        ctor_args.push_back(af->arg);
+                        ++applied;
                     }
                 }
-                if (def.quot_role == QuotRole::Lift) {
-                    if (auto redex = quot_lift_redex(n)) return apply(std::move(redex->first), std::move(redex->second));
-                }
+                if (applied == ci.arity) return Value{VCtor{ci.ind_type_global_id, ci.ctor_idx, std::move(ctor_args)}};
+                return Value{std::move(n)};
+            }
+            VNeutral n{n0->head, n0->spine.appended(EliminatorFrame{ApplyFrame{std::move(arg)}})};
+            if (def.quot_role == QuotRole::Lift) {
+                if (auto redex = quot_lift_redex(n)) return apply(std::move(redex->first), std::move(redex->second));
             }
             return Value{std::move(n)};
-        },
-        [&](VFix vf) -> Value {
-            // Unfolds exactly ONE layer, the local analogue of Const's
-            // own self-reference story (see GlobalEnv's comment): extend
-            // the Fix's OWN captured env with a reference back to the
-            // Fix's own value (another VFix, wrapping the identical
-            // fix_id/env -- not a genuinely self-referential Value,
-            // since looking THAT up and applying it again simply
-            // reproduces this exact case, one call at a time), evaluate
-            // the body in that extended env, then apply the result to
-            // `arg`. The self-reference lands at level vf.env.size() --
-            // exactly the level a construction site (Induct) must
-            // address it at, the same "new binder takes env.size()"
-            // convention every other binder in this file already
-            // follows.
-            Fix f = std::get<Fix>(realize(vf.fix_id));
-            Env self_env = vf.env.extend(Value{VFix{vf.fix_id, vf.env}});
-            Value body_val = eval(f.body, self_env);
-            return apply(std::move(body_val), std::move(arg));
-        },
-        [&](auto) -> Value {
-            // Applying a non-function value indicates the term being
-            // evaluated was not well-typed; this should not be reachable
-            // for input that has already passed a correct typechecker.
-            throw std::logic_error("itp: apply() on a non-function value -- ill-typed term reached eval");
         }
-    );
+        return Value{VNeutral{n0->head, n0->spine.appended(EliminatorFrame{ApplyFrame{std::move(arg)}})}};
+    }
+    if (const VFix* vf = std::get_if<VFix>(&fn)) {
+        // Unfolds exactly ONE layer, the local analogue of Const's
+        // own self-reference story (see GlobalEnv's comment): extend
+        // the Fix's OWN captured env with a reference back to the
+        // Fix's own value (another VFix, wrapping the identical
+        // fix_id/env -- not a genuinely self-referential Value,
+        // since looking THAT up and applying it again simply
+        // reproduces this exact case, one call at a time), evaluate
+        // the body in that extended env, then apply the result to
+        // `arg`. The self-reference lands at level vf.env.size() --
+        // exactly the level a construction site (Induct) must
+        // address it at, the same "new binder takes env.size()"
+        // convention every other binder in this file already
+        // follows.
+        const Fix& f = ctx().fixes[vf->fix_id.index];
+        Env self_env = vf->env.extend(Value{VFix{vf->fix_id, vf->env}});
+        Value body_val = eval(f.body, self_env);
+        return apply(std::move(body_val), std::move(arg));
+    }
+    // Applying a non-function value indicates the term being
+    // evaluated was not well-typed; this should not be reachable
+    // for input that has already passed a correct typechecker.
+    throw std::logic_error("itp: apply() on a non-function value -- ill-typed term reached eval");
 }
 
 /// No-delta evaluation scope (Findings F2a/F4/F5). While a NoDeltaScope is alive on this thread,
@@ -1906,66 +1892,75 @@ struct NoDeltaScope {
 };
 
 inline Value eval(NodeId term, const Env& env) {
-    return inspect(term,
-        [&](Var v) -> Value {
-            return v.bound ? env[env.size() - 1 - v.n] : env[v.n]; // bound: index from the END of env; context: level from its start
-        },
-        [&](App a) -> Value {
-            return apply(eval(a.fn_id, env), eval(a.arg_id, env));
-        },
-        [&](Lambda l) -> Value {
+    ITP_STACK_CHECK();
+    switch (term.tag) {
+        case NodeType::VAR: {
+            const Var v = ctx().vars[term.index];
+            return v.bound ? env.from_top(v.n) : env[v.n]; // bound: index from the END of env; context: level from its start
+        }
+        case NodeType::APP: {
+            const App a = ctx().apps[term.index];
+            Value f = eval(a.fn_id, env);
+            Value x = eval(a.arg_id, env);
+            return apply(std::move(f), std::move(x));
+        }
+        case NodeType::LAMBDA: {
+            const Lambda l = ctx().lambdas[term.index];
             return Value{Closure{env, l.type_id, l.body_id}};
-        },
-        [&](Let l) -> Value {
+        }
+        case NodeType::LET: {
+            const Let l = ctx().lets[term.index];
             return eval(l.body_id, env.extend(eval(l.value_id, env)));
-        },
-        [&](Pi p) -> Value {
+        }
+        case NodeType::PI: {
+            const Pi p = ctx().pis[term.index];
             return Value{VPi{env, p.dom_id, p.cod_id}};
-        },
-        [&](Type t) -> Value {
-            return Value{VType{t.universe_level}};
-        },
-        [&](Const c) -> Value {
-            const GlobalDef& def = ctx().globals[c.global_id];
+        }
+        case NodeType::TYPE: return Value{VType{ctx().types[term.index].universe_level}};
+        case NodeType::CONST: {
+            const GlobalDef& def = ctx().globals[ctx().consts[term.index].global_id];
             if (def.ctor_info && def.ctor_info->arity == 0) {
                 // A nullary constructor is already saturated.
-                return Value{VCtor{def.ctor_info->ind_type_global_id, def.ctor_info->ctor_idx, {}}};
+                return Value{VCtor{def.ctor_info->ind_type_global_id, def.ctor_info->ctor_idx, SharedSeq<Value>{}}};
             }
             if (def.value && !no_delta_flag()) {
                 // Delta-reduction: definitions unfold transparently.
                 // Definitions are required to be closed, so they are
-                // evaluated in an empty environment. (Skipped inside a
+                // evaluated in an empty environment, once: the result is cached on the
+                // definition (see GlobalDef::cached_value). (Skipped inside a
                 // NoDeltaScope: the constant then stays a folded neutral.)
-                return eval(*def.value, Env{});
+                if (def.cached_value) return def.cached_value->v;
+                Value v = eval(*def.value, Env{});
+                def.cached_value = std::make_shared<const CachedValue>(CachedValue{v});
+                return v;
             }
-            return Value{VNeutral{NeutralHead{NeutralHead::Kind::GlobalConst, c.global_id}, {}}};
-        },
-        [&](Match m) -> Value {
+            return Value{VNeutral{NeutralHead{NeutralHead::Kind::GlobalConst, ctx().consts[term.index].global_id}, {}}};
+        }
+        case NodeType::MATCH: {
+            const Match& m = ctx().matches[term.index];
             Value scrutinee = eval(m.scrutinee_id, env);
-            return inspect_value(scrutinee,
-                [&](const VCtor& vc) -> Value {
-                    // Evaluate the selected branch and apply it to the
-                    // constructor's stored arguments in turn.
-                    NodeId branch = m.branches->at(vc.ctor_idx);
-                    Value result = eval(branch, env);
-                    for (const Value& a : vc.args) result = apply(result, a);
-                    return result;
-                },
-                [&](const VNeutral& n) -> Value {
-                    // The scrutinee is stuck, so the match itself becomes
-                    // a new frame on its spine.
-                    VNeutral result = n;
-                    result.spine.push_back(EliminatorFrame{MatchFrame{m.motive_id, *m.branches, env}});
-                    return Value{result};
-                },
-                [&](const auto&) -> Value {
-                    throw std::logic_error(
-                        "itp: match on a non-inductive, non-neutral value -- ill-typed term reached eval");
-                }
-            );
-        },
-        [&](Meta meta) -> Value {
-            const MetaEntry& e = ctx().meta_ctx[meta.meta_id];
+            if (const VCtor* vc = std::get_if<VCtor>(&scrutinee)) {
+                // Evaluate the selected branch and apply it to the
+                // constructor's stored arguments in turn. A branch is a lambda over the constructor's fields: bind them
+                // directly instead of building a closure and applying it once per field.
+                NodeId branch = m.branches->at(vc->ctor_idx);
+                const std::size_t nargs = vc->args.size();
+                Env e = env; std::size_t i = 0;
+                while (i < nargs && branch.tag == NodeType::LAMBDA) { e = e.extend(vc->args[i]); branch = ctx().lambdas[branch.index].body_id; ++i; }
+                Value result = eval(branch, e);
+                for (; i < nargs; ++i) result = apply(std::move(result), vc->args[i]);
+                return result;
+            }
+            if (const VNeutral* n = std::get_if<VNeutral>(&scrutinee)) {
+                // The scrutinee is stuck, so the match itself becomes
+                // a new frame on its spine.
+                return Value{VNeutral{n->head, n->spine.appended(EliminatorFrame{MatchFrame{m.motive_id, NodeSeq{m.branches}, env}})}};
+            }
+            throw std::logic_error("itp: match on a non-inductive, non-neutral value -- ill-typed term reached eval");
+        }
+        case NodeType::META: {
+            const uint32_t meta_id = ctx().metas[term.index].meta_id;
+            const MetaEntry& e = ctx().meta_ctx[meta_id];
             if (e.solution) {
                 // As with a solved definition, the solution is expected to
                 // be closed with respect to the metavariable's own local
@@ -1976,14 +1971,13 @@ inline Value eval(NodeId term, const Env& env) {
                 // an ambient environment here.
                 return eval(*e.solution, Env{});
             }
-            return Value{VNeutral{NeutralHead{NeutralHead::Kind::Meta, meta.meta_id}, {}}};
-        },
-        [&](TypeUniv) -> Value {
+            return Value{VNeutral{NeutralHead{NeutralHead::Kind::Meta, meta_id}, {}}};
+        }
+        case NodeType::TYPE_UNIV:
             throw std::logic_error(
                 "itp: encountered an uninstantiated universe parameter during evaluation -- "
                 "did you forget to call instantiate_global?");
-        },
-        [&](Fix) -> Value {
+        case NodeType::FIX:
             // Lazy: a Fix does NOT unfold its self-reference here, the
             // same way a Lambda's body is not forced by evaluating the
             // Lambda itself. It only reduces one layer when actually
@@ -1999,8 +1993,8 @@ inline Value eval(NodeId term, const Env& env) {
             // risks the circular-construction problem a genuinely
             // self-referential Value would have.
             return Value{VFix{term, env}};
-        }
-    );
+    }
+    std::unreachable();
 }
 
 inline Value fresh_neutral(uint32_t level) {
@@ -2034,6 +2028,7 @@ inline Env open_context(uint32_t n) {
 /// Var, Const, Type, Meta and TypeUniv are returned unchanged; callers that care about Var/Meta test for them first.
 template <class F>
 inline NodeId map_children(NodeId t, F&& f) {
+    ITP_STACK_CHECK();
     return inspect(t,
         [&](App a) -> NodeId { return mk_app(f(a.fn_id, 0), f(a.arg_id, 0)); },
         [&](Lambda l) -> NodeId { return mk_lambda(f(l.type_id, 0), f(l.body_id, 1)); },
@@ -2052,6 +2047,7 @@ inline uint32_t sat_dec(uint32_t x) { return x > 0 ? x - 1 : 0; }
 
 /// 1 + the largest loose bound-variable index in t (0 when t has no loose bound variable). Memoised per node.
 inline uint32_t loose_range(NodeId t) {
+    ITP_STACK_CHECK();
     auto& cache = ctx().loose_cache;
     const uint64_t key = (static_cast<uint64_t>(static_cast<uint32_t>(t.tag)) << 32) | t.index;
     if (auto it = cache.find(key); it != cache.end()) return it->second;
@@ -2075,6 +2071,7 @@ inline bool has_loose_bvars(NodeId t) { return loose_range(t) > 0; }
 
 /// Raises every loose bound index >= cutoff by d.
 inline NodeId lift(NodeId t, uint32_t d, uint32_t cutoff = 0) {
+    ITP_STACK_CHECK();
     if (d == 0 || loose_range(t) <= cutoff) return t;
     if (t.tag == NodeType::VAR) {
         Var v = ctx().vars[t.index];
@@ -2086,6 +2083,7 @@ inline NodeId lift(NodeId t, uint32_t d, uint32_t cutoff = 0) {
 /// Replaces loose bound variable (offset + k) by vals[k] (lifted past the `offset` binders crossed) for k < vals.size(), and
 /// lowers every higher loose index by vals.size() (those binders are gone). vals[0] replaces the INNERMOST removed binder.
 inline NodeId instantiate_at(NodeId t, const std::vector<NodeId>& vals, uint32_t offset) {
+    ITP_STACK_CHECK();
     const uint32_t n = static_cast<uint32_t>(vals.size());
     if (n == 0 || loose_range(t) <= offset) return t;
     if (t.tag == NodeType::VAR) {
@@ -2102,6 +2100,7 @@ inline NodeId instantiate1(NodeId t, NodeId v) { return instantiate_at(t, std::v
 /// Closes over context variables: FVar(fvars[i]) becomes the bound variable of the i-th of n NEW outermost binders
 /// (fvars.back() is the innermost, index 0 at depth 0). Existing loose bound indices are lifted by n.
 inline NodeId abstract_fvars(NodeId t, const std::vector<uint32_t>& fvars, uint32_t depth = 0) {
+    ITP_STACK_CHECK();
     const uint32_t n = static_cast<uint32_t>(fvars.size());
     if (n == 0) return t;
     if (t.tag == NodeType::VAR) {
@@ -2115,6 +2114,7 @@ inline NodeId abstract_fvars(NodeId t, const std::vector<uint32_t>& fvars, uint3
 
 /// Simultaneously replaces context variables by terms (lifted past the binders crossed if they have loose bound variables).
 inline NodeId replace_fvars(NodeId t, const std::unordered_map<uint32_t, NodeId>& m, uint32_t depth = 0) {
+    ITP_STACK_CHECK();
     if (m.empty()) return t;
     if (t.tag == NodeType::VAR) {
         Var v = ctx().vars[t.index];
@@ -2148,6 +2148,7 @@ inline NodeId splice_meta(NodeId sol, const std::vector<NodeId>& args, P&& proce
 }
 
 inline NodeId resolve_metas(NodeId term) {
+    ITP_STACK_CHECK();
     if (term.tag == NodeType::META) { auto s = meta_solution_of(term); return s ? resolve_metas(*s) : term; }
     if (term.tag == NodeType::APP) {
         std::vector<NodeId> args; NodeId head = term;
@@ -2166,6 +2167,7 @@ inline NodeId quote_at(const Value& v, uint32_t n0, uint32_t depth);
 /// are untouched. `bound` counts binders crossed inside `term`. Because bound variables are indices this needs no
 /// re-anchoring and no second depth counter (the old requote_captured_syntax needed both).
 inline NodeId requote(NodeId term, const Env& env, uint32_t n0, uint32_t depth, uint32_t bound = 0) {
+    ITP_STACK_CHECK();
     if (term.tag == NodeType::VAR) {
         Var v = ctx().vars[term.index];
         if (v.bound) {
@@ -2192,6 +2194,7 @@ inline NodeId requote(NodeId term, const Env& env, uint32_t n0, uint32_t depth, 
 /// `depth` is the number of binders in scope including that context (labels in [n0, depth) are binders opened by this
 /// quotation -> bound Var by index).
 inline NodeId quote_at(const Value& v, uint32_t n0, uint32_t depth) {
+    ITP_STACK_CHECK();
     return inspect_value(v,
         [&](const VType& t) -> NodeId { return mk_type(t.universe_level); },
         [&](const Closure& clo) -> NodeId {
@@ -2245,6 +2248,7 @@ inline NodeId quote(const Value& v, uint32_t depth) { return quote_at(v, depth, 
 /// True iff some immediate child satisfies pred. Total over node kinds (like map_children, read-only).
 template <class P>
 inline bool any_child(NodeId t, P&& pred) {
+    ITP_STACK_CHECK();
     return inspect(t,
         [&](App a) -> bool { return pred(a.fn_id) || pred(a.arg_id); },
         [&](Lambda l) -> bool { return pred(l.type_id) || pred(l.body_id); },
@@ -2261,6 +2265,7 @@ inline bool any_child(NodeId t, P&& pred) {
 namespace detail {
 /// Does t mention a context variable of level >= `level`? (bound variables never count)
 inline bool references_level_at_or_above(NodeId t, uint32_t level) {
+    ITP_STACK_CHECK();
     if (t.tag == NodeType::VAR) { Var v = ctx().vars[t.index]; return !v.bound && v.n >= level; }
     return any_child(t, [&](NodeId c) { return references_level_at_or_above(c, level); });
 }
@@ -2322,6 +2327,7 @@ inline int& conv_nesting() { static thread_local int n = 0; return n; }
 inline constexpr int kMaxConvNesting = 256;
 struct ConvNestingGuard { ConvNestingGuard() { ++conv_nesting(); } ~ConvNestingGuard() { --conv_nesting(); } };
 inline bool branches_convertible(NodeId ba, const Env& env_a, NodeId bb, const Env& env_b, uint32_t depth) {
+    ITP_STACK_CHECK();
     ConvNestingGuard nesting_guard;
     if (conv_nesting() > kMaxConvNesting) return false;
     bool a_is_lambda = ba.tag == NodeType::LAMBDA;
@@ -2345,6 +2351,7 @@ inline bool branches_convertible(NodeId ba, const Env& env_a, NodeId bb, const E
 /// really does have function type. If that assumption is violated,
 /// apply() will throw rather than silently returning an incorrect result.
 inline bool conv_value(const Value& a, const Value& b, uint32_t depth) {
+    ITP_STACK_CHECK();
     return inspect_value(a, b,
         [&](const VType& ta, const VType& tb) -> bool {
             return ta.universe_level == tb.universe_level;
@@ -2959,16 +2966,19 @@ inline NodeId close_pi_over_context(NodeId ty, const ElabCtx& ec) {
 /// Replaces every occurrence of a closed (no loose bound variable) term by its replacement. Both sides are position independent, so
 /// no binder bookkeeping is needed.
 inline NodeId replace_terms(NodeId t, const std::vector<std::pair<NodeId, NodeId>>& subs) {
+    ITP_STACK_CHECK();
     for (auto& [from, to] : subs) if (t == from) return to;
     return map_children(t, [&](NodeId c, uint32_t) { return replace_terms(c, subs); });
 }
 
 namespace detail {
 inline void collect_fvars(NodeId t, std::unordered_set<uint32_t>& out) {
+    ITP_STACK_CHECK();
     if (t.tag == NodeType::VAR) { Var v = ctx().vars[t.index]; if (!v.bound) out.insert(v.n); return; }
     any_child(t, [&](NodeId c) { collect_fvars(c, out); return false; });
 }
 inline bool occurs_meta(uint32_t meta_id, NodeId t) {
+    ITP_STACK_CHECK();
     if (t.tag == NodeType::META) return ctx().metas[t.index].meta_id == meta_id;
     return any_child(t, [&](NodeId c) { return occurs_meta(meta_id, c); });
 }
@@ -3107,6 +3117,7 @@ inline ElabResult proof_irrelevance_fallback(const Value& a_in, const Value& b_i
 }
 
 inline ElabResult unify_structural(const Value& a_in, const Value& b_in, ElabCtx& ec, ElabState& es) {
+    ITP_STACK_CHECK();
     Value a = resolve_solved_meta_head(a_in);
     Value b = resolve_solved_meta_head(b_in);
     auto is_meta_headed = [](const Value& v) {
@@ -3306,6 +3317,7 @@ inline ElabResult unify_structural(const Value& a_in, const Value& b_in, ElabCtx
 
 /// Definitional equality as the type checker uses it: structural comparison, then (in the Prop/Type world) proof irrelevance.
 inline ElabResult unify_values(const Value& a, const Value& b, ElabCtx& ec, ElabState& es) {
+    ITP_STACK_CHECK();
     if (!ctx().prop_mode) return unify_structural(a, b, ec, es);
     const auto meta_mark = ctx().meta_ctx.checkpoint(); const std::size_t pending_mark = es.pending.size();
     ElabResult r = unify_structural(a, b, ec, es);
@@ -3314,6 +3326,7 @@ inline ElabResult unify_values(const Value& a, const Value& b, ElabCtx& ec, Elab
 }
 
 inline ElabResult unify(NodeId a_id, NodeId b_id, ElabCtx& ec, ElabState& es) {
+    ITP_STACK_CHECK();
     return unify_values(eval(a_id, ec.values), eval(b_id, ec.values), ec, es);
 }
 
@@ -3559,6 +3572,7 @@ struct CompactResult {
 /// would, never a wrong one.
 inline void match_index_pattern(NodeId pat, NodeId conc, uint32_t base_depth, uint32_t ctor_arity,
                                  const Env& env, CtorIndexForcing& out) {
+    ITP_STACK_CHECK();
     if (!out.ok || out.refuted) return; // already settled (failure or refutation) -- stop recursing
     bool pat_is_own_field = false;
     uint32_t pat_level = 0;
@@ -4054,6 +4068,7 @@ inline InductiveHandle finish_inductive(uint32_t type_global_id, std::vector<Cto
 /// regard to position. Used as a building block by is_strictly_positive,
 /// which is where position (positive vs. negative) is taken into account.
 inline bool occurs(uint32_t ind_type_global_id, NodeId term) {
+    ITP_STACK_CHECK();
     return inspect(term,
         [&](Var) { return false; },
         [&](App a) { return occurs(ind_type_global_id, a.fn_id) || occurs(ind_type_global_id, a.arg_id); },
@@ -4111,6 +4126,7 @@ inline bool occurs(uint32_t ind_type_global_id, NodeId term) {
 /// treating "not a Pi" as automatically safe was a real, previously
 /// unnoticed gap in an earlier version of this check.
 inline bool is_strictly_positive(uint32_t ind_type_global_id, NodeId arg_type) {
+    ITP_STACK_CHECK();
     return inspect(arg_type,
         [&](Pi p) {
             if (occurs(ind_type_global_id, p.dom_id)) return false;
@@ -4458,6 +4474,7 @@ inline bool is_structurally_decreasing(uint32_t fn_gid, uint32_t ind_type_global
     std::unordered_set<uint32_t> smaller;
 
     std::function<bool(NodeId, uint32_t)> walk = [&](NodeId t, uint32_t depth) -> bool {
+        ITP_STACK_CHECK();
         // A self-call is checked by unrolling the application spine and
         // inspecting its head, ahead of the generic structural walk below,
         // since a self-call has a different acceptance condition than an
@@ -4596,6 +4613,7 @@ inline bool is_locally_structurally_decreasing(uint32_t self_ref_level, uint32_t
     std::unordered_set<uint32_t> smaller;
 
     std::function<bool(NodeId, uint32_t)> walk = [&](NodeId t, uint32_t depth) -> bool {
+        ITP_STACK_CHECK();
         NodeId head = t;
         std::vector<NodeId> args;
         while (auto a = try_match<App>(head)) { args.push_back(a->arg_id); head = a->fn_id; }
@@ -4742,11 +4760,15 @@ inline std::expected<void, TypeError> finish_recursive_function_checked(
         }
     }
     ctx().globals.defs[fn_gid].value = body;
+    ctx().globals.invalidate_value_caches();
     ElabState es;
     ElabCtx empty_ec;
-    ElabResult r = check(body, ctx().globals[fn_gid].type, empty_ec, es);
+    auto roll_back = [&] { ctx().globals.defs[fn_gid].value = std::nullopt; ctx().globals.invalidate_value_caches(); };   // never leave a bad definition installed
+    ElabResult r;
+    try { r = check(body, ctx().globals[fn_gid].type, empty_ec, es); }
+    catch (...) { roll_back(); throw; }                  // an exception (e.g. the stack guard) must not leave it installed either
     if (!r) {
-        ctx().globals.defs[fn_gid].value = std::nullopt; // roll back: never leave a bad definition installed
+        roll_back();
         return std::unexpected(r.error());
     }
     ctx().globals.defs[fn_gid].recursive_info =
@@ -4849,92 +4871,12 @@ inline InductiveHandle finish_inductive_unchecked(uint32_t type_global_id, std::
 }
 inline void finish_recursive_function(uint32_t fn_gid, uint32_t ind_type_global_id, uint32_t decreasing_arg_level, NodeId body, bool = false) {
     ctx().globals.defs[fn_gid].value = body;
+    ctx().globals.invalidate_value_caches();
     ctx().globals.defs[fn_gid].recursive_info = RecursiveFnInfo{ind_type_global_id, decreasing_arg_level, true};
 }
 inline uint32_t declare_unchecked(NodeId type, std::optional<NodeId> value, const std::string& name) {
     return ctx().globals.declare(type, value, name);
 }
-
-// ---- S1 typing fragment: Type, Pi, Lambda, App, Let, Const, context variables. Binders are opened with a fresh FVar
-// (instantiate), typed, and closed again (abstract): the standard locally-nameless discipline.
-using TcResult = std::expected<NodeId, std::string>;
-inline TcResult tc_infer(NodeId t, const ElabCtx& ec);
-inline std::expected<void, std::string> tc_check(NodeId t, NodeId expected, const ElabCtx& ec) {
-    auto got = tc_infer(t, ec);
-    if (!got) return std::unexpected(got.error());
-    if (!conv_value(eval(*got, ec.values), eval(expected, ec.values), ec.size())) return std::unexpected(std::string("type mismatch"));
-    return {};
-}
-inline std::expected<uint32_t, std::string> tc_sort(NodeId t, const ElabCtx& ec) {
-    auto ty = tc_infer(t, ec);
-    if (!ty) return std::unexpected(ty.error());
-    Value v = eval(*ty, ec.values);
-    if (auto* vt = std::get_if<VType>(&v)) return vt->universe_level;
-    return std::unexpected(std::string("not a type"));
-}
-inline TcResult tc_infer(NodeId t, const ElabCtx& ec) {
-    switch (t.tag) {
-        case NodeType::VAR: {
-            Var v = ctx().vars[t.index];
-            if (v.bound) return std::unexpected(std::string("loose bound variable"));
-            if (v.n >= ec.size()) return std::unexpected(std::string("context variable outside the context"));
-            return ec.types[v.n];
-        }
-        case NodeType::TYPE: return mk_type(ctx().types[t.index].universe_level + 1);
-        case NodeType::CONST: return ctx().globals[ctx().consts[t.index].global_id].type;
-        case NodeType::PI: {
-            // Telescope: open the whole chain of directly nested Pis with fresh context variables in ONE pass (per-binder instantiate
-            // would be quadratic in the chain length), type every domain and the final codomain, then fold the universe rule.
-            std::vector<NodeId> doms; NodeId cod = t;
-            while (cod.tag == NodeType::PI) { Pi p = ctx().pis[cod.index]; doms.push_back(p.dom_id); cod = p.cod_id; }
-            const uint32_t m = static_cast<uint32_t>(doms.size()), n = ec.size();
-            ElabCtx cur = ec; std::vector<NodeId> fv_rev; std::vector<uint32_t> sorts;
-            for (uint32_t j = 0; j < m; ++j) {
-                NodeId dj = instantiate(doms[j], fv_rev);
-                auto s = tc_sort(dj, cur); if (!s) return std::unexpected(s.error());
-                sorts.push_back(*s); cur = cur.extend(dj); fv_rev.insert(fv_rev.begin(), mk_fvar(n + j));
-            }
-            auto sc = tc_sort(instantiate(cod, fv_rev), cur); if (!sc) return std::unexpected(sc.error());
-            uint32_t level = *sc;
-            for (int j = static_cast<int>(m) - 1; j >= 0; --j) level = (level == 0) ? 0 : std::max(sorts[j], level);
-            return mk_type(level);
-        }
-        case NodeType::LAMBDA: {
-            // Telescope (see PI): open all nested lambdas at once, type the body once, close with one abstract per domain.
-            std::vector<NodeId> doms; NodeId body = t;
-            while (body.tag == NodeType::LAMBDA) { Lambda l = ctx().lambdas[body.index]; doms.push_back(l.type_id); body = l.body_id; }
-            const uint32_t m = static_cast<uint32_t>(doms.size()), n = ec.size();
-            ElabCtx cur = ec; std::vector<NodeId> fv_rev, opened; std::vector<uint32_t> fvl;
-            for (uint32_t j = 0; j < m; ++j) {
-                NodeId dj = instantiate(doms[j], fv_rev);
-                auto s = tc_sort(dj, cur); if (!s) return std::unexpected(s.error());
-                opened.push_back(dj); cur = cur.extend(dj); fv_rev.insert(fv_rev.begin(), mk_fvar(n + j)); fvl.push_back(n + j);
-            }
-            auto bt = tc_infer(instantiate(body, fv_rev), cur); if (!bt) return bt;
-            NodeId result = abstract_fvars(*bt, fvl);
-            for (int j = static_cast<int>(m) - 1; j >= 0; --j)
-                result = mk_pi(abstract_fvars(opened[j], std::vector<uint32_t>(fvl.begin(), fvl.begin() + j)), result);
-            return result;
-        }
-        case NodeType::APP: {
-            App a = ctx().apps[t.index];
-            auto tf = tc_infer(a.fn_id, ec); if (!tf) return tf;
-            Value fv = eval(*tf, ec.values);
-            auto* pi = std::get_if<VPi>(&fv);
-            if (!pi) return std::unexpected(std::string("application of a non-function"));
-            auto ok = tc_check(a.arg_id, quote(eval(pi->dom_id, pi->env), ec.size()), ec); if (!ok) return std::unexpected(ok.error());
-            return quote(eval(pi->cod_id, pi->env.extend(eval(a.arg_id, ec.values))), ec.size());
-        }
-        case NodeType::LET: {
-            Let l = ctx().lets[t.index];
-            auto s = tc_sort(l.type_id, ec); if (!s) return std::unexpected(s.error());
-            auto ok = tc_check(l.value_id, l.type_id, ec); if (!ok) return std::unexpected(ok.error());
-            return tc_infer(instantiate1(l.body_id, l.value_id), ec);
-        }
-        default: return std::unexpected(std::string("tc_infer: node kind not supported by the S1 typing fragment"));
-    }
-}
-
 
 // ===========================================================================
 // S2: the typing core on the hybrid representation.
@@ -4962,6 +4904,7 @@ inline NodeId close_pi_telescope(const std::vector<NodeId>& opened_doms, NodeId 
 /// All-levels form of a term, for the legacy structural-recursion analyses: every bound variable becomes the context variable
 /// whose level is its absolute binder number (depth counts binders from the start of the context).
 inline NodeId to_levels(NodeId t, uint32_t depth) {
+    ITP_STACK_CHECK();
     if (t.tag == NodeType::VAR) {
         Var v = ctx().vars[t.index];
         return v.bound ? mk_fvar(depth - 1 - v.n) : t;
@@ -5142,6 +5085,7 @@ inline NodeId forced_ctor_app(uint32_t ctor_gid, uint32_t base, uint32_t arity, 
 // match, so a field variable they determine is substituted everywhere (refl Nat a, le_n a): the standard eliminator's minor premise.
 // ===========================================================================
 inline bool uniform_family_occurrences(NodeId t, uint32_t fam, uint32_t arity, uint32_t pos, NodeId var) {
+    ITP_STACK_CHECK();
     if (t.tag == NodeType::APP || t.tag == NodeType::CONST) {
         detail::AppSpine sp = detail::decompose_app_spine(t);
         if (sp.head.tag == NodeType::CONST && ctx().consts[sp.head.index].global_id == fam) {
@@ -5211,6 +5155,7 @@ inline MotiveParts motive_binders(uint32_t tgid, uint32_t n, const std::vector<N
 
 inline ElabResult check_match_branches(uint32_t type_global_id, NodeId motive, const std::vector<NodeId>& branches,
                                         const std::vector<NodeId>& concrete_indices, ElabCtx& ec, ElabState& es) {
+    ITP_STACK_CHECK();
     std::vector<uint32_t> ctor_gids = detail::ctor_gids_for_type(type_global_id);
     if (ctx().prop_mode && ctx().prop_elim_only.count(type_global_id)) {      // a proposition that is not a syntactic subsingleton: eliminable only into Type0
         uint32_t elim_level = 0;
@@ -5237,7 +5182,20 @@ inline ElabResult check_match_branches(uint32_t type_global_id, NodeId motive, c
     return {};
 }
 
+/// The type of `match s with ...` is `motive indices s`. A motive that ignores all its binders (a constant motive -- the usual case) has exactly that type
+/// as its body, so use the body: building the application would mention the scrutinee and make the evaluator evaluate it, and typing a nest of matches
+/// (each one the scrutinee of the next) was quadratic.
+inline NodeId motive_result(NodeId motive, const std::vector<NodeId>& indices, NodeId scrutinee) {
+    NodeId cur = motive;
+    for (std::size_t i = 0; i <= indices.size(); ++i) {
+        if (cur.tag != NodeType::LAMBDA) return mk_app(apply_all(motive, indices), scrutinee);
+        cur = ctx().lambdas[cur.index].body_id;
+    }
+    return loose_range(cur) == 0 ? cur : mk_app(apply_all(motive, indices), scrutinee);
+}
+
 inline TypeResult infer(NodeId t, ElabCtx& ec, ElabState& es) {
+    ITP_STACK_CHECK();
     auto err = [&](TypeErrorKind k, NodeId at, const char* msg) { return std::unexpected(TypeError{k, at, std::nullopt, msg}); };
     switch (t.tag) {
         case NodeType::VAR: {
@@ -5258,7 +5216,11 @@ inline TypeResult infer(NodeId t, ElabCtx& ec, ElabState& es) {
             if (!pi) return err(TypeErrorKind::NotAFunction, a.fn_id, "applying a term that is not a function");
             NodeId dom_ty = quote(eval(pi->dom_id, pi->env), ec.size());
             if (ElabResult r = check(a.arg_id, dom_ty, ec, es); !r) return std::unexpected(r.error());
-            return quote(eval(pi->cod_id, pi->env.extend(eval(a.arg_id, ec.values))), ec.size());
+            // A codomain without loose bound variables cannot mention the argument (the usual, non-dependent case, e.g. `Succ : Nat -> Nat`):
+            // do not evaluate it. Evaluating every argument made typing a numeral of depth n quadratic -- each of its n applications
+            // re-evaluated the whole sub-numeral below it.
+            Value arg_val = loose_range(pi->cod_id) == 0 ? fresh_neutral(pi->env.size()) : eval(a.arg_id, ec.values);
+            return quote(eval(pi->cod_id, pi->env.extend(std::move(arg_val))), ec.size());
         }
         case NodeType::LAMBDA: {
             std::vector<NodeId> doms; NodeId body = t;
@@ -5314,7 +5276,7 @@ inline TypeResult infer(NodeId t, ElabCtx& ec, ElabState& es) {
             }
             if (ElabResult r = verify_motive_shape(m.motive_id, static_cast<uint32_t>(concrete_indices.size()), ec, es); !r) return std::unexpected(r.error());
             if (ElabResult r = check_match_branches(type_global_id, m.motive_id, *m.branches, concrete_indices, ec, es); !r) return std::unexpected(r.error());
-            return quote(eval(mk_app(apply_all(m.motive_id, concrete_indices), m.scrutinee_id), ec.values), ec.size());
+            return quote(eval(motive_result(m.motive_id, concrete_indices, m.scrutinee_id), ec.values), ec.size());
         }
         case NodeType::FIX: {
             Fix f = ctx().fixes[t.index];
@@ -5330,6 +5292,7 @@ inline TypeResult infer(NodeId t, ElabCtx& ec, ElabState& es) {
 
 /// Checks a chain of lambdas against a Pi telescope in ONE pass (one instantiate for the body, not one per binder).
 inline ElabResult check_lambda(NodeId t, NodeId expected_ty, ElabCtx& ec, ElabState& es) {
+    ITP_STACK_CHECK();
     Value cur = eval(expected_ty, ec.values);
     ElabCtx cur_ec = ec; std::vector<NodeId> fv_rev; NodeId body = t;
     const uint32_t n = ec.size(); uint32_t j = 0;
@@ -5354,6 +5317,7 @@ inline ElabResult check_lambda(NodeId t, NodeId expected_ty, ElabCtx& ec, ElabSt
 }
 
 inline ElabResult check_match(NodeId t, NodeId expected_ty, ElabCtx& ec, ElabState& es) {
+    ITP_STACK_CHECK();
     Match m = ctx().matches[t.index];
     TypeResult scrut_ty_r = infer(m.scrutinee_id, ec, es);
     if (!scrut_ty_r) return std::unexpected(scrut_ty_r.error());
@@ -5389,13 +5353,14 @@ inline ElabResult check_match(NodeId t, NodeId expected_ty, ElabCtx& ec, ElabSta
         motive = built;
     } else {
         if (ElabResult r = verify_motive_shape(m.motive_id, static_cast<uint32_t>(concrete_indices.size()), ec, es); !r) return r;
-        NodeId applied = mk_app(apply_all(motive, concrete_indices), m.scrutinee_id);
+        NodeId applied = motive_result(motive, concrete_indices, m.scrutinee_id);
         if (ElabResult r = unify(applied, expected_ty, ec, es); !r) return r;
     }
     return check_match_branches(type_global_id, motive, *m.branches, concrete_indices, ec, es);
 }
 
 inline ElabResult check(NodeId t, NodeId expected_ty, ElabCtx& ec, ElabState& es) {
+    ITP_STACK_CHECK();
     if (t.tag == NodeType::LAMBDA) return check_lambda(t, expected_ty, ec, es);
     if (t.tag == NodeType::MATCH) return check_match(t, expected_ty, ec, es);
     TypeResult inferred = infer(t, ec, es);
@@ -5477,6 +5442,7 @@ inline ElabResult exact(ProofState& ps, NodeId term, std::optional<uint32_t> tar
 }
 
 inline ElabResult apply(ProofState& ps, NodeId candidate, std::optional<uint32_t> target_meta_id = std::nullopt) {
+    ITP_STACK_CHECK();
     auto idx_opt = find_goal_index(ps, target_meta_id);
     if (!idx_opt) return no_goal_error("apply", target_meta_id);
     Goal g = ps.goals[*idx_opt]; // copy: only committed to ps.goals on success
@@ -6133,6 +6099,7 @@ inline std::vector<NodeId> apply_candidates(const ProofState& ps, const Discrimi
 // ===========================================================================
 namespace detail {
 inline bool fvars_below(NodeId t, uint32_t nfree, std::unordered_set<uint64_t>& seen) {
+    ITP_STACK_CHECK();
     uint64_t key = (static_cast<uint64_t>(static_cast<uint32_t>(t.tag)) << 32) | t.index;
     if (!seen.insert(key).second) return true;
     if (t.tag == NodeType::VAR) { Var v = ctx().vars[t.index]; return v.bound || v.n < nfree; }

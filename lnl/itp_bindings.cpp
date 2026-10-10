@@ -7,6 +7,7 @@
 #include <nanobind/stl/tuple.h>
 #include <nanobind/stl/vector.h>
 #include <functional>
+#include <sys/resource.h>
 #include "itp_kernel.hpp"
 
 namespace nb = nanobind;
@@ -165,13 +166,6 @@ struct KernelWrapper {
         auto g = activate(); itp::Env env = fresh_env(n0);
         return itp::conv_value(itp::eval(a, env), itp::eval(b, env), n0);
     }
-    std::pair<bool, nb::object> tc_infer_open(itp::NodeId t, const std::vector<itp::NodeId>& hyp_types) {
-        auto g = activate(); itp::ElabCtx ec;
-        for (auto h : hyp_types) ec = ec.extend(h);
-        auto r = itp::tc_infer(t, ec);
-        if (r) return {true, nb::cast(*r)};
-        return {false, nb::cast(r.error())};
-    }
     uint32_t loose_range(itp::NodeId t) { auto g = activate(); return itp::loose_range(t); }
     itp::NodeId lift(itp::NodeId t, uint32_t d, uint32_t cutoff) { auto g = activate(); return itp::lift(t, d, cutoff); }
     itp::NodeId instantiate(itp::NodeId t, const std::vector<itp::NodeId>& vals) { auto g = activate(); return itp::instantiate(t, vals); }
@@ -201,32 +195,51 @@ struct KernelWrapper {
     // Raw dump with explicit variable kinds: b<i> = bound index, f<l> = context level.
     std::string dump_raw(itp::NodeId n) {
         auto g = activate();
-        std::function<std::string(itp::NodeId)> go = [&](itp::NodeId t) -> std::string {
-            return itp::inspect(t,
-                [&](itp::Var v) { return std::string(v.bound ? "b" : "f") + std::to_string(v.n); },
-                [&](itp::App a) { return "(" + go(a.fn_id) + " " + go(a.arg_id) + ")"; },
-                [&](itp::Lambda l) { return "(lam " + go(l.type_id) + ". " + go(l.body_id) + ")"; },
-                [&](itp::Pi p) { return "(pi " + go(p.dom_id) + ". " + go(p.cod_id) + ")"; },
-                [&](itp::Let l) { return "(let " + go(l.type_id) + " := " + go(l.value_id) + " in " + go(l.body_id) + ")"; },
-                [&](itp::Type ty) { return "T" + std::to_string(ty.universe_level); },
-                [&](itp::Const c) { return "C" + std::to_string(c.global_id); },
-                [&](itp::Meta m) { return "?" + std::to_string(m.meta_id); },
+        std::string out;   // appended to in place: building each level's string from its children's copied the whole text at every level (quadratic on deep terms)
+        std::function<void(itp::NodeId)> go = [&](itp::NodeId t) {
+            ITP_STACK_CHECK();
+            itp::inspect(t,
+                [&](itp::Var v) { out += v.bound ? "b" : "f"; out += std::to_string(v.n); },
+                [&](itp::App a) { out += "("; go(a.fn_id); out += " "; go(a.arg_id); out += ")"; },
+                [&](itp::Lambda l) { out += "(lam "; go(l.type_id); out += ". "; go(l.body_id); out += ")"; },
+                [&](itp::Pi p) { out += "(pi "; go(p.dom_id); out += ". "; go(p.cod_id); out += ")"; },
+                [&](itp::Let l) { out += "(let "; go(l.type_id); out += " := "; go(l.value_id); out += " in "; go(l.body_id); out += ")"; },
+                [&](itp::Type ty) { out += "T" + std::to_string(ty.universe_level); },
+                [&](itp::Const c) { out += "C" + std::to_string(c.global_id); },
+                [&](itp::Meta m) { out += "?" + std::to_string(m.meta_id); },
                 [&](itp::Match m) {
-                    std::string r = "(match " + go(m.scrutinee_id) + " [" + go(m.motive_id) + "]";
-                    for (auto b : *m.branches) r += " | " + go(b);
-                    return r + ")";
+                    out += "(match "; go(m.scrutinee_id); out += " ["; go(m.motive_id); out += "]";
+                    for (auto b : *m.branches) { out += " | "; go(b); }
+                    out += ")";
                 },
-                [&](itp::Fix f) { return "(fix<" + std::to_string(f.decreasing_arg) + "> " + go(f.fn_type) + " := " + go(f.body) + ")"; },
-                [&](auto) { return std::string("<other>"); });
+                [&](itp::Fix f) { out += "(fix<" + std::to_string(f.decreasing_arg) + "> "; go(f.fn_type); out += " := "; go(f.body); out += ")"; },
+                [&](auto) { out += "<other>"; });
         };
-        return go(n);
+        go(n);
+        return out;
     }
 };
 
 inline itp::ContextGuard ProofStateHandle::activate() { return kernel->activate(); }
 
+// The kernel recurses on the depth of a term. Linux grows the main thread's stack on demand up to its soft limit, which is only 8 MiB by
+// default; raise it (as far as the hard limit allows) so deep but legitimate terms -- a unary numeral tens of thousands deep -- have room.
+// Threads created from Python get threading.stack_size(); the guard in the kernel turns an overflow into a RuntimeError either way.
+static uint64_t raise_stack_limit(uint64_t want) {
+    rlimit rl;
+    if (getrlimit(RLIMIT_STACK, &rl) != 0) return 0;
+    rlim_t target = static_cast<rlim_t>(want);
+    if (rl.rlim_max != RLIM_INFINITY && rl.rlim_max < target) target = rl.rlim_max;
+    if (rl.rlim_cur != RLIM_INFINITY && rl.rlim_cur < target) { rl.rlim_cur = target; setrlimit(RLIMIT_STACK, &rl); }
+    itp::refresh_stack_floor();
+    getrlimit(RLIMIT_STACK, &rl);
+    return rl.rlim_cur == RLIM_INFINITY ? ~uint64_t{0} : static_cast<uint64_t>(rl.rlim_cur);
+}
+
 NB_MODULE(itp_env_lnl, m) {
     nb::exception<ITPError>(m, "ITPError");
+    raise_stack_limit(uint64_t{1} << 30);
+    m.def("set_stack_limit", &raise_stack_limit, "bytes"_a, "Raise the soft stack limit of the process (main thread) to at least `bytes` if the hard limit allows; returns the limit now in force.");
     nb::class_<itp::NodeId>(m, "NodeId")
         .def("__eq__", [](const itp::NodeId& a, const itp::NodeId& b) { return a == b; })
         .def("__hash__", [](const itp::NodeId& n) { return std::hash<uint64_t>{}((static_cast<uint64_t>(static_cast<uint32_t>(n.tag)) << 32) | n.index); })
@@ -300,7 +313,6 @@ NB_MODULE(itp_env_lnl, m) {
         .def("unify_drain_open", &KernelWrapper::unify_drain_open, "a"_a, "b"_a, "hyp_types"_a)
         .def("normalize_open", &KernelWrapper::normalize_open, "term"_a, "n0"_a)
         .def("conv_open", &KernelWrapper::conv_open, "a"_a, "b"_a, "n0"_a)
-        .def("tc_infer_open", &KernelWrapper::tc_infer_open, "term"_a, "hyp_types"_a)
         .def("loose_range", &KernelWrapper::loose_range, "term"_a)
         .def("lift", &KernelWrapper::lift, "term"_a, "d"_a, "cutoff"_a = 0)
         .def("instantiate", &KernelWrapper::instantiate, "term"_a, "vals"_a)
