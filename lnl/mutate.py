@@ -1,6 +1,10 @@
 """Mutation testing of the S2 typing core: each mutant re-breaks one rule in an isolated copy; the test suite must FAIL."""
-import os, re, shutil, subprocess, sys, time
-SRC = '/home/claude/itp_py/lnl'
+import os, re, shutil, subprocess, sys, tempfile, time
+SRC = os.path.dirname(os.path.abspath(__file__))
+PY_ROOT = os.path.dirname(SRC)
+REF_DIR = os.environ.get('ITP_REF_DIR', os.path.join(os.path.dirname(PY_ROOT), 'itp_ref'))
+def gate_env(lnl_dir, **extra):   # one place that says where the three source trees live, for the baseline and for every mutant copy
+    return dict(os.environ, LNL_DIR=lnl_dir, ITP_PY_ROOT=PY_ROOT, ITP_REF_DIR=REF_DIR, PYTHONPATH=os.pathsep.join([REF_DIR, PY_ROOT, lnl_dir]), **extra)
 MUTANTS = {
  'M71 apply does not check that the solutions unification found have their arguments\' types (F25)': ("        if (!solutions_ok) return std::unexpected(TypeError{TypeErrorKind::Mismatch, g.target, std::nullopt, \"apply: the solution unification found for an argument of the lemma does not have that argument's type (\" + why + \")\"});\n", ""),
  'M67 prop_elim: Match does not enforce the elimination restriction': ("    if (ctx().prop_mode && ctx().prop_elim_only.count(type_global_id)) {      // a proposition that is not a syntactic subsingleton: eliminable only into Type0", "    if (false && ctx().prop_mode && ctx().prop_elim_only.count(type_global_id)) {      // a proposition that is not a syntactic subsingleton: eliminable only into Type0"),
@@ -79,14 +83,14 @@ def run(names):
     results = []
     cmds = [c for c in GATE_CMDS if not os.environ.get('MUT_ONLY') or c[0] in os.environ['MUT_ONLY'].split(',')]
     # the UNMUTATED build must be green on every gate, otherwise every mutant would look "caught" and the results would mean nothing
-    base_env = dict(os.environ, LNL_DIR=SRC, PYTHONPATH='/home/claude/itp_ref:/home/claude/itp_py:' + SRC)
+    base_env = gate_env(SRC)
     for cmd in cmds:
         r = subprocess.run([sys.executable, SRC + '/' + cmd[0]] + cmd[1:], cwd=SRC, env=base_env, capture_output=True, text=True, timeout=250)
         if r.returncode != 0:
             print("BASELINE IS RED on %s -- mutation results would be meaningless" % cmd[0]); print((r.stdout + r.stderr)[-500:]); sys.exit(2)
     print("baseline green on all gates", flush=True)
     for nm in names:
-        old, new = MUTANTS[nm]; d = '/tmp/mut_' + re.sub(r'\W+', '_', nm)[:24]
+        old, new = MUTANTS[nm]; d = os.path.join(tempfile.gettempdir(), 'mut_' + re.sub(r'\W+', '_', nm)[:24])
         if os.path.exists(d): shutil.rmtree(d)
         shutil.copytree(SRC, d, ignore=shutil.ignore_patterns('*.so', '__pycache__'))
         h = open(d + '/itp_kernel.hpp').read(); assert h.count(old) == 1, (nm, h.count(old))
@@ -94,7 +98,7 @@ def run(names):
         env = dict(os.environ, ITP_NB_DOMAIN='lnl'); t0 = time.time()
         b = subprocess.run([sys.executable, 'build_kernel.py'], cwd=d, env=env, capture_output=True, text=True)
         if 'Build succeeded' not in b.stdout: results.append((nm, 'BUILD FAILED', b.stdout[-200:] + b.stderr[-200:])); continue
-        env = dict(os.environ, LNL_DIR=d, PYTHONPATH='/home/claude/itp_ref:/home/claude/itp_py:' + d)
+        env = gate_env(d)
         outs = []
         for cmd in cmds:
             try:

@@ -1,8 +1,13 @@
 """Differential harness: reference kernel (absolute levels) vs hybrid kernel (bound = index, context = level)."""
 import re, sys, time, random
 import os
-LNL_DIR = os.environ.get('LNL_DIR', '/home/claude/itp_py/lnl')   # which build of the hybrid kernel to test (mutation runs use copies)
-sys.path[:0] = ['/home/claude/itp_ref', LNL_DIR, '/home/claude/itp_py']
+# Layout:  <root>/itp_ref (frozen reference kernel)   <root>/itp_py (this repo: old-kernel RL modules)   <root>/itp_py/lnl (hybrid kernel)
+# Every location is derived from this file; the env vars exist for mutation runs, which test a COPY of lnl/.
+HERE = os.path.dirname(os.path.abspath(__file__))
+PY_ROOT = os.environ.get('ITP_PY_ROOT', os.path.dirname(HERE))
+REF_DIR = os.environ.get('ITP_REF_DIR', os.path.join(os.path.dirname(PY_ROOT), 'itp_ref'))
+LNL_DIR = os.environ.get('LNL_DIR', HERE)   # which build of the hybrid kernel to test (mutation runs use copies)
+sys.path[:0] = [REF_DIR, LNL_DIR, PY_ROOT]
 import itp_env_ref as R
 import itp_env_lnl as H
 sys.modules['itp_env'] = R            # curriculum builds its kernels through `itp_env`: alias it to the REFERENCE module

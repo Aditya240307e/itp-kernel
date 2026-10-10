@@ -18,9 +18,27 @@ from dataclasses import dataclass
 from typing import Callable, Optional
 import itp_env
 import hypergraph as hg
-from model import PolicyValueModel
-from trainable_policy import TrainablePolicy
-import training
+
+
+class _Lazy:
+    """Import-on-first-use stand-in for a module (or one name inside it). Kernel-only users -- the differential
+    harness and every gate import this module just to build the base library -- must not pay for a
+    deep-learning framework: importing torch costs seconds per process and the mutation driver starts
+    thousands of processes. Training code resolves these on its first call, exactly as before."""
+    def __init__(self, module, attr=None): self._m, self._a, self._obj = module, attr, None
+    def _get(self):
+        if self._obj is None:
+            import importlib
+            o = importlib.import_module(self._m)
+            self._obj = getattr(o, self._a) if self._a else o
+        return self._obj
+    def __getattr__(self, k): return getattr(self._get(), k)
+    def __call__(self, *a, **kw): return self._get()(*a, **kw)
+
+
+PolicyValueModel = _Lazy("model", "PolicyValueModel")      # used only as an annotation here (see __future__ import)
+TrainablePolicy = _Lazy("trainable_policy", "TrainablePolicy")
+training = _Lazy("training")
 
 
 def eq_app(k, refs, a, x, y):
