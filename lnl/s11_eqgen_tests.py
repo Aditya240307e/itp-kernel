@@ -86,7 +86,7 @@ def legacy_partial(verbose=False):
         st = build_new(knew, l2h(stmt, 0)); ps = knew.start_proof(st)
         for _ in range(nintro): ps.intro('x')
         ps.induct(hyp, eq_gid=g['Eq'], refl_gid=g['refl'])
-        out[name] = (knew.check_open(ps.extract(), st, [])[0], ps.num_goals() == 2)
+        out[name] = (knew.check_partial(ps.extract(), st, [])[0], ps.num_goals() == 2)
     return out
 
 def contains_const(t, gids):
@@ -131,7 +131,7 @@ def probe_first_creation(params):
         res['the real proof still completes and verifies after the probes'] = ps2.num_goals() == 0 and ps2.is_complete() and t8.kernel_verdict(knew, parse_raw(knew.dump_raw(ps2.extract()), True), l2h(stmt_t, 0))
     else:       # legacy cannot discriminate S m = 0 (F2b), so the proof cannot complete: the real induct must give a well-typed partial proof with two branch goals
         ps2, log = run_ops(knew, g, stmt_t, [('intro',), ('intro',), ('induct_eq', 1)])
-        res['the real induct after the probes gives a well-typed partial proof and two goals'] = ps2.num_goals() == 2 and bool(knew.check_open(ps2.extract(), build_new(knew, l2h(stmt_t, 0)), [])[0])
+        res['the real induct after the probes gives a well-typed partial proof and two goals'] = ps2.num_goals() == 2 and bool(knew.check_partial(ps2.extract(), build_new(knew, l2h(stmt_t, 0)), [])[0])
     return res
 
 if __name__ == '__main__':

@@ -22,6 +22,21 @@ inline void require_scoped(itp::NodeId t, uint32_t nfree, const char* what) {
         throw ITPError(std::string("ill-scoped term (") + what + "): it has an unbound bound variable, or a context variable beyond the " + std::to_string(nfree) + " in scope");
 }
 inline void require_scoped_telescope(const std::vector<itp::NodeId>& types, const char* what) { for (uint32_t j = 0; j < types.size(); ++j) require_scoped(types[j], j, what); }
+// Every id and index that crosses the boundary is validated here: the kernel indexes its tables with them directly, so a bad one must be an exception, never an out-of-range read.
+// (These read the active ExecutionContext: call them after `auto g = activate();`.)
+inline void require_global(uint32_t gid, const char* what) {
+    if (gid >= itp::ctx().globals.defs.size()) throw ITPError(std::string("no such global (") + what + "): id " + std::to_string(gid) + ", there are " + std::to_string(itp::ctx().globals.defs.size()) + " globals");
+}
+inline void require_meta(uint32_t id, const char* what) {
+    if (id >= itp::ctx().meta_ctx.entries.size()) throw ITPError(std::string("unknown metavariable id (") + what + "): " + std::to_string(id));
+}
+inline void require_small(uint32_t v, const char* what) {
+    if (v > itp::kMaxUniverseLevel) throw ITPError(std::string(what) + " is too large (" + std::to_string(v) + "; the limit is " + std::to_string(itp::kMaxUniverseLevel) + ")");
+}
+// A metavariable is a hole: declarations, statements and final verification must not contain one (the typing rule for ?m is "it has the type it was created with").
+inline void require_meta_free(itp::NodeId t, const char* what) {
+    if (itp::detail::contains_meta(t)) throw ITPError(std::string("a metavariable occurs in the ") + what + ": declarations and final checks need meta-free terms (finish the proof / instantiate first)");
+}
 template <class R> void raise_if_error(const R& r) { if (!r) throw ITPError(r.error().message); }
 
 // Wraps itp::ProofState; keeps a raw pointer to its Kernel (start_proof binds nb::keep_alive<0,1> so the kernel outlives it).
@@ -34,12 +49,15 @@ struct ProofStateHandle {
     void intro_(const std::string& name, std::optional<uint32_t> tm) { auto g = activate(); raise_if_error(itp::intro(*ps, name, tm)); }
     void apply_(itp::NodeId term, std::optional<uint32_t> tm) { auto g = activate(); require_scoped(term, scope_of(tm), "apply"); raise_if_error(itp::apply(*ps, term, tm)); }
     void cases_(uint32_t hyp_level, std::optional<uint32_t> tm, const std::vector<uint32_t>& gen) { auto g = activate(); raise_if_error(itp::cases(*ps, hyp_level, tm, gen)); }
-    void induct_(uint32_t hyp_level, std::optional<uint32_t> tm, const std::vector<uint32_t>& gen, std::optional<uint32_t> eq_gid, std::optional<uint32_t> refl_gid) { auto g = activate(); raise_if_error(itp::induct(*ps, hyp_level, tm, gen, eq_gid, refl_gid)); }
+    void induct_(uint32_t hyp_level, std::optional<uint32_t> tm, const std::vector<uint32_t>& gen, std::optional<uint32_t> eq_gid, std::optional<uint32_t> refl_gid) {
+        auto g = activate(); if (eq_gid) require_global(*eq_gid, "induct eq_gid"); if (refl_gid) require_global(*refl_gid, "induct refl_gid");
+        raise_if_error(itp::induct(*ps, hyp_level, tm, gen, eq_gid, refl_gid)); }
     void exact_(itp::NodeId term, std::optional<uint32_t> tm) { auto g = activate(); require_scoped(term, scope_of(tm), "exact"); raise_if_error(itp::exact(*ps, term, tm)); }
     void rewrite_(itp::NodeId eq_term, itp::NodeId x, itp::NodeId y, uint32_t transport_gid, uint32_t symm_gid, std::optional<uint32_t> tm) {
-        auto g = activate(); uint32_t sc = scope_of(tm); require_scoped(eq_term, sc, "rewrite eq_term"); require_scoped(x, sc, "rewrite x"); require_scoped(y, sc, "rewrite y"); raise_if_error(itp::rewrite_eq(*ps, eq_term, x, y, transport_gid, symm_gid, tm));
+        auto g = activate(); require_global(transport_gid, "rewrite transport lemma"); require_global(symm_gid, "rewrite symmetry lemma"); uint32_t sc = scope_of(tm); require_scoped(eq_term, sc, "rewrite eq_term"); require_scoped(x, sc, "rewrite x"); require_scoped(y, sc, "rewrite y"); raise_if_error(itp::rewrite_eq(*ps, eq_term, x, y, transport_gid, symm_gid, tm));
     }
     bool is_complete() { auto g = activate(); return itp::proof_complete(*ps); }
+    // The current proof term. While goals are open it contains holes (metavariables); check_open and declare_checked refuse such a term, so an unfinished proof can never be admitted.
     itp::NodeId extract() { auto g = activate(); return itp::extract_proof_term(root_meta_id); }
     std::size_t num_goals() const { return ps->goals.size(); }
     std::size_t num_pending() const { return ps->es.pending.size(); }   // deferred unification constraints
@@ -80,37 +98,37 @@ struct KernelWrapper {
     uint32_t loose_range_of(itp::NodeId t) { auto g = activate(); return itp::loose_range(t); }
     void set_option(const std::string& name, bool value) { auto g = activate(); if (name == "parameters") itp::ctx().param_mode = value; else if (name == "prop_elim") itp::ctx().prop_mode = value; else throw ITPError("unknown option: " + name); }
     bool get_option(const std::string& name) { auto g = activate(); if (name == "parameters") return itp::ctx().param_mode; if (name == "prop_elim") return itp::ctx().prop_mode; throw ITPError("unknown option: " + name); }
-    std::vector<int> param_slots(uint32_t family_gid) { auto g = activate(); std::vector<int> out; for (bool b : itp::family_param_slots(family_gid)) out.push_back(b ? 1 : 0); return out; }
+    std::vector<int> param_slots(uint32_t family_gid) { auto g = activate(); require_global(family_gid, "param_slots"); std::vector<int> out; for (bool b : itp::family_param_slots(family_gid)) out.push_back(b ? 1 : 0); return out; }
     itp::DiscriminationTree index_library() { auto g = activate(); return itp::index_library(); }
     std::vector<itp::NodeId> apply_candidates(ProofStateHandle& psh, const itp::DiscriminationTree& lib, std::optional<uint32_t> target_meta_id) {
         auto g = activate(); return itp::apply_candidates(*psh.ps, lib, target_meta_id);
     }
     ProofStateHandle start_proof(itp::NodeId goal_type) {
-        auto g = activate(); require_scoped(goal_type, 0, "goal type"); ProofStateHandle h; h.kernel = this;
+        auto g = activate(); require_scoped(goal_type, 0, "goal type"); require_meta_free(goal_type, "goal type"); ProofStateHandle h; h.kernel = this;
         *h.ps = itp::start_proof(goal_type); h.root_meta_id = h.ps->goals[0].meta_id; return h;
     }
-    itp::NodeId mk_type(uint32_t l) { auto g = activate(); return itp::mk_type(l); }
-    itp::NodeId mk_bvar(uint32_t i) { auto g = activate(); return itp::mk_bvar(i); }
-    itp::NodeId mk_fvar(uint32_t l) { auto g = activate(); return itp::mk_fvar(l); }
+    itp::NodeId mk_type(uint32_t l) { auto g = activate(); require_small(l, "universe level"); return itp::mk_type(l); }
+    itp::NodeId mk_bvar(uint32_t i) { auto g = activate(); require_small(i, "bound variable index"); return itp::mk_bvar(i); }
+    itp::NodeId mk_fvar(uint32_t l) { auto g = activate(); require_small(l, "context variable level"); return itp::mk_fvar(l); }
     itp::NodeId mk_app(itp::NodeId f, itp::NodeId a) { auto g = activate(); return itp::mk_app(f, a); }
     itp::NodeId mk_lambda(itp::NodeId t, itp::NodeId b) { auto g = activate(); return itp::mk_lambda(t, b); }
     itp::NodeId mk_pi(itp::NodeId d, itp::NodeId c) { auto g = activate(); return itp::mk_pi(d, c); }
     itp::NodeId mk_let(itp::NodeId t, itp::NodeId v, itp::NodeId b) { auto g = activate(); return itp::mk_let(t, v, b); }
-    itp::NodeId mk_const(uint32_t gid) { auto g = activate(); return itp::mk_const(gid); }
+    itp::NodeId mk_const(uint32_t gid) { auto g = activate(); require_global(gid, "mk_const"); return itp::mk_const(gid); }
     itp::NodeId mk_match(itp::NodeId s, itp::NodeId m, std::vector<itp::NodeId> bs) { auto g = activate(); return itp::mk_match(s, m, std::move(bs)); }
-    itp::NodeId mk_fix(itp::NodeId fn_type, uint32_t dec, itp::NodeId body) { auto g = activate(); return itp::mk_fix(fn_type, dec, body); }
+    itp::NodeId mk_fix(itp::NodeId fn_type, uint32_t dec, itp::NodeId body) { auto g = activate(); require_small(dec, "decreasing argument"); return itp::mk_fix(fn_type, dec, body); }
 
-    uint32_t reserve_inductive_type(const std::string& name, itp::NodeId sort) { auto g = activate(); require_scoped(sort, 0, "inductive sort"); return itp::reserve_inductive_type(name, sort); }
+    uint32_t reserve_inductive_type(const std::string& name, itp::NodeId sort) { auto g = activate(); require_scoped(sort, 0, "inductive sort"); require_meta_free(sort, "inductive sort"); return itp::reserve_inductive_type(name, sort); }
     itp::InductiveHandle finish_inductive(uint32_t tid, std::vector<itp::CtorSpec> ctors) { auto g = activate();
-        for (auto& c : ctors) { require_scoped_telescope(c.arg_types, "constructor field type"); for (auto r : c.result_indices) require_scoped(r, static_cast<uint32_t>(c.arg_types.size()), "constructor result index"); }
+        for (auto& c : ctors) { require_scoped_telescope(c.arg_types, "constructor field type"); for (auto a : c.arg_types) require_meta_free(a, "constructor field type"); for (auto r : c.result_indices) { require_scoped(r, static_cast<uint32_t>(c.arg_types.size()), "constructor result index"); require_meta_free(r, "constructor result index"); } }
         return itp::finish_inductive(tid, std::move(ctors)); }
-    uint32_t reserve_recursive_function(const std::string& name, itp::NodeId type) { auto g = activate(); return itp::reserve_recursive_function(name, type); }
-    void finish_recursive_function(uint32_t gid, uint32_t ind_gid, uint32_t dec, itp::NodeId body) { auto g = activate(); require_scoped(body, 0, "recursive function body"); itp::finish_recursive_function(gid, ind_gid, dec, body); }
-    uint32_t declare_unchecked(itp::NodeId type, std::optional<itp::NodeId> value, const std::string& name) { auto g = activate(); require_scoped(type, 0, "declared type"); if (value) require_scoped(*value, 0, "declared value"); return itp::declare_unchecked(type, value, name); }
+    uint32_t reserve_recursive_function(const std::string& name, itp::NodeId type) { auto g = activate(); require_scoped(type, 0, "function type"); require_meta_free(type, "function type"); return itp::reserve_recursive_function(name, type); }
+    void finish_recursive_function(uint32_t gid, uint32_t ind_gid, uint32_t dec, itp::NodeId body) { auto g = activate(); require_scoped(body, 0, "recursive function body"); require_meta_free(body, "recursive function body"); itp::finish_recursive_function(gid, ind_gid, dec, body); }
+    uint32_t declare_unchecked(itp::NodeId type, std::optional<itp::NodeId> value, const std::string& name) { auto g = activate(); require_scoped(type, 0, "declared type"); require_meta_free(type, "declared type"); if (value) { require_scoped(*value, 0, "declared value"); require_meta_free(*value, "declared value"); } return itp::declare_unchecked(type, value, name); }
 
     // ---- S2: checked declarations and the full typing core
     itp::InductiveHandle finish_inductive_unchecked(uint32_t tid, std::vector<itp::CtorSpec> ctors) { auto g = activate();
-        for (auto& c : ctors) { require_scoped_telescope(c.arg_types, "constructor field type"); for (auto r : c.result_indices) require_scoped(r, static_cast<uint32_t>(c.arg_types.size()), "constructor result index"); }
+        for (auto& c : ctors) { require_scoped_telescope(c.arg_types, "constructor field type"); for (auto a : c.arg_types) require_meta_free(a, "constructor field type"); for (auto r : c.result_indices) { require_scoped(r, static_cast<uint32_t>(c.arg_types.size()), "constructor result index"); require_meta_free(r, "constructor result index"); } }
         return itp::finish_inductive_unchecked(tid, std::move(ctors)); }
     uint32_t declare_checked(itp::NodeId type, itp::NodeId value, const std::string& name) {
         auto g = activate(); require_scoped(type, 0, "declared type"); require_scoped(value, 0, "declared value"); auto r = itp::declare_checked(type, value, name);
@@ -122,25 +140,32 @@ struct KernelWrapper {
         if (!r) throw ITPError(r.error().message);
     }
     std::pair<bool, nb::object> infer_open(itp::NodeId t, const std::vector<itp::NodeId>& hyp_types) {
-        auto g = activate(); itp::ElabCtx ec; itp::ElabState es;
+        auto g = activate(); require_scoped_telescope(hyp_types, "hypothesis type"); require_scoped(t, static_cast<uint32_t>(hyp_types.size()), "term"); itp::ElabCtx ec; itp::ElabState es;
         for (auto h : hyp_types) ec = ec.extend(h);
         auto r = itp::infer(t, ec, es);
         if (r) return {true, nb::cast(*r)};
         return {false, nb::cast(r.error().message)};
     }
-    std::pair<bool, std::string> check_open(itp::NodeId t, itp::NodeId expected, const std::vector<itp::NodeId>& hyp_types) {
-        auto g = activate(); require_scoped_telescope(hyp_types, "hypothesis type"); require_scoped(t, hyp_types.size(), "term"); require_scoped(expected, hyp_types.size(), "expected type"); itp::ElabCtx ec; itp::ElabState es;
+    // check_open is the VERIFICATION entry point (final proofs are re-checked with it): a hole must not pass for a proof, so no metavariable may occur anywhere.
+    // check_partial is the elaboration-time check: the same typing, but metavariables are allowed (the rule for ?m is "it has the type it was created with"), which is what
+    // "this partial proof, with its open goals as holes, is well typed" means.
+    std::pair<bool, std::string> check_open(itp::NodeId t, itp::NodeId expected, const std::vector<itp::NodeId>& hyp_types) { return check_impl(t, expected, hyp_types, false); }
+    std::pair<bool, std::string> check_partial(itp::NodeId t, itp::NodeId expected, const std::vector<itp::NodeId>& hyp_types) { return check_impl(t, expected, hyp_types, true); }
+    std::pair<bool, std::string> check_impl(itp::NodeId t, itp::NodeId expected, const std::vector<itp::NodeId>& hyp_types, bool allow_holes) {
+        auto g = activate(); require_scoped_telescope(hyp_types, "hypothesis type"); require_scoped(t, hyp_types.size(), "term"); require_scoped(expected, hyp_types.size(), "expected type");
+        if (!allow_holes) { for (auto h : hyp_types) require_meta_free(h, "hypothesis type"); require_meta_free(t, "term"); require_meta_free(expected, "expected type"); }
+        itp::ElabCtx ec; itp::ElabState es;
         for (auto h : hyp_types) ec = ec.extend(h);
         auto r = itp::check(t, expected, ec, es);
         if (r) return {true, "OK"};
         return {false, r.error().message};
     }
     // ---- S3: direct access to metas and unification (used by the unifier unit tests)
-    uint32_t fresh_meta(itp::NodeId type, uint32_t scope) { auto g = activate(); return itp::ctx().meta_ctx.fresh(type, scope); }
-    itp::NodeId mk_meta(uint32_t id) { auto g = activate(); return itp::mk_meta(id); }
-    bool meta_is_solved(uint32_t id) { auto g = activate(); return itp::ctx().meta_ctx.is_solved(id); }
+    uint32_t fresh_meta(itp::NodeId type, uint32_t scope) { auto g = activate(); require_small(scope, "meta scope"); require_scoped(type, scope, "meta type"); return itp::ctx().meta_ctx.fresh(type, scope); }
+    itp::NodeId mk_meta(uint32_t id) { auto g = activate(); require_meta(id, "mk_meta"); return itp::mk_meta(id); }
+    bool meta_is_solved(uint32_t id) { auto g = activate(); require_meta(id, "meta_is_solved"); return itp::ctx().meta_ctx.is_solved(id); }
     std::string meta_solution_raw(uint32_t id) {
-        auto g = activate(); auto sol = itp::ctx().meta_ctx[id].solution;
+        auto g = activate(); require_meta(id, "meta_solution_raw"); auto sol = itp::ctx().meta_ctx[id].solution;
         return sol ? dump_raw(*sol) : std::string("");
     }
     std::tuple<bool, std::string, uint32_t> unify_open(itp::NodeId a, itp::NodeId b, const std::vector<itp::NodeId>& hyp_types) {
@@ -157,22 +182,37 @@ struct KernelWrapper {
         return {static_cast<bool>(r), r ? std::string("OK") : r.error().message, static_cast<uint32_t>(es.pending.size())};
     }
     itp::NodeId close_telescope(const std::string& kind, const std::vector<itp::NodeId>& doms, itp::NodeId body, uint32_t base) {
-        auto g = activate();
+        auto g = activate(); require_small(base, "telescope base");
+        if (kind != "lam" && kind != "pi") throw ITPError("close_telescope: kind must be 'lam' or 'pi', not '" + kind + "'");
         return kind == "lam" ? itp::close_lambda_telescope(doms, body, base) : itp::close_pi_telescope(doms, body, base);
     }
     itp::Env fresh_env(uint32_t n0) { itp::Env env; for (uint32_t i = 0; i < n0; ++i) env = env.extend(itp::fresh_neutral(i)); return env; }
-    itp::NodeId normalize_open(itp::NodeId t, uint32_t n0) { auto g = activate(); require_scoped(t, n0, "term"); return itp::normalize(t, fresh_env(n0)); }
+    itp::NodeId normalize_open(itp::NodeId t, uint32_t n0) { auto g = activate(); require_small(n0, "context size"); require_scoped(t, n0, "term"); return itp::normalize(t, fresh_env(n0)); }
     bool conv_open(itp::NodeId a, itp::NodeId b, uint32_t n0) {
-        auto g = activate(); itp::Env env = fresh_env(n0);
+        auto g = activate(); require_small(n0, "context size"); require_scoped(a, n0, "lhs"); require_scoped(b, n0, "rhs"); itp::Env env = fresh_env(n0);
         return itp::conv_value(itp::eval(a, env), itp::eval(b, env), n0);
     }
     uint32_t loose_range(itp::NodeId t) { auto g = activate(); return itp::loose_range(t); }
-    itp::NodeId lift(itp::NodeId t, uint32_t d, uint32_t cutoff) { auto g = activate(); return itp::lift(t, d, cutoff); }
+    // Test hook for the release machinery: builds a chain of `depth` nested values ITERATIVELY (kind 0: one-argument constructors, a unary numeral; 1: an environment with `depth` bindings;
+    // 2: closures each capturing an environment that holds the previous closure) and then drops it. With a recursive destructor this overflows any stack long before a million levels;
+    // the trampoline in detail::run_release makes it a loop. Returns the depth, so the call cannot be optimised away.
+    uint64_t stress_value_release(uint32_t depth, int kind) {
+        auto g = activate();
+        if (kind == 0) { itp::Value v{itp::VCtor{0, 0, std::vector<itp::Value>{}}}; for (uint32_t i = 0; i < depth; ++i) v = itp::Value{itp::VCtor{0, 1, itp::SharedSeq<itp::Value>::of(std::move(v))}}; }
+        else if (kind == 1) { itp::Env e; for (uint32_t i = 0; i < depth; ++i) e = e.extend(itp::Value{itp::VType{0}}); }
+        else if (kind == 2) { itp::Value v{itp::VType{0}}; for (uint32_t i = 0; i < depth; ++i) { itp::Env e; e = e.extend(std::move(v)); v = itp::Value{itp::Closure{e, itp::NodeId{}, itp::NodeId{}}}; } }
+        else throw ITPError("stress_value_release: kind must be 0, 1 or 2");
+        return depth;
+    }
+    itp::NodeId lift(itp::NodeId t, uint32_t d, uint32_t cutoff) {
+        auto g = activate(); require_small(d, "lift amount"); require_small(cutoff, "lift cutoff");
+        if (static_cast<uint64_t>(itp::loose_range(t)) + d > itp::kMaxUniverseLevel) throw ITPError("lift: the result would have a bound variable index beyond the supported range");
+        return itp::lift(t, d, cutoff); }
     itp::NodeId instantiate(itp::NodeId t, const std::vector<itp::NodeId>& vals) { auto g = activate(); return itp::instantiate(t, vals); }
     itp::NodeId abstract_fvars(itp::NodeId t, const std::vector<uint32_t>& fvars) { auto g = activate(); return itp::abstract_fvars(t, fvars); }
     // Quotients: declares Quot, Quot.mk, Quot.lift, Quot.ind and Quot.sound with kernel-built types (see itp::declare_quot); eq_gid must be the standard equality family.
     std::tuple<uint32_t, uint32_t, uint32_t, uint32_t, uint32_t> declare_quot(uint32_t eq_gid) {
-        auto g = activate(); auto r = itp::declare_quot(eq_gid);
+        auto g = activate(); require_global(eq_gid, "declare_quot"); auto r = itp::declare_quot(eq_gid);
         if (!r) throw ITPError(r.error().message);
         return {r->type, r->mk, r->lift, r->ind, r->sound};
     }
@@ -304,6 +344,7 @@ NB_MODULE(itp_env_lnl, m) {
         .def("finish_recursive_function_checked", &KernelWrapper::finish_recursive_function_checked, "gid"_a, "ind_gid"_a, "decreasing_arg_level"_a, "body"_a)
         .def("infer_open", &KernelWrapper::infer_open, "term"_a, "hyp_types"_a)
         .def("check_open", &KernelWrapper::check_open, "term"_a, "expected"_a, "hyp_types"_a)
+        .def("check_partial", &KernelWrapper::check_partial, "term"_a, "expected"_a, "hyp_types"_a)
         .def("close_telescope", &KernelWrapper::close_telescope, "kind"_a, "doms"_a, "body"_a, "base"_a)
         .def("fresh_meta", &KernelWrapper::fresh_meta, "type"_a, "scope"_a)
         .def("mk_meta", &KernelWrapper::mk_meta, "id"_a)
@@ -314,6 +355,7 @@ NB_MODULE(itp_env_lnl, m) {
         .def("normalize_open", &KernelWrapper::normalize_open, "term"_a, "n0"_a)
         .def("conv_open", &KernelWrapper::conv_open, "a"_a, "b"_a, "n0"_a)
         .def("loose_range", &KernelWrapper::loose_range, "term"_a)
+        .def("stress_value_release", &KernelWrapper::stress_value_release, "depth"_a, "kind"_a)
         .def("lift", &KernelWrapper::lift, "term"_a, "d"_a, "cutoff"_a = 0)
         .def("instantiate", &KernelWrapper::instantiate, "term"_a, "vals"_a)
         .def("abstract_fvars", &KernelWrapper::abstract_fvars, "term"_a, "levels"_a)

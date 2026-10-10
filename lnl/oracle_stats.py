@@ -53,7 +53,7 @@ def run(N, seed, verbose=True, mode2_only=False, no_q=False, params=False, eq=Fa
             if op[0] == 'induct' and not mode2(hyps[op[1]]) and not eq: m1 = True      # with equations a concrete index is supported: nothing is attributed
             d = tot.setdefault(op[0], [0, 0, 0, 0, 0])      # [ok, ill-typed partial proof, ill-formed goals, skipped, attributed to F12]
             if ps.num_pending() > 0 or not goals_meta_free(knew, ps): d[3] += 1; continue
-            good = knew.check_open(ps.extract(), stmt, [])[0]; wf = goals_wellformed(knew, ps) if ps.num_goals() else True
+            good = knew.check_partial(ps.extract(), stmt, [])[0]; wf = goals_wellformed(knew, ps) if ps.num_goals() else True
             if good and wf: d[0] += 1
             elif m1: d[4] += 1
             else:

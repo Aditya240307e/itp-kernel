@@ -68,7 +68,7 @@ def strict_ok(L, stmt):
     from oracle_lib import goals_wellformed, goals_meta_free
     if L.psn.num_goals() and not goals_wellformed(L.knew, L.psn): return False
     if L.m1 or L.psn.num_pending() > 0 or not goals_meta_free(L.knew, L.psn): return True
-    return L.knew.check_open(L.psn.extract(), build_new(L.knew, l2h(stmt, 0)), [])[0]
+    return L.knew.check_partial(L.psn.extract(), build_new(L.knew, l2h(stmt, 0)), [])[0]      # the proof so far, holes allowed
 
 F10_STATS = {'validated': 0, 'unvalidated_metas': 0}
 def tree_state_wellformed(k, states):
@@ -228,7 +228,7 @@ def test_conv_termination():
         if op[0] == 'intro': ps.intro('x')
         elif op[0] == 'induct': ps.induct(op[1])
         else: ps.apply(build_new(knew, op[1]))
-    ok, msg = knew.check_open(ps.extract(), stmt, [])          # used to segfault (unbounded conv_value/branches_convertible recursion)
+    ok, msg = knew.check_partial(ps.extract(), stmt, [])          # (a partial proof: holes allowed) used to segfault (unbounded conv_value/branches_convertible recursion)
     return ok, msg
 
 def test_field_after_ih():

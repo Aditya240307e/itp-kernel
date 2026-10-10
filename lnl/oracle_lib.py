@@ -3,7 +3,7 @@ from harness import *
 
 def is_type(k, tree, ctxs):
     node = build_new(k, tree)
-    return any(k.check_open(node, build_new(k, ('type', lvl)), ctxs)[0] for lvl in range(4))
+    return any(k.check_partial(node, build_new(k, ('type', lvl)), ctxs)[0] for lvl in range(4))
 
 def metas_in(tree, out):
     if isinstance(tree, tuple):

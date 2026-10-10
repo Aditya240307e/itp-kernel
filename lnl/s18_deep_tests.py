@@ -12,7 +12,7 @@ test failure with a name instead of a dead gate:
 Never a crash, never a hang, never a wrong answer."""
 import sys, os, subprocess, threading, time
 HERE = os.path.dirname(os.path.abspath(__file__))
-SHAPES = ['numeral', 'neutral', 'lambda', 'pi', 'let', 'match', 'beta', 'spine']
+SHAPES = ['numeral', 'neutral', 'lambda', 'pi', 'let', 'match', 'beta', 'spine', 'release']
 N_SMALL, N_BIG = 150000, 30000
 
 def child(shape, mode):
@@ -54,6 +54,9 @@ def child(shape, mode):
         for _ in range(n // 100): ft = k.mk_pi(NAT, ft)
         spine_f = k.declare_unchecked(ft, None, 'deep_f'); t = k.mk_const(spine_f)
         for _ in range(n // 100): t = app(t, Z)
+    if shape == 'release':
+        # values built iteratively (so nothing recurses on the way IN) and dropped: freeing them must not recurse either. A million levels is far beyond any stack.
+        t = Z
     results = []
     def op(name, f):
         t_op = time.perf_counter()
@@ -63,6 +66,10 @@ def child(shape, mode):
         print("%s %s" % (name, results[-1][1]), flush=True)
         if os.environ.get('S18_TIMES'): print("   %-16s %8.0f ms" % (name, (time.perf_counter() - t_op) * 1e3), file=sys.stderr, flush=True)
     def run():
+        if shape == 'release':
+            for kind, what in ((0, 'ctor chain'), (1, 'environment'), (2, 'closure chain')):
+                op('release ' + what.replace(' ', '_'), lambda kind=kind: k.stress_value_release(1_000_000, kind))
+            return
         op('infer', lambda: k.infer_open(t, []))
         op('normalize', lambda: k.normalize_open(t, 0))
         op('lift', lambda: k.lift(t, 1))
@@ -103,7 +110,8 @@ def main():
             if 'AFTER ok' not in lines: fails.append("%s/%s: the kernel was broken after the deep work" % (mode, shape))
             stack = [l for l in lines if l.endswith(' stack')]; errs = [l for l in lines if l.endswith(' error')]; oks = [l for l in lines if l.endswith(' ok') and not l.startswith('AFTER')]
             if mode == 'big' and stack: fails.append("%s/%s: stack exhausted on a term the raised limit should allow: %s" % (mode, shape, stack))
-            if mode == 'small' and not stack: fails.append("%s/%s: nothing overflowed -- the term is not deep enough to test the guard" % (mode, shape))
+            if mode == 'small' and not stack and shape != 'release': fails.append("%s/%s: nothing overflowed -- the term is not deep enough to test the guard" % (mode, shape))
+            if shape == 'release' and (len(oks) != 3 or stack or errs): fails.append("%s/%s: dropping a deep value chain did not simply succeed: ok %d, stack %d, errors %d" % (mode, shape, len(oks), len(stack), len(errs)))
             print("   %-5s %-8s ok %2d  stack-guard %2d  other-error %2d" % (mode, shape, len(oks), len(stack), len(errs)), flush=True)
             for e in errs:
                 if mode == 'big' and shape in ('numeral', 'neutral', 'match', 'beta', 'let') and e.split()[0] in ('infer', 'normalize', 'conv', 'check', 'declare_checked', 'check_refl', 'tactic_refl', 'unify'):

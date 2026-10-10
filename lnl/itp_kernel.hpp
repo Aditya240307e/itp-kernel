@@ -71,8 +71,13 @@ inline void refresh_stack_floor() { stack_floor_slot() = nullptr; }
     }
     if (sp < slot) throw StackExhausted();
 }
-#define ITP_STACK_CHECK() do { char itp_sp_marker_; const char* itp_sp_ = &itp_sp_marker_; \
+// The frame address, not the address of a local: under AddressSanitizer's fake stacks (use-after-return detection) a local lives on the heap and
+// its address would be compared with the real stack's floor.
+#define ITP_STACK_CHECK() do { const char* itp_sp_ = static_cast<const char*>(__builtin_frame_address(0)); \
     if (__builtin_expect(itp_sp_ < ::itp::stack_floor_slot() || !::itp::stack_floor_slot(), 0)) ::itp::stack_check_slow(itp_sp_); } while (0)
+
+/// Universe levels, bound-variable indices and context levels are 32-bit; anything above this is rejected at the API boundary, so that `l + 1`, `index + d` etc. cannot wrap around.
+constexpr uint32_t kMaxUniverseLevel = uint32_t{1} << 30;
 
 // ---------------------------------------------------------------------------
 // Term representation
@@ -802,6 +807,11 @@ struct GlobalDef {
     // ends in a sort, or Quot -- is NOT inductive: treating it as one would make a branchless match on any of its inhabitants a proof of
     // False (finding F26).
     bool is_inductive = false;
+    // Between reserve_inductive_type / reserve_recursive_function and the matching finish_*: the global exists (so that constructor types and function bodies can refer to it) but has no
+    // constructors / body yet. finish_* demands the right state and clears it, so a finished type can never be given more constructors (which would make every Match on it, and every
+    // theorem proved by cases on it, wrong) and a finished or ordinary global can never be given a different body.
+    enum class Reserved : uint8_t { None, Inductive, Function };
+    Reserved reserved = Reserved::None;
     // The evaluated value of `value` (see eval(Const)). Evaluating a definition re-ran its whole body at every reference -- including every proof used as an
     // argument. Filled lazily by eval, dropped by GlobalEnv::invalidate_value_caches() whenever any definition's body is installed, replaced or rolled back.
     mutable std::shared_ptr<const struct CachedValue> cached_value;
@@ -1650,28 +1660,8 @@ struct VPi {
     NodeId cod_id;
 };
 
-/// A fully saturated constructor application.
-///
-/// A custom destructor is required here, not the compiler-generated
-/// default: `args` can itself contain another VCtor (a long list or a
-/// large unary number, once evaluated into actual Values rather than
-/// left as syntax, is a genuine chain of VCtors each owning the next by
-/// value). The default recursive destructor -- each VCtor's destruction
-/// destroying its args vector, which destroys the nested VCtor, which
-/// destroys ITS args, and so on -- walks that chain one C++ stack frame
-/// per element. Confirmed by direct measurement, not just argument: a
-/// 100,000-deep chain survives destruction; a 500,000-deep one segfaults,
-/// specifically during destruction and not during construction or
-/// evaluation (those were tested and ruled out separately). The fix
-/// flattens the chain into an explicit, heap-allocated worklist and
-/// destroys it iteratively instead of relying on the C++ call stack.
-///
-/// This addresses VCtor chains specifically, which is the common,
-/// naturally-arising case (any inductively-defined data value more than
-/// trivially deep is represented this way). It does not address every
-/// theoretically possible route to a similar cascade; if a workload is
-/// ever found that stresses one, it would need the same treatment,
-/// applied there specifically.
+/// A fully saturated constructor application. `args` is a SharedSeq: copying a VCtor copies a pointer, and a long chain (a unary numeral n deep is n nested VCtors)
+/// is freed iteratively by detail::run_release, not by n nested destructor calls (a 500,000-deep chain used to segfault during destruction).
 struct VCtor {
     uint32_t ind_type_global_id;
     uint32_t ctor_idx;
@@ -1742,10 +1732,7 @@ inline uint32_t Env::size() const { return top.p ? top.p->depth : 0; }
 
 inline const Value& Env::operator[](uint32_t level) const {
     const uint32_t target = level + 1;
-    if (!top.p || target > top.p->depth) {
-        std::fprintf(stderr, "DBG Env::operator[] OUT OF BOUNDS: level=%u count=%u\n", level, size());
-        std::abort();
-    }
+    if (!top.p || target > top.p->depth) throw std::logic_error("itp: variable out of scope (level " + std::to_string(level) + " in an environment of " + std::to_string(size()) + "): an ill-scoped term reached the evaluator");
     const EnvCell* c = top.p;
     while (c->depth > target) {
         const EnvCell* j = c->jump.p;
@@ -2982,6 +2969,16 @@ inline bool occurs_meta(uint32_t meta_id, NodeId t) {
     if (t.tag == NodeType::META) return ctx().metas[t.index].meta_id == meta_id;
     return any_child(t, [&](NodeId c) { return occurs_meta(meta_id, c); });
 }
+/// Does the term mention ANY metavariable (solved or not)? Linear in the size of the DAG: each shared node is visited once.
+inline bool contains_meta_rec(NodeId t, std::unordered_set<uint64_t>& seen) {
+    ITP_STACK_CHECK();
+    if (t.tag == NodeType::META) return true;
+    if (!seen.insert((static_cast<uint64_t>(static_cast<uint32_t>(t.tag)) << 32) | t.index).second) return false;
+    return any_child(t, [&](NodeId c) { return contains_meta_rec(c, seen); });
+}
+inline bool contains_meta(NodeId t) { std::unordered_set<uint64_t> seen; return contains_meta_rec(t, seen); }
+/// Number of leading lambdas of a body: the function's own parameters, one of which must be the decreasing argument.
+inline uint32_t lambda_arity(NodeId t) { uint32_t n = 0; while (t.tag == NodeType::LAMBDA) { ++n; t = ctx().lambdas[t.index].body_id; } return n; }
 /// ?m x_{l0} .. x_{lk} =?= other  (distinct context variables): the solution is the closed lambda over the spine variables.
 /// The spine must be in dependency order (a spine variable's type may mention only EARLIER spine variables); the reference
 /// silently assumed this, here it is checked.
@@ -3868,6 +3865,10 @@ inline std::optional<std::size_t> find_goal_index(const ProofState& ps, std::opt
 /// around a tactic-layer bug this function's own trust boundary exists
 /// to provide.
 inline std::expected<uint32_t, TypeError> declare_checked(NodeId type, NodeId value, std::string name) {
+    // A metavariable is a HOLE: the typing rule for one is "it has the type it was created with", so an unsolved ?m : False would be accepted as a proof of False (and a solved
+    // one means whatever its solution happens to be at the moment, which a rewind can change). A declaration is closed and meta-free: callers extract/instantiate first.
+    if (detail::contains_meta(type) || detail::contains_meta(value))
+        return std::unexpected(TypeError{TypeErrorKind::Other, value, std::nullopt, "a declaration may not contain metavariables (instantiate or finish the proof first)"});
     ElabState es;
     ElabCtx empty_ec;
     ElabResult r = check(value, type, empty_ec, es);
@@ -4162,7 +4163,9 @@ inline bool is_strictly_positive(uint32_t ind_type_global_id, NodeId arg_type) {
 /// the inductive's own global id, which does not exist until the
 /// inductive has been at least partially declared.
 inline uint32_t reserve_inductive_type(const std::string& name, NodeId sort) {
-    return ctx().globals.declare(sort, std::nullopt, name);
+    uint32_t gid = ctx().globals.declare(sort, std::nullopt, name);
+    ctx().globals.defs[gid].reserved = GlobalDef::Reserved::Inductive;
+    return gid;
 }
 
 /// Admission checks for an inductive declaration (Finding F1). Run by finish_inductive and
@@ -4732,12 +4735,36 @@ struct MutualFnTarget {
     uint32_t decreasing_arg_level;
 };
 
+namespace detail {
+/// Why `fn_gid` cannot be given `body` as a recursive function over `ind_gid` decreasing in argument `dec` -- or nullopt when it can. Every ID here comes from outside (Python), and the
+/// kernel indexes with them: they are validated before anything is looked up.
+inline std::optional<std::string> recursive_function_problem(uint32_t fn_gid, uint32_t ind_gid, uint32_t dec, NodeId body) {
+    const auto& defs = ctx().globals.defs;
+    if (fn_gid >= defs.size()) return "unknown function id " + std::to_string(fn_gid);
+    if (defs[fn_gid].reserved != GlobalDef::Reserved::Function)
+        return "global '" + defs[fn_gid].name + "' is not a reserved, unfinished recursive function (reserve_recursive_function first; a function is finished once)";
+    if (ind_gid >= defs.size() || !defs[ind_gid].is_inductive) return "the recursion is over global " + std::to_string(ind_gid) + ", which is not a finished inductive type";
+    if (dec >= lambda_arity(body)) return "the decreasing argument " + std::to_string(dec) + " is not one of the function's own parameters (the body has " + std::to_string(lambda_arity(body)) + ")";
+    if (contains_meta(body)) return "a function body may not contain metavariables";
+    return std::nullopt;
+}
+/// Throws unless `tid` names an inductive type that was reserved and not yet finished.
+inline void require_reserved_inductive(uint32_t tid) {
+    const auto& defs = ctx().globals.defs;
+    if (tid >= defs.size()) throw std::logic_error("itp: finish_inductive: unknown global id " + std::to_string(tid));
+    if (defs[tid].reserved != GlobalDef::Reserved::Inductive)
+        throw std::logic_error("itp: finish_inductive: global '" + defs[tid].name + "' is not a reserved, unfinished inductive type (a finished type cannot be given more constructors)");
+}
+} // namespace detail
+
 /// Reserves a global id for a recursive function before its body is
 /// supplied, mirroring reserve_inductive_type: the body needs to
 /// reference the function's own global id, which does not exist until it
 /// has been at least partially declared.
 inline uint32_t reserve_recursive_function(const std::string& name, NodeId type) {
-    return ctx().globals.declare(type, std::nullopt, name);
+    uint32_t gid = ctx().globals.declare(type, std::nullopt, name);
+    ctx().globals.defs[gid].reserved = GlobalDef::Reserved::Function;
+    return gid;
 }
 
 /// Checked counterpart of finish_recursive_function: guardedness alone
@@ -4753,6 +4780,8 @@ inline uint32_t reserve_recursive_function(const std::string& name, NodeId type)
 inline std::expected<void, TypeError> finish_recursive_function_checked(
         uint32_t fn_gid, uint32_t ind_type_global_id, uint32_t decreasing_arg_level, NodeId body,
         bool allow_unsafe_skip_guard_check = false) {
+    if (auto problem = detail::recursive_function_problem(fn_gid, ind_type_global_id, decreasing_arg_level, body))
+        return std::unexpected(TypeError{TypeErrorKind::Other, body, std::nullopt, *problem});
     if (!allow_unsafe_skip_guard_check) {
         if (!is_structurally_decreasing(fn_gid, ind_type_global_id, decreasing_arg_level, to_levels(body, 0))) {
             return std::unexpected(TypeError{TypeErrorKind::Other, body, std::nullopt,
@@ -4773,6 +4802,7 @@ inline std::expected<void, TypeError> finish_recursive_function_checked(
     }
     ctx().globals.defs[fn_gid].recursive_info =
         RecursiveFnInfo{ind_type_global_id, decreasing_arg_level, allow_unsafe_skip_guard_check};
+    ctx().globals.defs[fn_gid].reserved = GlobalDef::Reserved::None;
     return {};
 }
 
@@ -4858,6 +4888,7 @@ inline void record_prop_elim_restriction(uint32_t type_gid, const std::vector<Ct
     if (!subsingleton) ctx().prop_elim_only.insert(type_gid);
 }
 inline InductiveHandle finish_inductive_unchecked(uint32_t type_global_id, std::vector<CtorSpec> ctors) {
+    detail::require_reserved_inductive(type_global_id);
     ExecutionContext& c = ctx();
     InductiveHandle handle; handle.type_global_id = type_global_id;
     for (std::size_t idx = 0; idx < ctors.size(); ++idx) {
@@ -4867,9 +4898,12 @@ inline InductiveHandle finish_inductive_unchecked(uint32_t type_global_id, std::
     }
     record_prop_elim_restriction(type_global_id, ctors);
     c.globals.defs[type_global_id].is_inductive = true;
+    c.globals.defs[type_global_id].reserved = GlobalDef::Reserved::None;
     return handle;
 }
 inline void finish_recursive_function(uint32_t fn_gid, uint32_t ind_type_global_id, uint32_t decreasing_arg_level, NodeId body, bool = false) {
+    if (auto problem = detail::recursive_function_problem(fn_gid, ind_type_global_id, decreasing_arg_level, body)) throw std::logic_error("itp: finish_recursive_function: " + *problem);
+    ctx().globals.defs[fn_gid].reserved = GlobalDef::Reserved::None;
     ctx().globals.defs[fn_gid].value = body;
     ctx().globals.invalidate_value_caches();
     ctx().globals.defs[fn_gid].recursive_info = RecursiveFnInfo{ind_type_global_id, decreasing_arg_level, true};
@@ -5205,7 +5239,11 @@ inline TypeResult infer(NodeId t, ElabCtx& ec, ElabState& es) {
             return ec.types[v.n];
         }
         case NodeType::CONST: return ctx().globals[ctx().consts[t.index].global_id].type;
-        case NodeType::TYPE: return mk_type(ctx().types[t.index].universe_level + 1);
+        case NodeType::TYPE: {
+            // `Type l : Type (l+1)` -- and the successor must not wrap around: in 32-bit arithmetic Type 4294967295 would get the type Type 0, a universe that contains itself (Girard).
+            if (ctx().types[t.index].universe_level >= kMaxUniverseLevel) return err(TypeErrorKind::Other, t, "universe level too large: it has no successor");
+            return mk_type(ctx().types[t.index].universe_level + 1);
+        }
         case NodeType::META: return ctx().meta_ctx[ctx().metas[t.index].meta_id].type;
         case NodeType::TYPE_UNIV: return err(TypeErrorKind::Other, t, "TypeUniv is elaborator-internal and not meaningful as a standalone infer target");
         case NodeType::APP: {
@@ -5370,6 +5408,7 @@ inline ElabResult check(NodeId t, NodeId expected_ty, ElabCtx& ec, ElabState& es
 
 /// Checked inductive declaration: strict positivity + admission (typed fields/indices, universe rule), then constructors.
 inline InductiveHandle finish_inductive(uint32_t type_global_id, std::vector<CtorSpec> ctors, bool allow_unsafe_skip_positivity) {
+    detail::require_reserved_inductive(type_global_id);        // before the admission checks look anything up by this id
     if (!allow_unsafe_skip_positivity) {
         for (const auto& ctor : ctors)
             for (NodeId arg_ty : ctor.arg_types)
@@ -5442,7 +5481,6 @@ inline ElabResult exact(ProofState& ps, NodeId term, std::optional<uint32_t> tar
 }
 
 inline ElabResult apply(ProofState& ps, NodeId candidate, std::optional<uint32_t> target_meta_id = std::nullopt) {
-    ITP_STACK_CHECK();
     auto idx_opt = find_goal_index(ps, target_meta_id);
     if (!idx_opt) return no_goal_error("apply", target_meta_id);
     Goal g = ps.goals[*idx_opt]; // copy: only committed to ps.goals on success

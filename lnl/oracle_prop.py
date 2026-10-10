@@ -62,7 +62,7 @@ def run(N, seed, eq=True):
                 ps = o.replay(k, g, stmt, ops, eq); rebuilds += 1; continue
             ops.append(op); d = tot.setdefault(op[0], [0, 0, 0, 0])      # [ok, ill-typed partial proof, ill-formed goals, skipped]
             if ps.num_pending() > 0 or not goals_meta_free(k, ps): d[3] += 1; continue
-            good = k.check_open(ps.extract(), stmt, [])[0]; wf = goals_wellformed(k, ps) if ps.num_goals() else True
+            good = k.check_partial(ps.extract(), stmt, [])[0]; wf = goals_wellformed(k, ps) if ps.num_goals() else True
             if good and wf: d[0] += 1
             else:
                 d[1] += (not good); d[2] += (not wf)

@@ -1,7 +1,7 @@
 """Mutation testing of the S2 typing core: each mutant re-breaks one rule in an isolated copy; the test suite must FAIL."""
 import os, re, shutil, subprocess, sys, tempfile, time
 SRC = os.path.dirname(os.path.abspath(__file__))
-PY_ROOT = os.path.dirname(SRC)
+PY_ROOT = os.environ.get('ITP_PY_ROOT', os.path.dirname(SRC))
 REF_DIR = os.environ.get('ITP_REF_DIR', os.path.join(os.path.dirname(PY_ROOT), 'itp_ref'))
 def gate_env(lnl_dir, **extra):   # one place that says where the three source trees live, for the baseline and for every mutant copy
     return dict(os.environ, LNL_DIR=lnl_dir, ITP_PY_ROOT=PY_ROOT, ITP_REF_DIR=REF_DIR, PYTHONPATH=os.pathsep.join([REF_DIR, PY_ROOT, lnl_dir]), **extra)
@@ -129,7 +129,7 @@ MUTANTS = {
  'C8 checker: eta is not applied (a lambda against a non-lambda)': ("        if (ka == 'lam') != (kb == 'lam'):                  # eta:", "        if False and (ka == 'lam') != (kb == 'lam'):                  # eta:", 'indep_checker.py'),
 }
 # Order matters only for speed (a mutant stops at the first gate that fails): fast, high-yield gates first, the 25-second oracle last.
-GATE_CMDS = (['s2_tests.py', '1500'], ['s16_quot_tests.py'], ['s17_irrelevance_tests.py'], ['s18_deep_tests.py'], ['harness.py', '1500', '3'], ['s3_tests.py', '600'], ['s4_tests.py', '800'], ['s5_tests.py', '1200', '3'], ['s5_probe_tests.py', '500', '7'], ['s6_logic_tests.py'], ['s6_f6_tests.py'],
+GATE_CMDS = (['s2_tests.py', '1500'], ['s16_quot_tests.py'], ['s17_irrelevance_tests.py'], ['s18_deep_tests.py'], ['s19_boundary_tests.py'], ['harness.py', '1500', '3'], ['s3_tests.py', '600'], ['s4_tests.py', '800'], ['s5_tests.py', '1200', '3'], ['s5_probe_tests.py', '500', '7'], ['s6_logic_tests.py'], ['s6_f6_tests.py'],
              ['s7_param_tests.py', '150', '600'], ['s8_indep_tests.py', '100'], ['s9_strong_tests.py'], ['s10_noconf_tests.py'], ['s11_eqgen_tests.py'], ['s12_probe_eq_tests.py', '150'], ['s13_prop_tests.py'],
              ['s14_prop_world_tests.py', '600'], ['s15_classical_tests.py', '300'], ['oracle_gate.py'])
 # a gate has failed when it exits non-zero or prints one of these markers

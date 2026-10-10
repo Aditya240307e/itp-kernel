@@ -189,6 +189,7 @@ def main() -> int:
 
     cmd = [
         cxx, std_flag, "-O2", "-fPIC", "-pthread", *isolation_flags(cxx),
+        *os.environ.get("ITP_EXTRA_CXXFLAGS", "").split(),      # e.g. "-fsanitize=address,undefined -O1 -g" for the sanitizer build (see sanitize.sh)
         f"-I{include_dir}", f"-I{robin_map_dir}", f"-I{py_include}", f"-I{HERE}",
         *shared_lib_flags(),
         str(HERE / "itp_bindings.cpp"), str(source_dir / "nb_combined.cpp"),
