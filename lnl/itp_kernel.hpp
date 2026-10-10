@@ -51,7 +51,7 @@ namespace itp {
 // which pool it refers to.
 
 enum class NodeType : uint32_t { VAR, APP, LAMBDA, PI, TYPE, CONST, MATCH,
-                                  META, TYPE_UNIV, QUOT_TYPE, QUOT_MK, QUOT_LIFT, LET, FIX };
+                                  META, TYPE_UNIV, LET, FIX };
 
 /// A handle to an interned term node: a type tag and an index into the
 /// corresponding pool. Trivially copyable and intended to be passed by
@@ -214,42 +214,6 @@ struct TypeUniv {
     friend bool operator==(TypeUniv, TypeUniv) = default;
 };
 
-/// The quotient type former, `Quot r` for a relation `r`. Modeled as a
-/// single generic node kind reused for every quotient a consumer builds,
-/// the same way Match is reused for every inductive rather than each
-/// getting its own node kind.
-struct QuotType {
-    NodeId relation;
-    friend bool operator==(QuotType, QuotType) = default;
-};
-
-/// The quotient introduction form, `Quot.mk r a`.
-struct QuotMk {
-    NodeId relation;
-    NodeId elem;
-    friend bool operator==(QuotMk, QuotMk) = default;
-};
-
-/// The quotient eliminator, `Quot.lift f h q`: lifts a function `f` that
-/// respects `relation` (as witnessed by `respects_proof`) to a function
-/// out of the quotient. `codomain` is retained for faithful
-/// reconstruction by quote() but, like Match's motive, is not consulted
-/// during reduction. The computation rule -- `Quot.lift f h (Quot.mk r a)`
-/// reduces to `f a` -- does not need `respects_proof` either; it exists
-/// purely for typechecking, which is left to the consumer. `Quot.sound`
-/// (the axiom making Quot.mk r a and Quot.mk r b propositionally equal
-/// when r a b holds) needs no dedicated node kind at all -- it is an
-/// ordinary opaque axiom a consumer declares once, typically via
-/// declare_polymorphic below, since it does not compute.
-struct QuotLift {
-    NodeId relation;
-    NodeId codomain;
-    NodeId f;
-    NodeId respects_proof;
-    NodeId quotient_elem;
-    friend bool operator==(QuotLift, QuotLift) = default;
-};
-
 /// A LOCAL fixpoint: `fix (self : fn_type) := body`, decreasing on
 /// argument position `decreasing_arg` of `fn_type`'s own Pi telescope.
 /// This is the local, proof-term-scoped counterpart of a global
@@ -273,8 +237,8 @@ struct QuotLift {
 /// extend the ambient context by one for it.
 ///
 /// `decreasing_arg` is not inspected by eval() at all (mirroring
-/// `Match::motive_id` and `QuotLift::codomain`, which are retained for
-/// faithful reconstruction/printing but never consulted during ordinary
+/// `Match::motive_id`, which is retained for faithful
+/// reconstruction/printing but never consulted during ordinary
 /// reduction) -- it exists purely for is_locally_structurally_decreasing
 /// to check once, at Induct-tactic-acceptance time.
 struct Fix {
@@ -379,20 +343,6 @@ struct std::hash<itp::Meta> {
 template <>
 struct std::hash<itp::TypeUniv> {
     std::size_t operator()(itp::TypeUniv t) const noexcept { return itp::hash_fields(t.param_index); }
-};
-template <>
-struct std::hash<itp::QuotType> {
-    std::size_t operator()(itp::QuotType q) const noexcept { return itp::hash_fields(q.relation); }
-};
-template <>
-struct std::hash<itp::QuotMk> {
-    std::size_t operator()(itp::QuotMk q) const noexcept { return itp::hash_fields(q.relation, q.elem); }
-};
-template <>
-struct std::hash<itp::QuotLift> {
-    std::size_t operator()(itp::QuotLift q) const noexcept {
-        return itp::hash_fields(q.relation, q.codomain, q.f, q.respects_proof, q.quotient_elem);
-    }
 };
 template <>
 struct std::hash<itp::Fix> {
@@ -996,9 +946,6 @@ struct ExecutionContext {
     NodePool<Match>    matches;
     NodePool<Meta>     metas;
     NodePool<TypeUniv> type_univs;
-    NodePool<QuotType> quot_types;
-    NodePool<QuotMk>   quot_mks;
-    NodePool<QuotLift> quot_lifts;
     NodePool<Fix>      fixes;
     GlobalEnv          globals;
     MetaContext        meta_ctx;
@@ -1062,15 +1009,13 @@ struct ExecutionContext {
             {"pis", pis.size(), pis.capacity()},             {"types", types.size(), types.capacity()},
             {"consts", consts.size(), consts.capacity()},    {"matches", matches.size(), matches.capacity()},
             {"metas", metas.size(), metas.capacity()},       {"type_univs", type_univs.size(), type_univs.capacity()},
-            {"quot_types", quot_types.size(), quot_types.capacity()}, {"quot_mks", quot_mks.size(), quot_mks.capacity()},
-            {"quot_lifts", quot_lifts.size(), quot_lifts.capacity()}, {"fixes", fixes.size(), fixes.capacity()},
+            {"fixes", fixes.size(), fixes.capacity()},
         };
     }
 
     struct Checkpoint {
         uint32_t vars_n, apps_n, lambdas_n, lets_n, pis_n, types_n, consts_n,
-                 matches_n, metas_n, type_univs_n, quot_types_n, quot_mks_n,
-                 quot_lifts_n, fixes_n;
+                 matches_n, metas_n, type_univs_n, fixes_n;
         MetaContext::Mark meta_mark;
         std::size_t globals_n; // safety check only; globals itself is never rewound
     };
@@ -1078,8 +1023,7 @@ struct ExecutionContext {
     Checkpoint checkpoint() const {
         return Checkpoint{
             vars.size(), apps.size(), lambdas.size(), lets.size(), pis.size(), types.size(),
-            consts.size(), matches.size(), metas.size(), type_univs.size(), quot_types.size(),
-            quot_mks.size(), quot_lifts.size(), fixes.size(),
+            consts.size(), matches.size(), metas.size(), type_univs.size(), fixes.size(),
             meta_ctx.checkpoint(), globals.defs.size()
         };
     }
@@ -1127,9 +1071,6 @@ struct ExecutionContext {
         matches.rewind(cp.matches_n);
         metas.rewind(cp.metas_n);
         type_univs.rewind(cp.type_univs_n);
-        quot_types.rewind(cp.quot_types_n);
-        quot_mks.rewind(cp.quot_mks_n);
-        quot_lifts.rewind(cp.quot_lifts_n);
         fixes.rewind(cp.fixes_n);
         meta_ctx.rewind(cp.meta_mark);
     }
@@ -1256,21 +1197,11 @@ inline NodeId mk_meta(uint32_t meta_id) {
 inline NodeId mk_type_univ(uint32_t param_index) {
     return NodeId{NodeType::TYPE_UNIV, ctx().type_univs.intern(TypeUniv{param_index})};
 }
-inline NodeId mk_quot_type(NodeId relation) {
-    return NodeId{NodeType::QUOT_TYPE, ctx().quot_types.intern(QuotType{relation})};
-}
-inline NodeId mk_quot_mk(NodeId relation, NodeId elem) {
-    return NodeId{NodeType::QUOT_MK, ctx().quot_mks.intern(QuotMk{relation, elem})};
-}
-inline NodeId mk_quot_lift(NodeId relation, NodeId codomain, NodeId f, NodeId respects_proof, NodeId quotient_elem) {
-    return NodeId{NodeType::QUOT_LIFT,
-                  ctx().quot_lifts.intern(QuotLift{relation, codomain, f, respects_proof, quotient_elem})};
-}
 inline NodeId mk_fix(NodeId fn_type, uint32_t decreasing_arg, NodeId body) {
     return NodeId{NodeType::FIX, ctx().fixes.intern(Fix{fn_type, decreasing_arg, body})};
 }
 
-using Term = std::variant<Var, App, Lambda, Let, Pi, Type, Const, Match, Meta, TypeUniv, QuotType, QuotMk, QuotLift, Fix>;
+using Term = std::variant<Var, App, Lambda, Let, Pi, Type, Const, Match, Meta, TypeUniv, Fix>;
 
 inline Term realize(NodeId id) {
     switch (id.tag) {
@@ -1284,9 +1215,6 @@ inline Term realize(NodeId id) {
         case NodeType::MATCH:     return Term{ctx().matches[id.index]};
         case NodeType::META:      return Term{ctx().metas[id.index]};
         case NodeType::TYPE_UNIV: return Term{ctx().type_univs[id.index]};
-        case NodeType::QUOT_TYPE: return Term{ctx().quot_types[id.index]};
-        case NodeType::QUOT_MK:   return Term{ctx().quot_mks[id.index]};
-        case NodeType::QUOT_LIFT: return Term{ctx().quot_lifts[id.index]};
         case NodeType::FIX:       return Term{ctx().fixes[id.index]};
     }
     std::unreachable();
@@ -1346,24 +1274,16 @@ auto inspect(NodeId a, NodeId b, Visitors... vs) {
 // holds EliminatorFrames, and an ApplyFrame holds a Value. This is
 // resolved with the usual forward-declare / alias / define-in-dependency-
 // order idiom: the alternatives of Value (VType, Closure, VNeutral, VPi,
-// VCtor, VQuotType, VQuotMk) must all be fully defined before ApplyFrame
+// VCtor, VFix) must all be fully defined before ApplyFrame
 // is defined, since ApplyFrame holds a Value by value and therefore
 // requires Value to be a complete type at that point.
-//
-// VQuotType and VQuotMk need a Value themselves (the relation, and for
-// VQuotMk the wrapped element) but, unlike ApplyFrame, they are
-// THEMSELVES alternatives of Value -- holding a Value directly would
-// require Value complete while Value's own alternative list is still
-// being assembled, which is circular. shared_ptr<Value> tolerates the
-// incomplete type as a member the same way vector<Value> does elsewhere,
-// so that indirection is used for exactly these two structs.
 
 struct Closure; struct VNeutral; struct VPi; struct VType; struct VCtor;
-struct VQuotType; struct VQuotMk; struct VFix;
-struct ApplyFrame; struct MatchFrame; struct QuotLiftFrame;
+struct VFix;
+struct ApplyFrame; struct MatchFrame;
 
-using Value = std::variant<VType, Closure, VNeutral, VPi, VCtor, VQuotType, VQuotMk, VFix>;
-using EliminatorFrame = std::variant<ApplyFrame, MatchFrame, QuotLiftFrame>;
+using Value = std::variant<VType, Closure, VNeutral, VPi, VCtor, VFix>;
+using EliminatorFrame = std::variant<ApplyFrame, MatchFrame>;
 
 // ---------------------------------------------------------------------------
 // Env: a persistent, structurally shared environment
@@ -1394,15 +1314,15 @@ using EliminatorFrame = std::variant<ApplyFrame, MatchFrame, QuotLiftFrame>;
 // that took multiple seconds.
 //
 // Leaf slots are stored as shared_ptr<const Value>, not Value directly.
-// This is required by the same mutual-recursion constraint as VQuotType/
-// VQuotMk above (EnvNode's structural definition only needs Value
+// This is required by the same mutual-recursion constraint as the
+// Value alternatives above (EnvNode's structural definition only needs Value
 // forward-declared this way, not complete, so it can be fully defined
 // here rather than deferred like ApplyFrame/MatchFrame below) -- but it
 // is also the right choice on its own terms: it keeps a leaf node's path-
 // copy cost at a constant "32 pointer copies" regardless of how large or
 // expensive Value itself is to copy, which matters because Value has
-// gained alternatives over the life of this header (Meta, TypeUniv, the
-// Quot family) and is expected to gain more; an unboxed design would have
+// gained alternatives over the life of this header (Meta, TypeUniv, Fix)
+// and is expected to gain more; an unboxed design would have
 // silently gotten more expensive to path-copy every time Value grew.
 // Internal (non-leaf) and leaf nodes are kept structurally distinct via a
 // variant rather than a struct that always has room for both regardless
@@ -1466,8 +1386,8 @@ struct Env {
 // avoid genericizing Env: (1) EnvNode's leaves are shared_ptr<const
 // Value> specifically because Value is forward-declared at that point in
 // the file (mutually recursive with EliminatorFrame/VNeutral) and
-// because Value is expensive and still growing (Meta, TypeUniv, the Quot
-// family were all added after Env's leaf representation was chosen) --
+// because Value is expensive and still growing (Meta, TypeUniv, Fix
+// were all added after Env's leaf representation was chosen) --
 // neither reason applies to NodeId, which is a complete, 8-byte,
 // trivially-copyable POD at the point LocalCtx is defined, so wrapping
 // each leaf slot in its own shared_ptr here would be pure overhead with
@@ -1589,9 +1509,9 @@ struct VType {
 
 /// A stuck term: a variable, opaque constant, or unsolved metavariable,
 /// with a spine of pending eliminators. The spine holds ApplyFrame for
-/// pending applications, MatchFrame for a pending case split, and
-/// QuotLiftFrame for a pending quotient lift, since each needs to be
-/// reconstructed and compared differently by quote and conv_value.
+/// pending applications and MatchFrame for a pending case split, since
+/// each needs to be reconstructed and compared differently by quote and
+/// conv_value.
 struct VNeutral {
     NeutralHead head;
     std::vector<EliminatorFrame> spine;
@@ -1628,23 +1548,20 @@ struct VPi {
 /// This addresses VCtor chains specifically, which is the common,
 /// naturally-arising case (any inductively-defined data value more than
 /// trivially deep is represented this way). It does not address every
-/// theoretically possible route to a similar cascade -- for example, a
-/// long chain of VQuotType/VQuotMk each wrapping the next via their own
-/// shared_ptr<Value> field -- since that pattern doesn't arise from
-/// ordinary evaluation the way VCtor chains do; if a workload is ever
-/// found that stresses it, it would need the same treatment, applied
-/// there specifically.
+/// theoretically possible route to a similar cascade; if a workload is
+/// ever found that stresses one, it would need the same treatment,
+/// applied there specifically.
 struct VCtor {
     uint32_t ind_type_global_id;
     uint32_t ctor_idx;
     std::vector<Value> args;
 
     // All special members are DECLARED here but DEFINED later in the
-    // file, after Value's alternatives (VQuotType/VQuotMk in particular)
-    // are complete -- mirroring the same forward-declare-then-define-
+    // file, after Value's alternatives are complete -- mirroring the
+    // same forward-declare-then-define-
     // later pattern already used for Env's own methods below. This is
     // load-bearing, not stylistic: VCtor is itself one of Value's
-    // alternatives, defined before VQuotType/VQuotMk in this file, and
+    // alternatives, and
     // the destructor's body performs real operations on
     // std::vector<Value> (push_back, pop_back) to iteratively flatten a
     // nested chain rather than let it recurse through the default
@@ -1678,21 +1595,6 @@ struct VCtor {
     // operator== to every other Value alternative too, for no actual benefit.
 };
 
-/// The evaluated form of a quotient type former, `Quot r`. `relation` is
-/// evaluated eagerly (unlike a Match branch, there is no benefit to
-/// deferring it), so conv_value can compare two quotient types by
-/// comparing their relations directly.
-struct VQuotType {
-    std::shared_ptr<Value> relation;
-};
-
-/// The evaluated form of `Quot.mk r a`: a canonical, "already reduced"
-/// quotient element, analogous to VCtor.
-struct VQuotMk {
-    std::shared_ptr<Value> relation;
-    std::shared_ptr<Value> elem;
-};
-
 /// The evaluated form of a Fix node: "the fixpoint, ready to be
 /// applied" -- deliberately NOT unfolded here. `fix_id` is the raw
 /// syntax of the ORIGINAL Fix node (not its body) and `env` is the
@@ -1721,28 +1623,6 @@ struct ApplyFrame {
 struct MatchFrame {
     NodeId motive_id;
     std::vector<NodeId> branches;
-    Env captured_env;
-};
-
-/// A quotient lift that was still pending when its argument got stuck.
-///
-/// All four fields are kept as raw, UNEVALUATED syntax (NodeId), not
-/// eagerly evaluated Values, mirroring MatchFrame's motive_id/branches
-/// exactly. An earlier version of this struct evaluated relation/
-/// codomain/f/respects_proof eagerly the moment a QuotLift got stuck --
-/// wasted work specifically for respects_proof, which conv_value below
-/// never even inspects (proof-irrelevance-in-spirit), and unnecessary for
-/// the others too, since quote() only needs to reconstruct them as
-/// syntax, not evaluate them, exactly as MatchFrame's motive_id/branches
-/// already didn't need evaluating. `captured_env` is still required,
-/// for the same soundness reason MatchFrame needs it: comparing the raw
-/// NodeIds alone isn't sound if they reference free variables that could
-/// resolve differently under different ambient environments.
-struct QuotLiftFrame {
-    NodeId relation_id;
-    NodeId codomain_id;
-    NodeId f_id;
-    NodeId respects_proof_id;
     Env captured_env;
 };
 
@@ -1866,12 +1746,9 @@ inline VCtor& VCtor::operator=(VCtor&&) noexcept = default;
 // This addresses VCtor chains specifically, which is the common,
 // naturally-arising case (any inductively-defined data value more than
 // trivially deep is represented this way). It does not address every
-// theoretically possible route to a similar cascade -- for example, a
-// long chain of VQuotType/VQuotMk each wrapping the next via their own
-// shared_ptr<Value> field -- since that pattern doesn't arise from
-// ordinary evaluation the way VCtor chains do; if a workload is ever
-// found that stresses it, it would need the same treatment, applied
-// there specifically.
+// theoretically possible route to a similar cascade; if a workload is
+// ever found that stresses one, it would need the same treatment,
+// applied there specifically.
 inline VCtor::~VCtor() {
     if (args.empty()) return; // common case: nothing to flatten, avoid the worklist entirely
     std::vector<Value> worklist;
@@ -2089,42 +1966,6 @@ inline Value eval(NodeId term, const Env& env) {
             // risks the circular-construction problem a genuinely
             // self-referential Value would have.
             return Value{VFix{term, env}};
-        },
-        [&](QuotType q) -> Value {
-            return Value{VQuotType{std::make_shared<Value>(eval(q.relation, env))}};
-        },
-        [&](QuotMk q) -> Value {
-            return Value{VQuotMk{std::make_shared<Value>(eval(q.relation, env)),
-                                  std::make_shared<Value>(eval(q.elem, env))}};
-        },
-        [&](QuotLift q) -> Value {
-            Value scrutinee = eval(q.quotient_elem, env);
-            return inspect_value(scrutinee,
-                [&](const VQuotMk& mk) -> Value {
-                    // The computation rule: Quot.lift f h (Quot.mk r a)
-                    // reduces to f a. respects_proof is not needed here;
-                    // it exists purely for typechecking.
-                    Value f_val = eval(q.f, env);
-                    return apply(f_val, *mk.elem);
-                },
-                [&](const VNeutral& n) -> Value {
-                    // Stored as raw, unevaluated syntax (plus the
-                    // ambient env), not eagerly evaluated Values -- see
-                    // QuotLiftFrame's comment. This was previously eager
-                    // (eval(q.relation, env), eval(q.codomain, env), etc.
-                    // computed here every time a QuotLift got stuck),
-                    // wasting real work normalizing content -- especially
-                    // respects_proof -- that conv_value never inspects.
-                    VNeutral result = n;
-                    result.spine.push_back(EliminatorFrame{
-                        QuotLiftFrame{q.relation, q.codomain, q.f, q.respects_proof, env}});
-                    return Value{result};
-                },
-                [&](const auto&) -> Value {
-                    throw std::logic_error(
-                        "itp: Quot.lift applied to a non-quotient, non-neutral value -- ill-typed term reached eval");
-                }
-            );
         }
     );
 }
@@ -2171,11 +2012,6 @@ inline NodeId map_children(NodeId t, F&& f) {
             return mk_match(f(m.scrutinee_id, 0), f(m.motive_id, 0), std::move(bs));
         },
         [&](Fix x) -> NodeId { return mk_fix(f(x.fn_type, 0), x.decreasing_arg, f(x.body, 1)); },
-        [&](QuotType q) -> NodeId { return mk_quot_type(f(q.relation, 0)); },
-        [&](QuotMk q) -> NodeId { return mk_quot_mk(f(q.relation, 0), f(q.elem, 0)); },
-        [&](QuotLift q) -> NodeId {
-            return mk_quot_lift(f(q.relation, 0), f(q.codomain, 0), f(q.f, 0), f(q.respects_proof, 0), f(q.quotient_elem, 0));
-        },
         [&](auto) -> NodeId { return t; });
 }
 
@@ -2198,11 +2034,6 @@ inline uint32_t loose_range(NodeId t) {
             return r2;
         },
         [&](Fix x) -> uint32_t { return std::max(loose_range(x.fn_type), sat_dec(loose_range(x.body))); },
-        [&](QuotType q) -> uint32_t { return loose_range(q.relation); },
-        [&](QuotMk q) -> uint32_t { return std::max(loose_range(q.relation), loose_range(q.elem)); },
-        [&](QuotLift q) -> uint32_t {
-            return std::max({loose_range(q.relation), loose_range(q.codomain), loose_range(q.f), loose_range(q.respects_proof), loose_range(q.quotient_elem)});
-        },
         [&](auto) -> uint32_t { return 0; });
     cache[key] = r;
     return r;
@@ -2347,8 +2178,6 @@ inline NodeId quote_at(const Value& v, uint32_t n0, uint32_t depth) {
             for (const Value& arg : vc.args) acc = mk_app(acc, quote_at(arg, n0, depth));
             return acc;
         },
-        [&](const VQuotType& q) -> NodeId { return mk_quot_type(quote_at(*q.relation, n0, depth)); },
-        [&](const VQuotMk& q) -> NodeId { return mk_quot_mk(quote_at(*q.relation, n0, depth), quote_at(*q.elem, n0, depth)); },
         [&](const VFix& vf) -> NodeId { return requote(vf.fix_id, vf.env, n0, depth); },
         [&](const VNeutral& n) -> NodeId {
             NodeId acc;
@@ -2366,15 +2195,12 @@ inline NodeId quote_at(const Value& v, uint32_t n0, uint32_t depth) {
             for (const EliminatorFrame& frame : n.spine) {
                 if (auto* af = std::get_if<ApplyFrame>(&frame)) {
                     acc = mk_app(acc, quote_at(af->arg, n0, depth));
-                } else if (auto* mf = std::get_if<MatchFrame>(&frame)) {
+                } else {
+                    const auto* mf = &std::get<MatchFrame>(frame);
                     std::vector<NodeId> branches_q; branches_q.reserve(mf->branches.size());
                     for (NodeId b : mf->branches) branches_q.push_back(requote(b, mf->captured_env, n0, depth));
                     NodeId motive_q = quote_at(eval(mf->motive_id, mf->captured_env), n0, depth);
                     acc = mk_match(acc, motive_q, std::move(branches_q));
-                } else {
-                    const auto& qf = std::get<QuotLiftFrame>(frame);
-                    acc = mk_quot_lift(requote(qf.relation_id, qf.captured_env, n0, depth), requote(qf.codomain_id, qf.captured_env, n0, depth),
-                                       requote(qf.f_id, qf.captured_env, n0, depth), requote(qf.respects_proof_id, qf.captured_env, n0, depth), acc);
                 }
             }
             return acc;
@@ -2397,9 +2223,6 @@ inline bool any_child(NodeId t, P&& pred) {
             return false;
         },
         [&](Fix x) -> bool { return pred(x.fn_type) || pred(x.body); },
-        [&](QuotType q) -> bool { return pred(q.relation); },
-        [&](QuotMk q) -> bool { return pred(q.relation) || pred(q.elem); },
-        [&](QuotLift q) -> bool { return pred(q.relation) || pred(q.codomain) || pred(q.f) || pred(q.respects_proof) || pred(q.quotient_elem); },
         [&](auto) -> bool { return false; });
 }
 namespace detail {
@@ -2509,12 +2332,6 @@ inline bool conv_value(const Value& a, const Value& b, uint32_t depth) {
                 if (!conv_value(ca.args[i], cb.args[i], depth)) return false;
             }
             return true;
-        },
-        [&](const VQuotType& qa, const VQuotType& qb) -> bool {
-            return conv_value(*qa.relation, *qb.relation, depth);
-        },
-        [&](const VQuotMk& qa, const VQuotMk& qb) -> bool {
-            return conv_value(*qa.relation, *qb.relation, depth) && conv_value(*qa.elem, *qb.elem, depth);
         },
         [&](const VFix& fa, const VFix& fb) -> bool {
             // Sound but not complete, exactly like MatchFrame's own
@@ -2674,32 +2491,6 @@ inline bool conv_value(const Value& a, const Value& b, uint32_t depth) {
                         // captured_env pointwise, correctly: there, equal
                         // branch syntax makes a pointwise env comparison
                         // both meaningful and necessary.
-                        return true;
-                    },
-                    [&](const QuotLiftFrame& fa, const QuotLiftFrame& fb) -> bool {
-                        // Same sound-but-not-complete syntactic comparison
-                        // as MatchFrame above: relation/codomain/f are
-                        // raw syntax now (see QuotLiftFrame's comment), so
-                        // comparing them is a cheap NodeId equality check
-                        // (exploiting hash-consing) rather than a fresh
-                        // evaluate-then-compare, and captured_env is
-                        // compared pointwise for the same soundness reason
-                        // MatchFrame needs it. respects_proof_id is
-                        // deliberately not compared at all: by proof-
-                        // irrelevance-in-spirit for this reference
-                        // implementation, two lifts of the same function
-                        // over the same relation are considered the same
-                        // eliminator regardless of which respects-proof
-                        // term was supplied, since it has no computational
-                        // role. A theory with real Prop-irrelevance would
-                        // formalize this generally; this is a narrow,
-                        // local application of the same idea.
-                        if (fa.relation_id != fb.relation_id) return false;
-                        if (fa.codomain_id != fb.codomain_id) return false;
-                        if (fa.f_id != fb.f_id) return false;
-                        if (fa.captured_env.size() != fb.captured_env.size()) return false;
-                        for (std::size_t j = 0; j < fa.captured_env.size(); ++j)
-                            if (!conv_value(fa.captured_env[j], fb.captured_env[j], depth)) return false;
                         return true;
                     },
                     [&](const auto&, const auto&) { return false; } // mismatched frame kinds
@@ -2958,7 +2749,7 @@ struct ElabCtx {
 /// Checks whether `v` is a Miller pattern: a metavariable applied to a
 /// spine of zero or more DISTINCT, locally-bound variables (each a bare
 /// Var, not itself further applied) and nothing else -- no pending Match
-/// or QuotLift frame anywhere in the spine disqualifies it. This is the
+/// frame anywhere in the spine disqualifies it. This is the
 /// restricted fragment unify_values below solves directly by assignment;
 /// anything else involving a Meta head is deferred to ElabState::pending
 /// instead of attempted eagerly (general higher-order unification is
@@ -2974,7 +2765,7 @@ inline std::optional<std::pair<uint32_t, std::vector<uint32_t>>> is_miller_patte
     std::unordered_set<uint32_t> seen;
     for (const auto& frame : neutral->spine) {
         auto* af = std::get_if<ApplyFrame>(&frame);
-        if (!af) return std::nullopt; // MatchFrame/QuotLiftFrame in the spine: not a pattern
+        if (!af) return std::nullopt; // MatchFrame in the spine: not a pattern
         auto* arg_neutral = std::get_if<VNeutral>(&af->arg);
         if (!arg_neutral || arg_neutral->head.kind != NeutralHead::Kind::LocalVar || !arg_neutral->spine.empty())
             return std::nullopt; // argument isn't a bare local variable
@@ -3027,9 +2818,9 @@ inline std::vector<uint32_t> ctor_gids_for_type(uint32_t type_global_id) {
 /// that e.g. `f ?M` unifying against `f x` solves `?M := x` even though
 /// the outermost shape (App/App, i.e. matching VNeutral heads here) was
 /// already rigid. Falls back to conv_value-equivalent hard equality for
-/// MatchFrame/QuotLiftFrame spine elements specifically -- a deliberate,
-/// documented completeness gap (a meta buried under a stuck Match/
-/// QuotLift eliminator in this pass won't get solved), not a soundness
+/// MatchFrame spine elements specifically -- a deliberate,
+/// documented completeness gap (a meta buried under a stuck Match
+/// eliminator in this pass won't get solved), not a soundness
 /// one: this can only make unify_values FAIL in a case a fuller
 /// implementation would have solved, never accept something wrong.
 struct DiagnosticTable;
@@ -3043,7 +2834,7 @@ inline std::string print(NodeId id, const DiagnosticTable* diag);
 /// apply(). Returns v unchanged otherwise (not meta-headed, or meta-
 /// headed but still genuinely unsolved).
 ///
-/// A non-ApplyFrame spine entry (MatchFrame/QuotLiftFrame -- a meta
+/// A non-ApplyFrame spine entry (a MatchFrame -- a meta
 /// being matched on directly, before it was solved) is left
 /// unresolved rather than handled: no existing call site in this
 /// kernel ever mints a meta applied that way (apply()/cases()/
@@ -3217,21 +3008,14 @@ inline ElabResult unify_values(const Value& a_in, const Value& b_in, ElabCtx& ec
             }
             return {};
         },
-        [&](const VQuotType& qa, const VQuotType& qb) -> ElabResult {
-            return unify_values(*qa.relation, *qb.relation, ec, es);
-        },
-        [&](const VQuotMk& qa, const VQuotMk& qb) -> ElabResult {
-            if (ElabResult r = unify_values(*qa.relation, *qb.relation, ec, es); !r) return r;
-            return unify_values(*qa.elem, *qb.elem, ec, es);
-        },
         [&](const VFix& fa, const VFix& fb) -> ElabResult {
             // Hard syntactic equality, same documented completeness gap
-            // as MatchFrame/QuotLiftFrame just below: fix_id equality
+            // as MatchFrame just below: fix_id equality
             // plus pointwise conv_value (not recursive unify_values) on
             // the captured environments -- a metavariable buried only
             // inside a captured Fix env won't get solved by this pass,
-            // mirroring exactly how a meta buried in a stuck Match's or
-            // Quot.lift's captured env already isn't solved here either.
+            // mirroring exactly how a meta buried in a stuck Match's
+            // captured env already isn't solved here either.
             if (fa.fix_id != fb.fix_id) return mismatch("different Fix nodes");
             if (fa.env.size() != fb.env.size()) return mismatch("Fix captured environments differ in size");
             for (uint32_t i = 0; i < fa.env.size(); ++i) {
@@ -3312,15 +3096,6 @@ inline ElabResult unify_values(const Value& a_in, const Value& b_in, ElabCtx& ec
                         // comparison, and a trailing pointwise check on
                         // captured_env itself would reject two genuinely-
                         // equal stuck reconstructions of the same value.
-                        return ElabResult{};
-                    },
-                    [&](const QuotLiftFrame& fa, const QuotLiftFrame& fb) -> ElabResult {
-                        if (fa.relation_id != fb.relation_id || fa.codomain_id != fb.codomain_id ||
-                            fa.f_id != fb.f_id || fa.captured_env.size() != fb.captured_env.size())
-                            return mismatch("stuck Quot.lift frames differ");
-                        for (std::size_t j = 0; j < fa.captured_env.size(); ++j)
-                            if (!conv_value(fa.captured_env[j], fb.captured_env[j], ec.size()))
-                                return mismatch("stuck Quot.lift captured environments differ");
                         return ElabResult{};
                     },
                     [&](const auto&, const auto&) -> ElabResult { return mismatch("mismatched eliminator frame kinds"); }
@@ -4119,13 +3894,6 @@ inline bool occurs(uint32_t ind_type_global_id, NodeId term) {
         },
         [&](Meta) { return false; },
         [&](TypeUniv) { return false; },
-        [&](QuotType q) { return occurs(ind_type_global_id, q.relation); },
-        [&](QuotMk q) { return occurs(ind_type_global_id, q.relation) || occurs(ind_type_global_id, q.elem); },
-        [&](QuotLift q) {
-            return occurs(ind_type_global_id, q.relation) || occurs(ind_type_global_id, q.codomain) ||
-                   occurs(ind_type_global_id, q.f) || occurs(ind_type_global_id, q.respects_proof) ||
-                   occurs(ind_type_global_id, q.quotient_elem);
-        },
         [&](Fix f) {
             // A Fix is not expected to appear inside a constructor's own
             // argument type in ordinary use (Fix is proof-term-scoped,
@@ -4666,12 +4434,6 @@ inline bool is_structurally_decreasing(uint32_t fn_gid, uint32_t ind_type_global
             },
             [&](Meta) { return true; }, // a bare unsolved meta reference contains no recursive calls
             [&](TypeUniv) { return true; },
-            [&](QuotType q) { return walk(q.relation, depth); },
-            [&](QuotMk q) { return walk(q.relation, depth) && walk(q.elem, depth); },
-            [&](QuotLift q) {
-                return walk(q.relation, depth) && walk(q.codomain, depth) && walk(q.f, depth) &&
-                       walk(q.respects_proof, depth) && walk(q.quotient_elem, depth);
-            },
             [&](Fix f) {
                 // A nested local Fix introduces exactly one new binder
                 // (its own self-reference), the same shape as Lambda/Pi
@@ -4804,12 +4566,6 @@ inline bool is_locally_structurally_decreasing(uint32_t self_ref_level, uint32_t
             },
             [&](Meta) { return true; },
             [&](TypeUniv) { return true; },
-            [&](QuotType q) { return walk(q.relation, depth); },
-            [&](QuotMk q) { return walk(q.relation, depth) && walk(q.elem, depth); },
-            [&](QuotLift q) {
-                return walk(q.relation, depth) && walk(q.codomain, depth) && walk(q.f, depth) &&
-                       walk(q.respects_proof, depth) && walk(q.quotient_elem, depth);
-            },
             [&](Fix f) {
                 // A nested Fix (e.g. a further, INNER induction within
                 // this one's branches) shifts self_ref_level's own
@@ -5354,22 +5110,6 @@ inline TypeResult infer(NodeId t, ElabCtx& ec, ElabState& es) {
             if (ElabResult r = check(instantiate1(f.body, mk_fvar(ec.size())), f.fn_type, ec2, es); !r) return std::unexpected(r.error());
             if (!fix_guard_ok(f, ec.size())) return err(TypeErrorKind::Other, t, "Fix failed the structural recursion check: some recursive call is not on a structurally smaller instance of the decreasing argument");
             return f.fn_type;
-        }
-        case NodeType::QUOT_TYPE: case NodeType::QUOT_MK: {
-            NodeId rel = (t.tag == NodeType::QUOT_TYPE) ? ctx().quot_types[t.index].relation : ctx().quot_mks[t.index].relation;
-            ITP_TRY(NodeId rel_ty, infer(rel, ec, es));
-            Value rel_ty_val = eval(rel_ty, ec.values);
-            auto* outer_pi = std::get_if<VPi>(&rel_ty_val);
-            if (!outer_pi) return err(TypeErrorKind::NotAFunction, rel, "Quot's relation must be a binary relation A -> A -> Sort");
-            NodeId elem_ty = quote(eval(outer_pi->dom_id, outer_pi->env), ec.size());
-            if (t.tag == NodeType::QUOT_TYPE) return infer(elem_ty, ec, es); // the quotient lives in the same sort as the underlying type
-            if (ElabResult r = check(ctx().quot_mks[t.index].elem, elem_ty, ec, es); !r) return std::unexpected(r.error());
-            return mk_quot_type(rel);
-        }
-        case NodeType::QUOT_LIFT: {
-            QuotLift q = ctx().quot_lifts[t.index];
-            if (ElabResult r = check(q.quotient_elem, mk_quot_type(q.relation), ec, es); !r) return std::unexpected(r.error());
-            return q.codomain;
         }
     }
     std::unreachable();
