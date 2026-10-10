@@ -209,6 +209,7 @@ def classify(expect, fn, w):
     try: r = fn(w)
     except BaseException as e:                                      # nanobind turns C++ exceptions into Python ones; anything Python-level counts as a rejection
         if isinstance(e, (KeyboardInterrupt, SystemExit)): raise
+        if isinstance(e, MemoryError): return ('FAIL', 'MemoryError: an absurd size was not rejected up front, the kernel tried to allocate it')
         return ('ok', 'raised %s' % type(e).__name__) if expect == 'reject' else ('FAIL', 'a call that must succeed raised %s: %s' % (type(e).__name__, str(e)[:100]))
     if rejected(r): return ('ok', 'reported failure') if expect == 'reject' else ('FAIL', 'a call that must succeed reported failure: %s' % (r,))
     return ('FAIL', 'ACCEPTED: %r' % (r if isinstance(r, (bool, int, str, tuple)) else type(r).__name__,)) if expect == 'reject' else ('ok', 'accepted')
@@ -438,6 +439,8 @@ def run_fuzz(seed, calls, start, skip, describe_at):
 
 # ================================================================== the gate
 def child_main(argv):
+    import resource
+    resource.setrlimit(resource.RLIMIT_AS, (3 << 30, 3 << 30))      # an input that is not rejected up front must fail fast with MemoryError, not eat the machine
     mode = argv[0]
     if mode == 'cases': run_cases(int(argv[1]))
     elif mode == 'fuzz':
