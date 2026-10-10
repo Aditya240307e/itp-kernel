@@ -76,15 +76,16 @@ struct ProofStateHandle {
     itp::ContextGuard activate();
     uint32_t scope_of(std::optional<uint32_t> tm) { auto idx = itp::find_goal_index(*ps, tm); return idx ? ps->goals[*idx].ec.size() : 0; }
     void intro_(const std::string& name, std::optional<uint32_t> tm) { auto g = activate(); raise_if_error(itp::intro(*ps, name, tm)); }
-    void apply_(itp::NodeId term, std::optional<uint32_t> tm) { auto g = activate(); require_scoped(term, scope_of(tm), "apply"); raise_if_error(itp::apply(*ps, term, tm)); }
-    void cases_(uint32_t hyp_level, std::optional<uint32_t> tm, const std::vector<uint32_t>& gen) { auto g = activate(); raise_if_error(itp::cases(*ps, hyp_level, tm, gen)); }
-    void induct_(uint32_t hyp_level, std::optional<uint32_t> tm, const std::vector<uint32_t>& gen, std::optional<uint32_t> eq_gid, std::optional<uint32_t> refl_gid) {
+    void apply_(itp::NodeId term, std::optional<uint32_t> tm, bool simp) { auto g = activate(); require_scoped(term, scope_of(tm), "apply"); raise_if_error(itp::apply(*ps, term, tm, simp)); }
+    void cases_(uint32_t hyp_level, std::optional<uint32_t> tm, const std::vector<uint32_t>& gen, bool simp) { auto g = activate(); raise_if_error(itp::cases(*ps, hyp_level, tm, gen, simp)); }
+    void induct_(uint32_t hyp_level, std::optional<uint32_t> tm, const std::vector<uint32_t>& gen, std::optional<uint32_t> eq_gid, std::optional<uint32_t> refl_gid, bool simp) {
         auto g = activate(); if (eq_gid) require_global(*eq_gid, "induct eq_gid"); if (refl_gid) require_global(*refl_gid, "induct refl_gid");
-        raise_if_error(itp::induct(*ps, hyp_level, tm, gen, eq_gid, refl_gid)); }
+        raise_if_error(itp::induct(*ps, hyp_level, tm, gen, eq_gid, refl_gid, simp)); }
     void exact_(itp::NodeId term, std::optional<uint32_t> tm) { auto g = activate(); require_scoped(term, scope_of(tm), "exact"); raise_if_error(itp::exact(*ps, term, tm)); }
     void rewrite_(itp::NodeId eq_term, itp::NodeId x, itp::NodeId y, uint32_t transport_gid, uint32_t symm_gid, std::optional<uint32_t> tm) {
         auto g = activate(); require_global(transport_gid, "rewrite transport lemma"); require_global(symm_gid, "rewrite symmetry lemma"); uint32_t sc = scope_of(tm); require_scoped(eq_term, sc, "rewrite eq_term"); require_scoped(x, sc, "rewrite x"); require_scoped(y, sc, "rewrite y"); raise_if_error(itp::rewrite_eq(*ps, eq_term, x, y, transport_gid, symm_gid, tm));
     }
+    void change_(itp::NodeId new_target, std::optional<uint32_t> tm) { auto g = activate(); require_scoped(new_target, scope_of(tm), "change"); raise_if_error(itp::change_target(*ps, new_target, tm)); }
     bool is_complete() { auto g = activate(); return itp::proof_complete(*ps); }
     // The current proof term. While goals are open it contains holes (metavariables); check_open and declare_checked refuse such a term, so an unfinished proof can never be admitted.
     itp::NodeId extract() { auto g = activate(); return itp::extract_proof_term(root_meta_id); }
@@ -227,6 +228,12 @@ struct KernelWrapper {
     }
     itp::Env fresh_env(uint32_t n0) { itp::Env env; for (uint32_t i = 0; i < n0; ++i) env = env.extend(itp::fresh_neutral(i)); return env; }
     itp::NodeId normalize_open(itp::NodeId t, uint32_t n0) { auto g = activate(); require_small(n0, "context size"); require_scoped(t, n0, "term"); return itp::normalize(t, fresh_env(n0)); }
+    // The normal form the tactic layer displays and rewrites in: definitions stay folded, a recursive function is unfolded only where its decreasing argument is a constructor (Coq's `simpl`).
+    // It is convertible with the input, but it is NOT used to decide anything: the kernel re-checks every step that rests on it by ordinary conversion.
+    itp::NodeId simp_normalize(itp::NodeId t, uint32_t n0) {
+        auto g = activate(); require_small(n0, "context size"); require_scoped(t, n0, "term");
+        itp::NoDeltaScope keep_folded; itp::GuardedUnfoldScope guarded; return itp::normalize(t, fresh_env(n0));
+    }
     bool conv_open(itp::NodeId a, itp::NodeId b, uint32_t n0) {
         auto g = activate(); require_small(n0, "context size"); require_scoped(a, n0, "lhs"); require_scoped(b, n0, "rhs"); itp::Env env = fresh_env(n0);
         return itp::conv_value(itp::eval(a, env), itp::eval(b, env), n0);
@@ -363,11 +370,12 @@ NB_MODULE(itp_env_lnl, m) {
     nb::class_<itp::ExecutionContext::Checkpoint>(m, "Checkpoint");
     nb::class_<ProofStateHandle>(m, "ProofState")
         .def("intro", &ProofStateHandle::intro_, "name"_a = "", "target_meta_id"_a = nb::none())
-        .def("apply", &ProofStateHandle::apply_, "term"_a, "target_meta_id"_a = nb::none())
-        .def("cases", &ProofStateHandle::cases_, "hyp_level"_a, "target_meta_id"_a = nb::none(), "generalizing"_a = std::vector<uint32_t>{})
-        .def("induct", &ProofStateHandle::induct_, "hyp_level"_a, "target_meta_id"_a = nb::none(), "generalizing"_a = std::vector<uint32_t>{}, "eq_gid"_a = nb::none(), "refl_gid"_a = nb::none())
+        .def("apply", &ProofStateHandle::apply_, "term"_a, "target_meta_id"_a = nb::none(), "simp"_a = false)
+        .def("cases", &ProofStateHandle::cases_, "hyp_level"_a, "target_meta_id"_a = nb::none(), "generalizing"_a = std::vector<uint32_t>{}, "simp"_a = false)
+        .def("induct", &ProofStateHandle::induct_, "hyp_level"_a, "target_meta_id"_a = nb::none(), "generalizing"_a = std::vector<uint32_t>{}, "eq_gid"_a = nb::none(), "refl_gid"_a = nb::none(), "simp"_a = false)
         .def("exact", &ProofStateHandle::exact_, "term"_a, "target_meta_id"_a = nb::none())
         .def("rewrite", &ProofStateHandle::rewrite_, "eq_term"_a, "x"_a, "y"_a, "transport_gid"_a, "symm_gid"_a, "target_meta_id"_a = nb::none())
+        .def("change", &ProofStateHandle::change_, "new_target"_a, "target_meta_id"_a = nb::none())
         .def("is_complete", &ProofStateHandle::is_complete)
         .def("extract", &ProofStateHandle::extract)
         .def("num_goals", &ProofStateHandle::num_goals)
@@ -419,6 +427,7 @@ NB_MODULE(itp_env_lnl, m) {
         .def("unify_open", &KernelWrapper::unify_open, "a"_a, "b"_a, "hyp_types"_a)
         .def("unify_drain_open", &KernelWrapper::unify_drain_open, "a"_a, "b"_a, "hyp_types"_a)
         .def("normalize_open", &KernelWrapper::normalize_open, "term"_a, "n0"_a)
+        .def("simp_normalize", &KernelWrapper::simp_normalize, "term"_a, "n0"_a)
         .def("conv_open", &KernelWrapper::conv_open, "a"_a, "b"_a, "n0"_a)
         .def("loose_range", &KernelWrapper::loose_range, "term"_a)
         .def("stress_value_release", &KernelWrapper::stress_value_release, "depth"_a, "kind"_a)

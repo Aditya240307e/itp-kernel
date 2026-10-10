@@ -319,7 +319,9 @@ class Checker:
         return params
 
     # ------------------------------------------------------------ reduction
-    def whnf(self, t):
+    def whnf(self, t, folded=False):
+        """weak head normal form. With `folded`, a structurally recursive function is unfolded only when its decreasing argument is a constructor application: a call that is stuck
+        stays a call (the default unfolds it into the stuck match on its decreasing argument, whose branches still mention the other arguments unevaluated)."""
         while True:
             self.tick()
             h, args = spine(t)
@@ -327,7 +329,10 @@ class Checker:
             if k == 'lam' and args:
                 t = apply_args(subst(h[3], h[1], args[0]), args[1:]); continue
             if k == 'c':
-                v = self.g[h[1]].value
+                gl = self.g[h[1]]; v = gl.value
+                if v is not None and folded and gl.recursion is not None:
+                    d = gl.recursion[1]
+                    if len(args) <= d or self.ctor_app(self.whnf(args[d], True)) is None: return t
                 if v is not None: t = apply_args(v, args); continue
                 if self.quot is not None and h[1] == self.quot['lift'] and len(args) >= 6:       # lift A r B f h (mk A' r' a) ~> f a
                     qh, qargs = spine(self.whnf(args[5]))
@@ -378,6 +383,13 @@ class Checker:
         self.tick()
         if canon(a) == canon(b): return True
         if depth > self.MAX_DEPTH: return False
+        # folded first: two stuck calls of one recursive function are equal when their arguments are (unfolding them instead gives two stuck matches whose branches mention the other
+        # arguments unevaluated, and comparing those never ends when an argument is not literally the same term, e.g. `add x Zero` and `add x (mul Zero x)`)
+        a, b = self.whnf(a, True), self.whnf(b, True)
+        if canon(a) == canon(b): return True
+        ha0, aa0 = spine(a); hb0, ab0 = spine(b)
+        if ha0[0] == 'c' and hb0[0] == 'c' and ha0[1] == hb0[1] and len(aa0) == len(ab0) and self.g[ha0[1]].recursion is not None:
+            if all(self.conv(x, y, depth + 1, ctx) for x, y in zip(aa0, ab0)): return True
         a, b = self.whnf(a), self.whnf(b)
         if canon(a) == canon(b): return True
         ka, kb = a[0], b[0]

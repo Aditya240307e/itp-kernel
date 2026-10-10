@@ -1842,6 +1842,9 @@ inline std::optional<std::pair<Value, Value>> quot_lift_redex(const VNeutral& n)
     return std::make_pair(std::get<ApplyFrame>(n.spine[3]).arg, std::get<ApplyFrame>(q->spine[2]).arg);
 }
 
+/// Set by GuardedUnfoldScope (defined with the NoDeltaScope below, which it is meant to be used with): see the comment there.
+inline bool& guarded_unfold_flag() { static thread_local bool f = false; return f; }
+
 inline Value apply(Value fn, Value arg) {
     ITP_STACK_CHECK();
     if (const Closure* clo = std::get_if<Closure>(&fn)) return eval(clo->body_id, clo->env.extend(std::move(arg)));
@@ -1868,6 +1871,22 @@ inline Value apply(Value fn, Value arg) {
             VNeutral n{n0->head, n0->spine.appended(EliminatorFrame{ApplyFrame{std::move(arg)}})};
             if (def.quot_role == QuotRole::Lift) {
                 if (auto redex = quot_lift_redex(n)) return apply(std::move(redex->first), std::move(redex->second));
+            }
+            if (guarded_unfold_flag() && def.recursive_info && def.value) {
+                // the application that supplies the decreasing argument decides: a constructor there means the body can make progress
+                const std::size_t d = def.recursive_info->decreasing_arg_level;
+                if (n.spine.size() == d + 1) {
+                    const auto* last = std::get_if<ApplyFrame>(&n.spine[d]);
+                    if (last && std::holds_alternative<VCtor>(last->arg)) {
+                        Value body = eval(*def.value, Env{});              // a lambda: this only builds a closure, so it is the same in every mode
+                        for (const auto& fr : n.spine) {
+                            const auto* af = std::get_if<ApplyFrame>(&fr);
+                            if (!af) return Value{std::move(n)};
+                            body = apply(std::move(body), af->arg);
+                        }
+                        return body;
+                    }
+                }
             }
             return Value{std::move(n)};
         }
@@ -1913,6 +1932,30 @@ struct NoDeltaScope {
     ~NoDeltaScope() { no_delta_flag() = prev; }
     NoDeltaScope(const NoDeltaScope&) = delete;
     NoDeltaScope& operator=(const NoDeltaScope&) = delete;
+};
+
+/// Guarded unfolding (a display and tactic aid, like Coq's `simpl`): inside a NoDeltaScope plus a GuardedUnfoldScope, a recursive function that is applied to its decreasing argument is unfolded
+/// ONE layer exactly when that argument is a constructor application, and stays a folded neutral otherwise. So `add (Succ m) n` computes to `Succ (add m n)` while `add m n` (m a variable)
+/// stays `add m n` instead of turning into the stuck match of its body. Every other global stays folded. NEVER used by conversion checking or by any typing rule: a normal form obtained this
+/// way is only ever handed back through `exact`/`apply`-style steps that the kernel re-checks by ordinary conversion.
+struct GuardedUnfoldScope {
+    bool prev;
+    GuardedUnfoldScope() : prev(guarded_unfold_flag()) { guarded_unfold_flag() = true; }
+    ~GuardedUnfoldScope() { guarded_unfold_flag() = prev; }
+    GuardedUnfoldScope(const GuardedUnfoldScope&) = delete;
+    GuardedUnfoldScope& operator=(const GuardedUnfoldScope&) = delete;
+};
+
+/// While a FoldSolutionsScope is alive, the unifier quotes the solutions it finds for metavariables with definitions left FOLDED (as under a NoDeltaScope) instead of fully delta-reduced. A solution is only
+/// ever used up to conversion, so this changes how the solved metavariable looks, not what it means. `apply` with `simp` turns it on, so that a goal it creates reads `n + k = m` and not the stuck
+/// `match n with ...` that the definition of `+` unfolds to when the lemma's premise is obtained by unfolding a definition such as `Iff` in the goal.
+inline bool& fold_solutions_flag() { static thread_local bool f = false; return f; }
+struct FoldSolutionsScope {
+    bool prev;
+    FoldSolutionsScope() : prev(fold_solutions_flag()) { fold_solutions_flag() = true; }
+    ~FoldSolutionsScope() { fold_solutions_flag() = prev; }
+    FoldSolutionsScope(const FoldSolutionsScope&) = delete;
+    FoldSolutionsScope& operator=(const FoldSolutionsScope&) = delete;
 };
 
 inline Value eval(NodeId term, const Env& env) {
@@ -2268,6 +2311,11 @@ inline NodeId quote_at(const Value& v, uint32_t n0, uint32_t depth) {
 }
 /// Quote a value living in a context of size `depth`.
 inline NodeId quote(const Value& v, uint32_t depth) { return quote_at(v, depth, depth); }
+/// The term stored as the solution of a metavariable: quoted with definitions folded when a FoldSolutionsScope is active (see there), else as `quote`.
+inline NodeId quote_solution(const Value& v, uint32_t depth) {
+    if (!fold_solutions_flag()) return quote(v, depth);
+    NoDeltaScope keep_folded; return quote(v, depth);
+}
 
 /// True iff some immediate child satisfies pred. Total over node kinds (like map_children, read-only).
 template <class P>
@@ -2670,6 +2718,7 @@ inline bool conv_value(const Value& a, const Value& b, uint32_t depth) {
 /// environment? Pass open_context(n) when checking under n ambient
 /// hypotheses, or {} for closed top-level terms.
 inline bool conv(NodeId a, NodeId b, const Env& env) {
+    if (a == b) return true;              // the same term (terms are hash-consed) under the same environment
     return conv_value(eval(a, env), eval(b, env), env.size());
 }
 
@@ -3174,10 +3223,10 @@ inline ElabResult unify_structural(const Value& a_in, const Value& b_in, ElabCtx
     // the same metavariable applied to the same arguments is trivially equal (the reference rejected ?m =?= ?m: the occurs check fired on itself)
     if (is_meta_headed(a) && is_meta_headed(b) && quote(a, ec.size()) == quote(b, ec.size())) return {};
     if (auto pat = is_miller_pattern(a)) {
-        return detail::solve_pattern(pat->first, pat->second, quote(b, ec.size()), ec);
+        return detail::solve_pattern(pat->first, pat->second, quote_solution(b, ec.size()), ec);
     }
     if (auto pat = is_miller_pattern(b)) {
-        return detail::solve_pattern(pat->first, pat->second, quote(a, ec.size()), ec);
+        return detail::solve_pattern(pat->first, pat->second, quote_solution(a, ec.size()), ec);
     }
     if (is_meta_headed(a) || is_meta_headed(b)) {
         es.pending.push_back(PendingConstraint{quote(a, ec.size()), quote(b, ec.size()), ec.size(), std::make_shared<const ElabCtx>(ec)});
@@ -3374,6 +3423,7 @@ inline ElabResult unify_values(const Value& a, const Value& b, ElabCtx& ec, Elab
 
 inline ElabResult unify(NodeId a_id, NodeId b_id, ElabCtx& ec, ElabState& es) {
     ITP_STACK_CHECK();
+    if (a_id == b_id) return {};          // the same term (terms are hash-consed): convertible, and nothing to solve -- no need to evaluate either side
     return unify_values(eval(a_id, ec.values), eval(b_id, ec.values), ec, es);
 }
 
@@ -5316,18 +5366,32 @@ inline TypeResult infer(NodeId t, ElabCtx& ec, ElabState& es) {
         case NodeType::META: return ctx().meta_ctx[ctx().metas[t.index].meta_id].type;
         case NodeType::TYPE_UNIV: return err(TypeErrorKind::Other, t, "TypeUniv is elaborator-internal and not meaningful as a standalone infer target");
         case NodeType::APP: {
-            App a = ctx().apps[t.index];
-            ITP_TRY(NodeId fn_ty, infer(a.fn_id, ec, es));
-            Value fn_ty_val = eval(fn_ty, ec.values);
-            auto* pi = std::get_if<VPi>(&fn_ty_val);
-            if (!pi) return err(TypeErrorKind::NotAFunction, a.fn_id, "applying a term that is not a function");
-            NodeId dom_ty = quote(eval(pi->dom_id, pi->env), ec.size());
-            if (ElabResult r = check(a.arg_id, dom_ty, ec, es); !r) return std::unexpected(r.error());
-            // A codomain without loose bound variables cannot mention the argument (the usual, non-dependent case, e.g. `Succ : Nat -> Nat`):
-            // do not evaluate it. Evaluating every argument made typing a numeral of depth n quadratic -- each of its n applications
-            // re-evaluated the whole sub-numeral below it.
-            Value arg_val = loose_range(pi->cod_id) == 0 ? fresh_neutral(pi->env.size()) : eval(a.arg_id, ec.values);
-            return quote(eval(pi->cod_id, pi->env.extend(std::move(arg_val))), ec.size());
+            // The whole application at once (iteratively: a long spine must not nest `infer` calls) -- the standard rule  f : (x : A) -> B,  a : A  |-  f a : B[a/x]  applied to the
+            // type of the head as it was written. Nothing is evaluated while that type is syntactically a Pi: each argument is checked against the domain with the earlier arguments
+            // substituted in, and the result is the body with all of them substituted. (The type used to be normalised at every application. The normal form of a type that mentions open
+            // polynomial terms is exponentially larger than the type itself, so checking a proof about such terms was exponential in the nesting of its terms, and quadratic in the length of
+            // a lemma's telescope even for numerals.) Types are only ever compared by unify/conv, which evaluate both sides, so what infer returns need only be a type of t up to conversion.
+            std::vector<NodeId> args; NodeId head = t;
+            while (head.tag == NodeType::APP) { App a = ctx().apps[head.index]; args.push_back(a.arg_id); head = a.fn_id; }
+            std::reverse(args.begin(), args.end());
+            ITP_TRY(NodeId chain, infer(head, ec, es));
+            std::vector<NodeId> done_rev;               // the arguments consumed from the current chain, the latest first (the order `instantiate` takes)
+            for (std::size_t i = 0; i < args.size(); ++i) {
+                if (chain.tag != NodeType::PI) {
+                    // the chain is not syntactically a Pi (a definition that unfolds to one, a solved metavariable): substitute what was consumed, then evaluate to expose the Pi
+                    NodeId current = done_rev.empty() ? chain : instantiate(chain, done_rev);
+                    done_rev.clear();
+                    Value cv = eval(current, ec.values);
+                    if (!std::get_if<VPi>(&cv))
+                        return err(TypeErrorKind::NotAFunction, apply_all(head, std::vector<NodeId>(args.begin(), args.begin() + static_cast<std::ptrdiff_t>(i))), "applying a term that is not a function");
+                    chain = quote(cv, ec.size());       // the Pi, as a node
+                }
+                Pi p = ctx().pis[chain.index];
+                NodeId dom = done_rev.empty() ? p.dom_id : instantiate(p.dom_id, done_rev);
+                if (ElabResult r = check(args[i], dom, ec, es); !r) return std::unexpected(r.error());
+                done_rev.insert(done_rev.begin(), args[i]); chain = p.cod_id;
+            }
+            return done_rev.empty() ? chain : instantiate(chain, done_rev);
         }
         case NodeType::LAMBDA: {
             std::vector<NodeId> doms; NodeId body = t;
@@ -5400,27 +5464,33 @@ inline TypeResult infer(NodeId t, ElabCtx& ec, ElabState& es) {
 /// Checks a chain of lambdas against a Pi telescope in ONE pass (one instantiate for the body, not one per binder).
 inline ElabResult check_lambda(NodeId t, NodeId expected_ty, ElabCtx& ec, ElabState& es) {
     ITP_STACK_CHECK();
-    Value cur = eval(expected_ty, ec.values);
-    ElabCtx cur_ec = ec; std::vector<NodeId> fv_rev; NodeId body = t;
+    // The expected type is read as written: while it is syntactically a Pi its domains and its body are taken from the syntax (with the binders opened so far substituted), and it is evaluated
+    // only to expose a Pi that a definition or a solved metavariable hides. (It used to be evaluated and quoted in full first; the normal form of a statement about open polynomial terms is
+    // exponentially larger than the statement, and the body was then compared against that.)
+    ElabCtx cur_ec = ec; std::vector<NodeId> fv_rev, chain_rev; NodeId body = t, chain = expected_ty;
     const uint32_t n = ec.size(); uint32_t j = 0;
     while (body.tag == NodeType::LAMBDA) {
-        auto* pi = std::get_if<VPi>(&cur);
-        if (!pi) {
-            if (j == 0) return std::unexpected(TypeError{TypeErrorKind::Mismatch, t, expected_ty, "checking a lambda against a non-function expected type"});
-            break;
+        if (chain.tag != NodeType::PI) {
+            NodeId current = chain_rev.empty() ? chain : instantiate(chain, chain_rev);        // the rest of the expected type, in the context opened so far
+            Value cv = eval(current, cur_ec.values);
+            if (!std::get_if<VPi>(&cv)) {
+                if (j == 0) return std::unexpected(TypeError{TypeErrorKind::Mismatch, t, expected_ty, "checking a lambda against a non-function expected type"});
+                break;
+            }
+            chain = quote(cv, n + j); chain_rev.clear();
         }
+        Pi p = ctx().pis[chain.index];
         Lambda l = ctx().lambdas[body.index];
         NodeId dom_j = instantiate(l.type_id, fv_rev);
-        NodeId expected_dom = quote(eval(pi->dom_id, pi->env), n + j);
+        NodeId expected_dom = chain_rev.empty() ? p.dom_id : instantiate(p.dom_id, chain_rev);
         // F21: a binder annotation must itself be a type. Unifying it with the expected domain is not enough (an ill-typed annotation can be
         // convertible to a well-typed one), and infer(Lambda) already insists on it. Skipped only when it IS the expected domain.
         if (dom_j != expected_dom) { auto sdom = sort_level_of(dom_j, cur_ec, es, "Lambda domain must be a type"); if (!sdom) return std::unexpected(sdom.error()); }
         if (ElabResult r = unify(dom_j, expected_dom, cur_ec, es); !r) return r;
-        Value next = eval(pi->cod_id, pi->env.extend(fresh_neutral(n + j)));
-        cur = std::move(next);
-        cur_ec = cur_ec.extend(dom_j); fv_rev.insert(fv_rev.begin(), mk_fvar(n + j)); body = l.body_id; ++j;
+        cur_ec = cur_ec.extend(dom_j); fv_rev.insert(fv_rev.begin(), mk_fvar(n + j)); chain_rev.insert(chain_rev.begin(), mk_fvar(n + j));
+        chain = p.cod_id; body = l.body_id; ++j;
     }
-    return check(instantiate(body, fv_rev), quote(cur, n + j), cur_ec, es);
+    return check(instantiate(body, fv_rev), chain_rev.empty() ? chain : instantiate(chain, chain_rev), cur_ec, es);
 }
 
 inline ElabResult check_match(NodeId t, NodeId expected_ty, ElabCtx& ec, ElabState& es) {
@@ -5549,29 +5619,92 @@ inline ElabResult exact(ProofState& ps, NodeId term, std::optional<uint32_t> tar
     return {};
 }
 
-inline ElabResult apply(ProofState& ps, NodeId candidate, std::optional<uint32_t> target_meta_id = std::nullopt) {
+/// The type of `candidate` read off its SYNTAX, normalising nothing: the declared type of its head (a global, or a context variable) with the arguments substituted in as the Pi binders are peeled.
+/// `infer` returns the type quoted from a fully delta-reduced value, which unfolds every stuck recursive function into its `match`; this one keeps the definitions folded, which is what the tactic layer
+/// wants to show. It is a type of the candidate only up to conversion (the same as the inferred one) and is used for presentation, never as evidence: `infer` has validated the candidate already.
+/// nullopt when the head is neither a global nor a context variable, or when a binder to peel is hidden behind a definition -- the caller then falls back to the inferred type.
+inline std::optional<NodeId> declared_type_of(NodeId candidate, const ElabCtx& ec) {
+    detail::AppSpine sp = detail::decompose_app_spine(candidate);
+    NodeId ty;
+    if (sp.head.tag == NodeType::CONST) ty = ctx().globals[ctx().consts[sp.head.index].global_id].type;
+    else if (sp.head.tag == NodeType::VAR) {
+        Var v = ctx().vars[sp.head.index];
+        if (v.bound || v.n >= ec.size()) return std::nullopt;
+        ty = ec.types[v.n];
+    } else return std::nullopt;
+    for (NodeId a : sp.args) {
+        if (ty.tag != NodeType::PI) return std::nullopt;
+        ty = instantiate1(ctx().pis[ty.index].cod_id, a);
+    }
+    return ty;
+}
+
+/// `simp`: the new goals (the premises of the candidate) are written in the display normal form -- definitions folded, a recursive function unfolded only where its decreasing argument is a
+/// constructor -- instead of with every definition unfolded. The goals are convertible either way; the choice only decides what a person (or a tactic that rewrites by pattern) sees.
+/// Unification and the peeling of the candidate's type always use full delta, as before; with `simp` the peeling starts from the candidate's declared type (declared_type_of) rather than from the
+/// inferred, delta-normalised one, so that the premises are not already unfolded when they are read off, and each new goal is read once more after unification so that it mentions what the
+/// lemma's other arguments were solved to instead of the metavariables that stood for them.
+inline ElabResult apply(ProofState& ps, NodeId candidate, std::optional<uint32_t> target_meta_id = std::nullopt, bool simp = false) {
     auto idx_opt = find_goal_index(ps, target_meta_id);
     if (!idx_opt) return no_goal_error("apply", target_meta_id);
     Goal g = ps.goals[*idx_opt]; // copy: only committed to ps.goals on success
     TypeResult cand_ty_r = infer(candidate, g.ec, ps.es);
     if (!cand_ty_r) return std::unexpected(cand_ty_r.error());
     NodeId applied = candidate;
-    Value cur_ty_val = eval(*cand_ty_r, g.ec.values);
+    NodeId start_ty = *cand_ty_r;
+    if (simp) { if (auto declared = declared_type_of(candidate, g.ec)) start_ty = *declared; }
+    Value cur_ty_val = eval(start_ty, g.ec.values);
     std::vector<std::pair<uint32_t, NodeId>> arg_metas; // (reference meta id, its own unwrapped arg type)
+    std::vector<NodeId> meta_refs;                      // the metavariable standing for each argument, in order
     while (true) {
         auto* pi = std::get_if<VPi>(&cur_ty_val);
         if (!pi) break;
-        NodeId arg_ty = quote(eval(pi->dom_id, pi->env), g.ec.size());
+        NodeId arg_ty;
+        if (simp) { NoDeltaScope keep_folded; GuardedUnfoldScope guarded; arg_ty = quote(eval(pi->dom_id, pi->env), g.ec.size()); }
+        else arg_ty = quote(eval(pi->dom_id, pi->env), g.ec.size());
         uint32_t m = ctx().meta_ctx.fresh(close_pi_over_context(arg_ty, g.ec), g.ec.size());
         arg_metas.push_back({m, arg_ty});
         NodeId meta_ref = meta_applied_to_context(m, g.ec.size());
+        meta_refs.push_back(meta_ref);
         applied = mk_app(applied, meta_ref);
         Value next = eval(pi->cod_id, pi->env.extend(eval(meta_ref, g.ec.values)));
         cur_ty_val = std::move(next);
     }
     NodeId concl_ty = quote(cur_ty_val, g.ec.size());
-    if (ElabResult r = unify(concl_ty, g.target, g.ec, ps.es); !r) return r;
-    if (ElabResult r = drain_pending(g.ec, ps.es); !r) return r;
+    // with simp the lemma's conclusion is also read with definitions folded (and a recursive function unfolded only on a constructor): unifying THAT against the goal is first order, so `?n + ?k` against
+    // `n + k` solves ?k := k, which the delta-unfolded stuck `match`es of the same two terms cannot do
+    std::optional<NodeId> concl_folded;
+    if (simp) {
+        NoDeltaScope keep_folded; GuardedUnfoldScope guarded;
+        Value cur = eval(start_ty, g.ec.values); bool exposed = true;
+        for (NodeId mr : meta_refs) {
+            auto* pi = std::get_if<VPi>(&cur);
+            if (!pi) { exposed = false; break; }          // a binder hidden behind a definition: only full delta sees it
+            Value next = eval(pi->cod_id, pi->env.extend(eval(mr, g.ec.values)));
+            cur = std::move(next);
+        }
+        if (exposed && !std::holds_alternative<VPi>(cur)) concl_folded = quote(cur, g.ec.size());
+    }
+    {
+        auto unify_and_drain = [&](NodeId concl) -> ElabResult {
+            if (ElabResult r = unify(concl, g.target, g.ec, ps.es); !r) return r;
+            return drain_pending(g.ec, ps.es);
+        };
+        ElabResult unified;
+        if (!simp) unified = unify_and_drain(concl_ty);
+        else {   // the attempts in order of preference: first order on the folded forms; full delta with the solutions kept folded; the ordinary attempt (whose error is the one reported)
+            auto mark = ctx().meta_ctx.checkpoint(); ElabState before = ps.es;
+            auto undo = [&] { ctx().meta_ctx.rewind(mark); ps.es = before; };
+            unified = std::unexpected(TypeError{TypeErrorKind::UnificationFailure, g.target, std::nullopt, "apply: no attempt was made"});
+            if (concl_folded) {
+                { NoDeltaScope keep_folded; GuardedUnfoldScope guarded; FoldSolutionsScope fold; unified = unify_and_drain(*concl_folded); }
+                if (!unified) undo();
+            }
+            if (!unified) { { FoldSolutionsScope fold; unified = unify_and_drain(concl_ty); } if (!unified) undo(); }
+            if (!unified) unified = unify_and_drain(concl_ty);
+        }
+        if (!unified) return unified;
+    }
     {   // F25: a SOLVED argument meta must have received a solution OF ITS TYPE. Unification solves `?A := goal` for a lemma whose conclusion is a bare variable (choice : Pi (A : Type1), Nonempty A -> A) even when the
         // goal lives in another universe; nothing checked that, so apply produced a state that could never verify (the kernel caught it only at the end). The check runs on a scratch copy and its meta assignments are undone.
         auto mark = ctx().meta_ctx.checkpoint(); ElabState scratch = ps.es; bool solutions_ok = true; std::string why;
@@ -5588,13 +5721,34 @@ inline ElabResult apply(ProofState& ps, NodeId candidate, std::optional<uint32_t
     std::vector<Goal> new_goals;
     for (auto& [m, arg_ty] : arg_metas) {
         if (ctx().meta_ctx.is_solved(m)) continue;
-        uint32_t subgoal_meta = ctx().meta_ctx.fresh(close_pi_over_context(arg_ty, g.ec), g.ec.size());
+        NodeId goal_ty = arg_ty;
+        // with simp the goal is read again now that unification is done: the metavariables that stood for the lemma's other arguments are replaced by what they were solved to, so the goal is the
+        // plain statement (`m + n = m + k`), not `m + ?7 m n k = m + ?8 m n k`
+        if (simp) { NoDeltaScope keep_folded; GuardedUnfoldScope guarded; goal_ty = quote(eval(arg_ty, g.ec.values), g.ec.size()); }
+        uint32_t subgoal_meta = ctx().meta_ctx.fresh(close_pi_over_context(goal_ty, g.ec), g.ec.size());
         ctx().meta_ctx.solve(m, close_over_context(meta_applied_to_context(subgoal_meta, g.ec.size()), g.ec));
-        new_goals.push_back(Goal{subgoal_meta, g.ec, g.hyps, arg_ty});
+        new_goals.push_back(Goal{subgoal_meta, g.ec, g.hyps, goal_ty});
     }
     ctx().meta_ctx.solve(g.meta_id, close_over_context(applied, g.ec));
     ps.goals.erase(ps.goals.begin() + *idx_opt);
     ps.goals.insert(ps.goals.begin() + *idx_opt, new_goals.begin(), new_goals.end());
+    return {};
+}
+
+/// Replaces the goal by a DEFINITIONALLY EQUAL one (`change`). The new target must be a well-formed type and convertible with the old one; the proof of the new goal is, term for term, the proof of the old one
+/// (the old goal's metavariable is solved by the new one, applied to the context), so nothing is wrapped around it. What this is for: `apply` and `induct` hand back goals normalised with full delta
+/// (a recursive function is unfolded even on a variable); a caller that wants a goal in another convertible form -- the tactic layer's `simpl`-style form, say -- gets it here without that re-normalisation.
+inline ElabResult change_target(ProofState& ps, NodeId new_target, std::optional<uint32_t> target_meta_id = std::nullopt) {
+    auto idx_opt = find_goal_index(ps, target_meta_id);
+    if (!idx_opt) return no_goal_error("change", target_meta_id);
+    Goal g = ps.goals[*idx_opt];
+    ElabCtx ec = g.ec;
+    if (auto sort = sort_level_of(new_target, ec, ps.es, "change: the new target is not a type"); !sort) return std::unexpected(sort.error());
+    if (!conv_value(eval(g.target, g.ec.values), eval(new_target, g.ec.values), g.ec.size()))
+        return std::unexpected(TypeError{TypeErrorKind::Mismatch, new_target, g.target, "change: the new target is not definitionally equal to the goal"});
+    uint32_t new_meta = ctx().meta_ctx.fresh(close_pi_over_context(new_target, g.ec), g.ec.size());
+    ctx().meta_ctx.solve(g.meta_id, close_over_context(meta_applied_to_context(new_meta, g.ec.size()), g.ec));
+    ps.goals[*idx_opt] = Goal{new_meta, g.ec, g.hyps, new_target};
     return {};
 }
 
@@ -5690,7 +5844,23 @@ inline uint32_t get_or_build_same_ctor(uint32_t family_gid) {
 namespace detail {
 struct ScrutInfo { uint32_t type_gid = 0; std::vector<NodeId> indices; };
 }
-inline std::expected<detail::ScrutInfo, TypeError> scrutinee_info(const char* who, const Goal& g, uint32_t hyp_level) {
+/// `simp`: the types of a constructor's fields in the display normal form (definitions folded, a recursive function unfolded only where its decreasing argument is a constructor, beta-redexes contracted).
+/// The forcing of the parameters substitutes them into the field types syntactically, which leaves `(fun x => n + x = m) j` where a person would write `n + j = m`. The field j is read in the
+/// context extended by the fields before it (levels n .. n+j-1); the result is convertible with the input, which is all the runtime branch and the new goal's context need.
+inline std::vector<NodeId> fields_in_display_form(const std::vector<NodeId>& arg_types, uint32_t n, const Env& base) {
+    NoDeltaScope keep_folded; GuardedUnfoldScope guarded;
+    Env env = base; std::vector<NodeId> out; out.reserve(arg_types.size());
+    for (uint32_t j = 0; j < arg_types.size(); ++j) {
+        out.push_back(quote(eval(arg_types[j], env), n + j));
+        env = env.extend(fresh_neutral(n + j));
+    }
+    return out;
+}
+
+/// `simp`: the parameters and indices of the hypothesis's type are read back with definitions folded (as written in the hypothesis) instead of fully delta-reduced. The head of the type is found with full
+/// delta either way (a hypothesis `h : Iff A B` is a conjunction), but what the arguments look like is only a question of presentation -- and the motive is built by replacing these terms where they occur
+/// in the goal and the other hypotheses, which are in the same folded form.
+inline std::expected<detail::ScrutInfo, TypeError> scrutinee_info(const char* who, const Goal& g, uint32_t hyp_level, bool simp = false) {
     NodeId scrut_ty = g.hyps[hyp_level].type;
     Value v = eval(scrut_ty, g.ec.values);
     auto* nt = std::get_if<VNeutral>(&v);
@@ -5702,7 +5872,8 @@ inline std::expected<detail::ScrutInfo, TypeError> scrutinee_info(const char* wh
     for (auto& frame : nt->spine) {
         auto* af = std::get_if<ApplyFrame>(&frame);
         if (!af) return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, scrut_ty, std::nullopt, std::string(who) + ": scrutinee's type has a non-application eliminator frame; cannot enumerate its indices"});
-        si.indices.push_back(quote(af->arg, g.ec.size()));
+        if (simp) { NoDeltaScope keep_folded; si.indices.push_back(quote(af->arg, g.ec.size())); }
+        else si.indices.push_back(quote(af->arg, g.ec.size()));
     }
     return si;
 }
@@ -5714,12 +5885,12 @@ inline NodeId generalized_goal(const Goal& g, const std::vector<std::pair<NodeId
     return close_binders(true, doms, reverted_js, replace_terms(g.target, subs));
 }
 
-inline ElabResult cases(ProofState& ps, uint32_t hyp_level, std::optional<uint32_t> target_meta_id = std::nullopt, const std::vector<uint32_t>& generalizing = {}) {
+inline ElabResult cases(ProofState& ps, uint32_t hyp_level, std::optional<uint32_t> target_meta_id = std::nullopt, const std::vector<uint32_t>& generalizing = {}, bool simp = false) {
     auto idx_opt = find_goal_index(ps, target_meta_id);
     if (!idx_opt) return no_goal_error("cases", target_meta_id);
     Goal g = ps.goals[*idx_opt];
     if (hyp_level >= g.hyps.size()) return std::unexpected(TypeError{TypeErrorKind::Other, NodeId{}, std::nullopt, "cases: hypothesis index out of range"});
-    auto si = scrutinee_info("cases", g, hyp_level); if (!si) return std::unexpected(si.error());
+    auto si = scrutinee_info("cases", g, hyp_level, simp); if (!si) return std::unexpected(si.error());
     const uint32_t n = g.ec.size(), tgid = si->type_gid, arity = static_cast<uint32_t>(si->indices.size());
     const std::vector<NodeId>& concrete_indices = si->indices;
     MotiveParts mp = motive_binders(tgid, n, concrete_indices);        // parameters (option) are FIXED: not generalised, not abstracted by the motive or the Fix
@@ -5786,6 +5957,7 @@ inline ElabResult cases(ProofState& ps, uint32_t hyp_level, std::optional<uint32
         const detail::InstantiatedCtor& inst = insts[ci]; const CtorIndexForcing& forcing = forcings[ci];
         const uint32_t ctor_arity = static_cast<uint32_t>(inst.arg_types.size());
         std::vector<NodeId> arg_types = apply_ctor_index_forcing(inst.arg_types, forcing);
+        if (simp) arg_types = fields_in_display_form(arg_types, n, g.ec.values);
         NodeId ctor_app = forced_ctor_app(ctor_gid, n, ctor_arity, inst, forcing);
         std::vector<NodeId> forced_result_indices = apply_ctor_index_forcing_to_result_indices(inst.result_indices, forcing);
         NodeId branch_expected = mk_app(apply_all(motive_original, forced_result_indices), ctor_app);
@@ -5793,7 +5965,8 @@ inline ElabResult cases(ProofState& ps, uint32_t hyp_level, std::optional<uint32
         for (uint32_t ai = 0; ai < ctor_arity; ++ai) be_env = be_env.extend(fresh_neutral(n + ai));
         const NodeId branch_expected_raw = branch_expected;
         std::vector<NodeId> reverted_dom_types;
-        if (!reverted_js.empty()) {   // the reverted layers are normalised with FULL delta, exactly as the reference does
+        if (!reverted_js.empty()) {   // the reverted layers are normalised with FULL delta, exactly as the reference does (with simp: definitions stay folded)
+            std::optional<NoDeltaScope> fold; if (simp) fold.emplace();
             Value cur_val = eval(branch_expected, be_env);
             for (std::size_t ri = 0; ri < reverted_js.size(); ++ri) {
                 auto* pi = std::get_if<VPi>(&cur_val);
@@ -5811,6 +5984,7 @@ inline ElabResult cases(ProofState& ps, uint32_t hyp_level, std::optional<uint32
         // a branch that carries the same_ctor premise has it BEFORE the reverted binders: recompute those layers one level up
         std::vector<NodeId> reverted_dom_types_up; NodeId branch_expected_up = branch_expected;
         if (exploit_ci && !reverted_js.empty()) {
+            std::optional<NoDeltaScope> fold; if (simp) fold.emplace();
             Value cur_val = eval(branch_expected_raw, be_env);
             for (std::size_t ri = 0; ri < reverted_js.size(); ++ri) {
                 auto* pi = std::get_if<VPi>(&cur_val);
@@ -5861,12 +6035,12 @@ inline ElabResult cases(ProofState& ps, uint32_t hyp_level, std::optional<uint32
 }
 
 inline ElabResult induct(ProofState& ps, uint32_t hyp_level, std::optional<uint32_t> target_meta_id = std::nullopt, const std::vector<uint32_t>& generalizing = {},
-                          std::optional<uint32_t> eq_gid = std::nullopt, std::optional<uint32_t> refl_gid = std::nullopt) {
+                          std::optional<uint32_t> eq_gid = std::nullopt, std::optional<uint32_t> refl_gid = std::nullopt, bool simp = false) {
     auto idx_opt = find_goal_index(ps, target_meta_id);
     if (!idx_opt) return no_goal_error("induct", target_meta_id);
     Goal g = ps.goals[*idx_opt];
     if (hyp_level >= g.hyps.size()) return std::unexpected(TypeError{TypeErrorKind::Other, NodeId{}, std::nullopt, "induct: hypothesis index out of range"});
-    auto si = scrutinee_info("induct", g, hyp_level); if (!si) return std::unexpected(si.error());
+    auto si = scrutinee_info("induct", g, hyp_level, simp); if (!si) return std::unexpected(si.error());
     const uint32_t n = g.ec.size(), tgid = si->type_gid, arity = static_cast<uint32_t>(si->indices.size());
     const std::vector<NodeId>& concrete_indices = si->indices;
     {   // Induction needs something to recurse on. The reference never accepted induct on a non-recursive family (e.g. Eq): its level-based
@@ -5972,6 +6146,7 @@ inline ElabResult induct(ProofState& ps, uint32_t hyp_level, std::optional<uint3
         CtorIndexForcing forcing_agent = unify_ctor_pattern_indices(inst_agent, concrete_indices, n, ctor_arity, g.ec.values, &is_param, use_eq ? &bad : nullptr);
         if (!forcing_agent.ok) return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, g.target, std::nullopt, forcing_agent.error});
         std::vector<NodeId> arg_types_agent = apply_ctor_index_forcing(inst_agent.arg_types, forcing_agent);
+        if (simp) arg_types_agent = fields_in_display_form(arg_types_agent, n, g.ec.values);
         ElabCtx branch_ec = g.ec; std::vector<Hypothesis> branch_hyps = g.hyps;
         std::vector<uint32_t> actual(ctor_arity);
         auto to_actual = [&](NodeId t, uint32_t upto) { std::unordered_map<uint32_t, NodeId> m; for (uint32_t j = 0; j < upto; ++j) m[n + j] = mk_fvar(actual[j]); return replace_fvars(t, m); };
