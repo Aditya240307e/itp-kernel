@@ -95,11 +95,17 @@ class DispatchNotation(Notation):
     def lit(self, n): return self.default.lit(n)
 
 
+# The work budget of one call into the kernel, in steps (see FuelExhausted in itp_kernel.hpp): a wrong or pathological action fails after this much work instead of running on. Every call to a library
+# so far has needed under 10^7 steps; this is two orders of magnitude of headroom for the large proof terms of a later library (about half a minute). ITP_FUEL overrides it (0 = unlimited).
+DEFAULT_FUEL = int(os.environ.get('ITP_FUEL', 2 * 10 ** 9))
+
+
 class World:
-    def __init__(self, parameters=True, prop_elim=True):
+    def __init__(self, parameters=True, prop_elim=True, fuel=None):
         self.k = E.Kernel()
         self.k.set_option('prop_elim', prop_elim)
         self.k.set_option('parameters', parameters)
+        self.k.set_fuel(DEFAULT_FUEL if fuel is None else fuel)
         self.ctx = []                       # types (handles) of the open context variables, outermost first; the variable at level l is mk_fvar(l)
         self.ctx_names = []                 # display names of those variables
         self.gid = {}                       # global name -> id
@@ -312,16 +318,30 @@ class World:
         fam, fargs = self.spine(sty); v = self.k.view(fam.n)
         if v[0] != 'const': raise AuthorError('cannot match on a term whose type is not an inductive family: %s' % self.show(sty))
         fam_gid = v[1]
-        if isinstance(motive, Term): mot = motive
-        else:
-            if fargs: raise AuthorError('a motive for an indexed or parameterised family must be passed as a Term (a lambda over the indices and the scrutinee)')
-            mot = self.lam(sty, motive)
-        ctors = self.constructors(fam_gid)
-        if len(ctors) != len(branches): raise AuthorError('%s has %d constructors, %d branches given' % (self.gname[fam_gid], len(ctors), len(branches)))
         slots = self.k.param_slots(fam_gid); nparams = sum(slots)
         if list(slots[:nparams]) != [1] * nparams: raise AuthorError('match: the parameters of %s are not a prefix of its arguments' % self.gname[fam_gid])
+        if isinstance(motive, Term): mot = motive
+        else:
+            if len(fargs) > nparams: raise AuthorError('a motive for an indexed family must be passed as a Term (a lambda over the parameters, the indices and the scrutinee)')
+            mot = self._motive(fam_gid, fargs[:nparams], sty, motive)
+        ctors = self.constructors(fam_gid)
+        if len(ctors) != len(branches): raise AuthorError('%s has %d constructors, %d branches given' % (self.gname[fam_gid], len(ctors), len(branches)))
         bs = [br if isinstance(br, Term) else self._branch(cname, fargs[:nparams], br) for cname, br in zip(ctors, branches)]
         return self.T(self.k.mk_match(scrut.n, mot.n, [b.n for b in bs]))
+
+    def _motive(self, fam_gid, params, sty, fn):
+        """the kernel's motive of a match on a family WITH PARAMETERS and no indices, from a function of the scrutinee: one unused binder per parameter slot, then the scrutinee (whose type mentions the actual
+        parameters). Without parameters this is just `fun (x : T) => fn x`."""
+        ty = self.T(self.k.global_info(fam_gid)[1]); doms = []; base = len(self.ctx)
+        try:
+            for prm in params:
+                parts = self.pi_parts(ty)
+                if parts is None: raise AuthorError('%s has fewer parameters than supplied' % self.gname[fam_gid])
+                self._bind(parts[0]); doms.append(parts[0]); ty = self.instantiate(parts[1], prm)
+            lvl, q = self._bind(sty, self._argname(fn)); doms.append(sty)
+            body = self.term(fn(q), 'motive body')
+        finally: self._unbind(len(self.ctx) - base)
+        return self.T(self.k.close_telescope('lam', [d.n for d in doms], body.n, base))
 
     def constructors(self, family):
         """the constructor names of an inductive family (a name or a global id), in declaration order"""
@@ -329,9 +349,16 @@ class World:
         return [self.gname[c] for c in self.k.global_info(gid)[5]]
 
     def _branch(self, cname, params, fn):
-        ty = self.ctor_fields(cname, params); vars_ = []; doms = []
+        """one branch of a match: `fn` receives the constructor's FIELDS. The kernel's branches of a family with parameters also carry one binder per parameter slot, in front and unused (their types are those of the
+        constructor's leading Pi's), while the types of the fields mention the scrutinee's own parameters: `match p with fun (A' : Type) (B' : Type) (a : A) (b : B) => a` for `p : Prod A B`."""
+        ty = self.global_type(cname); vars_ = []; doms = []
         base = len(self.ctx)
         try:
+            for prm in params:
+                parts = self.pi_parts(ty)
+                if parts is None: raise AuthorError('constructor %s has fewer parameters than supplied' % cname)
+                lvl, x = self._bind(parts[0]); doms.append(parts[0]); ty = self.instantiate(parts[1], prm)
+            nparams = len(doms)
             while True:
                 p = self.pi_parts(ty)
                 if p is None: break
@@ -340,9 +367,9 @@ class World:
                 ty = p[1]
             if hasattr(fn, '__code__'):
                 for i, nm in enumerate(fn.__code__.co_varnames[:fn.__code__.co_argcount]):
-                    if i < len(vars_): self.ctx_names[base + i] = nm
+                    if i < len(vars_): self.ctx_names[base + nparams + i] = nm
             body = self.term(fn(*vars_), 'branch')
-        finally: self._unbind(len(vars_))
+        finally: self._unbind(len(self.ctx) - base)
         return self.T(self.k.close_telescope('lam', [d.n for d in doms], body.n, base))
     def instantiate_with(self, body, vars_):
         """`body` has loose bound variables for the vars_ bound so far (innermost last): instantiate them"""

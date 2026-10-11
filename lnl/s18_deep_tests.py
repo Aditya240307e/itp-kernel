@@ -12,7 +12,7 @@ test failure with a name instead of a dead gate:
 Never a crash, never a hang, never a wrong answer."""
 import sys, os, subprocess, threading, time
 HERE = os.path.dirname(os.path.abspath(__file__))
-SHAPES = ['numeral', 'neutral', 'lambda', 'pi', 'let', 'match', 'beta', 'spine', 'release']
+SHAPES = ['numeral', 'neutral', 'lambda', 'pi', 'let', 'match', 'beta', 'spine', 'solution', 'metachain', 'metaspine', 'release']
 N_SMALL, N_BIG = 150000, 30000
 
 def child(shape, mode):
@@ -57,6 +57,24 @@ def child(shape, mode):
     if shape == 'release':
         # values built iteratively (so nothing recurses on the way IN) and dropped: freeing them must not recurse either. A million levels is far beyond any stack.
         t = Z
+    sol = None
+    if shape == 'solution':
+        # a proof built step by step: the solution of the first goal is  Succ ?m1,  that of ?m1 is  Succ ?m2, ...  (n steps, each one cheap), so extracting it resolves a chain of n metavariable solutions,
+        # and the result is a numeral n deep that nothing in it can reduce
+        sol = k.start_proof(NAT)
+        for _ in range(n): sol.apply(S)
+        sol.exact(Z); t = Z
+    meta_end = None
+    if shape == 'metachain':
+        # metavariables assigned to one another: ?m0 := ?m1, ?m1 := ?m2, ... (n of them); resolving the first goes through all n solutions, and no node of a term is rebuilt on the way
+        ms = [k.fresh_meta(NAT, 0) for _ in range(n)]
+        for i in range(n - 1): k.unify_open(k.mk_meta(ms[i]), k.mk_meta(ms[i + 1]), [])
+        t = k.mk_meta(ms[0]); meta_end = k.mk_meta(ms[-1])
+    elif shape == 'metaspine':
+        # ?f := fun x => x, and the term ?f (?f (... x)) n deep: every argument of a solved metavariable is resolved before it is spliced in
+        fid = k.fresh_meta(k.mk_pi(NAT, NAT), 0); k.unify_open(app(k.mk_meta(fid), k.mk_fvar(0)), k.mk_fvar(0), [NAT])
+        t = k.mk_fvar(0); meta_end = t
+        for _ in range(n): t = app(k.mk_meta(fid), t)
     results = []
     def op(name, f):
         t_op = time.perf_counter()
@@ -70,6 +88,19 @@ def child(shape, mode):
             for kind, what in ((0, 'ctor chain'), (1, 'environment'), (2, 'closure chain')):
                 op('release ' + what.replace(' ', '_'), lambda kind=kind: k.stress_value_release(1_000_000, kind))
             return
+        if shape in ('metachain', 'metaspine'):
+            op('resolve_metas', lambda: k.resolve_metas(t) == meta_end or (_ for _ in ()).throw(RuntimeError('resolving gave a different term than the end of the chain')))
+            op('node_info', lambda: k.node_info(t))
+            op('check_node_info', lambda: (lambda bad: bad == '' or (_ for _ in ()).throw(RuntimeError('node facts disagree: ' + bad)))(k.check_node_info(t)))
+            return
+        if shape == 'solution':
+            got = {}
+            op('is_complete', lambda: sol.is_complete())
+            op('extract', lambda: got.setdefault('proof', sol.extract()) is not None)
+            if 'proof' in got:                    # the extracted numeral is what was built, and the kernel accepts it
+                op('check_extracted', lambda: k.check_open(got['proof'], NAT, [])[0] or (_ for _ in ()).throw(RuntimeError('the extracted solution is not a Nat')))
+                op('extracted_is_numeral', lambda: got['proof'] == numeral(n) or (_ for _ in ()).throw(RuntimeError('the extracted solution differs from the numeral built step by step')))
+            return
         op('infer', lambda: k.infer_open(t, []))
         op('normalize', lambda: k.normalize_open(t, 0))
         op('lift', lambda: k.lift(t, 1))
@@ -77,6 +108,11 @@ def child(shape, mode):
         op('dump_raw', lambda: len(k.dump_raw(t)))
         op('instantiate', lambda: k.instantiate(k.lift(t, 1) if shape != 'lambda' else t, [Z]))
         op('abstract_fvars', lambda: k.abstract_fvars(t, [0]))
+        op('replace_fvars', lambda: k.replace_fvars(t, [(0, Z)]))
+        op('resolve_metas', lambda: k.resolve_metas(t))
+        op('check_node_info', lambda: (lambda bad: bad == '' or (_ for _ in ()).throw(RuntimeError('node facts disagree: ' + bad)))(k.check_node_info(t)))
+        op('node_info', lambda: k.node_info(t))
+        op('extract', lambda: (lambda ps: (ps.exact(t), ps.extract())[1])(k.start_proof(NAT)))              # the proof-term path: resolve the metavariables, then scan for anything that could reduce
         if shape in ('numeral', 'neutral', 'match', 'beta', 'let'):          # terms of type Nat
             if shape == 'neutral':
                 other = app(app(ADD, Z), Z)

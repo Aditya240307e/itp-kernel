@@ -380,3 +380,31 @@ S2-style random typed terms. Mutant inventory: 59 defined (M1-M37, M39-M60), 58 
 * **Not done, and now the real bottlenecks:** no universe polymorphism or cumulativity (Eq cannot even be stated on proofs: Eq P p q needs A : Type1 but P : Type0), no proof irrelevance, no structures/records, no implicit arguments or instances, unary Nat (2024 is 2024 constructors),
   no automation beyond the basic tactics, no numbers beyond Nat. See ROADMAP.md.
 * Inventory: 71 mutants defined (M1-M37, M39-M71), 70 caught (the survivor is M12). New ones were each run against their own gate only; the 90-minute full re-run has NOT been repeated.
+
+
+---
+# Gate index (2026-10-11): 32 gates, 601 mutants defined
+
+`python3 run_gates.py` runs every gate (the list is `GATE_CMDS` in mutate.py, the one place to add a gate); `python3 mutate.py --check` verifies every mutant's anchor; `python3 mutate.py PREFIX...` runs the mutants
+whose names start with a prefix (each is built in isolation and must make some gate fail). Each gate's docstring says what it pins down and why.
+
+| gate | what it pins down |
+|---|---|
+| `s2_tests.py` | the typing core against the reference kernel |
+| `s3_tests.py`, `s4_tests.py`, `s5_tests.py`, `s5_probe_tests.py`, `harness.py` | metas / unification / intro / apply / rewrite, cases / induct, the library index and the probing protocol, lockstep against the reference (raw `apply`, no `simp`) |
+| `s6_logic_tests.py`, `s6_f6_tests.py`, `s9_strong_tests.py` | logical vocabulary, induction with Pi goals and `generalizing`, strong induction by a bounded predicate |
+| `s7_param_tests.py`, `s13_prop_tests.py`, `s14_prop_world_tests.py`, `s15_classical_tests.py` | parameters vs indices, Prop with restricted elimination, the Prop/Type world, the classical axioms |
+| `s8_indep_tests.py` | the independently written checker against the kernels |
+| `s10_noconf_tests.py`, `s11_eqgen_tests.py`, `s12_probe_eq_tests.py` | injectivity lemmas, index generalisation with equations, probing x equations |
+| `s16_quot_tests.py`, `s17_irrelevance_tests.py` | quotients; definitional proof irrelevance |
+| `s18_deep_tests.py`, `s19_boundary_tests.py`, `s20_reservation_tests.py`, `s21_view_tests.py` | terms of any depth, the Python API boundary, well-founded global environment, reading terms back |
+| `s22_simp_tests.py` | display normal form, `change`, `apply` with folded premises (which reading of the lemma meets the goal) |
+| `s23_ring_tests.py`, `s24_bin_tests.py`, `s25_nring_tests.py` | Nat library and `ring`; binary naturals and their bridge; `ring` over N and the shared lemma template |
+| `s26_memo_tests.py` | node facts, shared-term traversals, typing memo, linear proof extraction |
+| `s27_fuel_tests.py` | the work budget and all-or-nothing tactics |
+| `s28_headunfold_tests.py` | definitions at the head of a goal or hypothesis are unfolded on syntax |
+| `s29_apply_pi_goal_tests.py` | `apply` on implication / negation / universal goals (arity rule) |
+| `oracle_gate.py` | the self-consistency oracle (random scripts, zero tolerance) |
+
+Libraries: `lnl_base.py` (logic, equality, Nat), `nat_lib.py`, `bin_lib.py` (Pos / N), `quot_lib.py` (quotients, `funext`, Prod, `Quot.lift2`), `int_lib.py` (Z), `ring.py` + `ring_lib.py` (the `ring` tactic and its lemma
+template), `tactics.py` and `author.py` (the authoring layer). `repros/` holds small scripts that reproduce findings F28-F30.

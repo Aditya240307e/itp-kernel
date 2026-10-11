@@ -384,7 +384,7 @@ def main():
     trace('H. speed')
     # ------------------------------------------------------------------------------------------------------------------ H. speed
     def timed(label, term, want, limit):
-        t = time.time(); got = read_n(term); dt = time.time() - t
+        t = time.process_time(); got = read_n(term); dt = time.process_time() - t          # CPU time: a loaded machine must not fail a speed check
         expect(got == want, 'H  %s: wrong value' % label); expect(dt < limit, 'H  %s took %.2f s (limit %.1f s)' % (label, dt, limit))
         return dt
     d1 = timed('2^1000 * 3^500', nmul(npow(lit_n(2), lit_n(1000)), npow(lit_n(3), lit_n(500))), 2 ** 1000 * 3 ** 500, 5.0)

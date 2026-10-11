@@ -332,6 +332,7 @@ def n_library(w):
         eq_thm('N.mul_right_comm', 3, lambda a, b, c: Eq((a * b) * c, (a * c) * b))
         eq_thm('N.mul_add', 3, lambda a, b, c: Eq(a * (b + c), a * b + a * c))
         eq_thm('N.add_mul', 3, lambda a, b, c: Eq((a + b) * c, a * c + b * c))
+        eq_thm('N.succ_eq_add_one', 1, lambda a: Eq(nsucc(a), a + one))
         eq_thm('N.pow_zero', 1, lambda a: Eq(a ** N0, one), 'refl')
         eq_thm('N.pow_succ', 2, lambda a, b: Eq(a ** nsucc(b), a * a ** b), 'pow_succ')
         eq_thm('N.pow_one', 1, lambda a: Eq(a ** one, a), 'pow_one')
@@ -373,6 +374,20 @@ def n_library(w):
         p.split()
         p.apply('N.to_nat_inj'); p.exact('h3')
         p.apply('N.to_nat_inj'); p.exact('h4')
+
+    @thm(w, 'N.mul_eq_zero', [N, N, lambda a, b: Eq(w['N.mul'](a, b), N0)], lambda a, b, h: Eq(a, N0) | Eq(b, N0))
+    def _(p):
+        p.intro('a', 'b', 'h'); to_nat_hyp(p, 'h', 'h2')
+        p.obtain(['e', 'e'], ('mul_eq_zero', (ntn, 'a'), (ntn, 'b'), 'h2'))
+        p.left(); p.apply('N.to_nat_inj'); p.exact('e')
+        p.right(); p.apply('N.to_nat_inj'); p.exact('e')
+
+    @thm(w, 'N.mul_left_cancel', [N, N, N, lambda a, b, c: ~Eq(a, N0), lambda a, b, c, h1: Eq(w['N.mul'](a, b), w['N.mul'](a, c))], lambda a, b, c, h1, h2: Eq(b, c))
+    def _(p):
+        p.intro('a', 'b', 'c', 'h1', 'h2'); p.apply('N.to_nat_inj'); to_nat_hyp(p, 'h2', 'h3')
+        p.apply('mul_left_cancel', (ntn, 'a'))
+        p.intro('e'); p.apply('h1'); p.apply('N.to_nat_inj'); p.exact('e')
+        p.exact('h3')
 
     @thm(w, 'N.eq_dec', [N, N], lambda a, b: Eq(a, b) | ~Eq(a, b))
     def _(p):
@@ -483,6 +498,8 @@ def build_bin_defs():
     pos_lemmas(w); n_lemmas(w)
     w.nota.register(w['N'], BinNotation(w))
     n_library(w); n_order(w)
+    import ring_lib
+    ring_lib.ring_lemma_set(w, ring_lib.n_desc(w))
     return w
 
 

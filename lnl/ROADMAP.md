@@ -1,9 +1,13 @@
 # Roadmap: from this kernel to IMO-level and undergraduate mathematics (a judgment, not a measurement)
 
-## Where we are (measured)
-A small, heavily tested trusted core and tactic layer: dependent types, inductive families with parameters and indices, structural recursion, a Prop/Type world with restricted elimination and the four classical axioms, tactics
-(intro, apply, rewrite, cases, induct with equation generalisation, strong induction by bounded predicates, generated injectivity lemmas), an independent checker, differential gates, zero-tolerance random oracles and soundness
-canaries. The library is: Nat, Eq, Le, add, And/Or/Ex/True/False/Not/Iff, a dozen lemmas.
+## Where we are (measured, 2026-10-11)
+A small, heavily tested trusted core and tactic layer: dependent types, inductive families with parameters and indices, structural recursion, a Prop/Type world with definitional proof irrelevance and restricted elimination,
+the four classical axioms, quotients (five kernel constants and one reduction rule; `funext` is a theorem), tactics (intro, apply, rewrite, cases, induct with equation generalisation, strong induction by bounded
+predicates, generated injectivity lemmas; in the authoring layer exact/rw/rw_at/have/obtain/calc/induction_on/ring), an independent checker, differential gates against the frozen reference, zero-tolerance random
+oracles, soundness canaries, and a deterministic work budget (a wrong action fails after a bounded number of steps instead of hanging). 32 gates, 601 mutants defined.
+Libraries, all built by tactic scripts and re-checked by the kernel (they use NO axioms; the four classical ones are an optional layer, S15): unary Nat (about 125 lemmas), the binary naturals `N` (Coq-style `Pos`/`N`, with the bridge to Nat and
+the induction principle as a theorem), the integers `Z` as a quotient of `N x N` (ring laws, order, trichotomy, discreteness; 408 globals, about 11 s to build), and a kernel-checked `ring` for `Nat`, `N` and `Z`.
+Not yet: the rest of the integer facts (sign cases, integral domain), `linarith`/`nlinarith`, Q and R, number theory, the gym environment on this kernel.
 
 ## What is missing, with rough effort (expert person-months; treat as +-2x)
 | Area | What | Effort |
@@ -35,6 +39,10 @@ lemmas; the RL surface (probing, library index) is on the hybrid kernel, the gym
 | 3. Gym environment on the hybrid kernel | observation/action surface, search and model code, curriculum Peano -> algebra -> number theory; can overlap with block 2 | ~1 week |
 | 4. Competition bench | formalise ~100 olympiad problems, write reference proofs to find library/automation gaps; (miniF2F-style AMC/AIME first, then early IMO P1, then shortlist A1-A3 / N1-N3) | 1-3 months |
 
+Progress against block 1 (2026-10-11): done -- binary N with its bridge, Z (quotient; ring laws, order, trichotomy, discreteness, `eq_dec`), `ring` over Nat, N and Z, the typing memo that made big `ring` proofs 10-15x
+faster, the work budget. Next in block 1: `Z.sign_cases`, `Z.mul_eq_zero`, `Z.mul_pos` and the strict-order lemmas, a generic ordered-ring layer (one template instantiated for Z, Q, R), then `linarith`/`nlinarith`
+(an exact rational simplex whose certificate is checked by `ring` plus the order lemmas), Q as a quotient, R as the axiomatic ordered field validated on Q. Blocks 2-4 have not been started.
+
 Scope: algebra and number theory only. About half of all IMO problems are geometry or combinatorics; geometry through coordinates/complex numbers (polynomial arithmetic + Groebner-style certificates) is possible for some
 problems and is a separate project, combinatorics needs finite structures and is long-term. An autonomous learned agent that solves real IMO problems is a research outcome, not an engineering milestone; realistic first targets
 are AMC/AIME-level and early-IMO P1-level problems.
@@ -49,6 +57,19 @@ Decisions: R is axiomatised as a single ordered-field structure instance (audit 
 5. Decide: build the library ourselves, or invest in Lean-kernel compatibility and import Mathlib.
 
 ## Status log (kernel features, newest first)
+- **`apply` on Pi goals** (gate S29, finding F32, mutants AR1-AR13). A goal that is an implication, a negation (`Not P` is `P -> False`) or a universal statement is met by a lemma that concludes such a Pi: the lemma's binders
+  are peeled only as far as they exceed the goal's (a binder hidden behind a definition counts as one), and if that does not unify every binder is peeled, as before. It is the tactic layer's mode (`simp`) only: without it `apply`
+  is the reference's, which the lockstep gates S3-S5 compare (the first full run after the change broke exactly those four gates, which is how the boundary was found).
+- **Work budget** (gate S27, finding F30, mutants FU1-FU13). Every guarded recursion spends a step from a deterministic thread-local budget, set at each outermost Python-to-C++ call; exhaustion throws `FuelExhausted` and the
+  budget stays spent for the rest of the call. `TacticTxn` makes the seven kernel tactics all-or-nothing against exceptions. Motivated by F29 (conversion is exponential on shared terms; a mistyped `apply` ran for minutes).
+- **Head unfolding on syntax** (gate S28, finding F31, mutants U1-U9). `unfold_head_folded` is one delta step on syntax; `apply` and `cases` read a definition at the head of a goal or hypothesis through it, so the arguments stay as written.
+- **Typing memo, node facts, shared-term traversals** (gate S26, mutants W/X series). Every node carries facts computed once (loose bound-variable range, context-variable range, tree size, mentions a metavariable); substitutions
+  are guarded by them, big traversals are memoised per (node, binder depth), `infer` remembers the type of a large metavariable-free term per context, and proof extraction is linear in the DAG when nothing can reduce. 10-15x on big `ring`
+  proofs. TRUSTED code, so the gate checks each piece against an oracle that shares no code with it. First mutation run of the series: 119 mutants, 95 caught, 2 documented equivalent, 22 survivors still to be triaged
+  (stack-check removals G5-G9, W61, W63, typing-memo keys X2/X5-X9/X11-X15/X17/X19/X21, X27).
+- **Integers, `ring` over N and Z** (gate S25, `int_lib.py`, `quot_lib.py`, `ring_lib.py`). `Z := Quot (N x N) Zrel`; addition, multiplication and negation by `Quot.lift`/`Quot.lift2`, computing on `Z.mk`; every law by quotient induction
+  down to an equation of N that `ring` proves; effectiveness of the quotient from a Bool-valued test (no propext). `ring` is trace-based and untrusted: the finished term is checked by the kernel, and one lemma template is
+  instantiated for Nat, N and Z. `funext` is derived from `Quot.sound` (S16), not assumed.
 - **Definitional proof irrelevance** (gate S17, mutants M101-M113 and C1-C8). In the Prop/Type world two proofs of one proposition are convertible. The kernel decides it in the unifier: the structural comparison runs first;
   only a pair it rejects is a candidate, and then both sides must infer (by the ordinary inference rule) to types whose sort is Type0, and the two types must unify. A syntactic prefilter only skips inference for data
   and type formers. Partial effects of the rejected structural attempt (metavariable assignments, deferred constraints) are rolled back first. The independent checker implements the same rule with a conversion that

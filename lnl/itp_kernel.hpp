@@ -57,10 +57,45 @@ struct StackExhausted : std::runtime_error {
     StackExhausted() : std::runtime_error("itp: stack exhausted -- a term is nested too deeply for this thread's stack "
                                           "(run the kernel on a thread with a bigger stack, e.g. threading.stack_size(...), or raise ulimit -s)") {}
 };
-inline char*& stack_floor_slot() { static thread_local char* floor_addr = nullptr; return floor_addr; }
+/// What every guarded call reads and writes, in one thread-local block (one address computation for both): the stack floor (below) and the work budget (below that).
+struct ThreadGuardState {
+    char* stack_floor = nullptr;
+    int64_t fuel = INT64_MAX;       // steps left in the current call; negative once the budget is spent
+    int64_t fuel_start = INT64_MAX; // the budget this call started with (so that used = start - fuel)
+    int64_t fuel_peak = 0;          // the most steps any call has used since the last reset_fuel_peak() (statistics: how big is a legitimate call?)
+};
+inline ThreadGuardState& thread_guard_state() { static thread_local ThreadGuardState s; return s; }
+inline char*& stack_floor_slot() { return thread_guard_state().stack_floor; }
 /// The lowest address this thread may use before the guard fires. Computed lazily per thread; call refresh_stack_floor() after changing the stack
 /// limit of the main thread (the Python module raises it at import).
 inline void refresh_stack_floor() { stack_floor_slot() = nullptr; }
+
+// ---------------------------------------------------------------------------
+// Work budget
+// ---------------------------------------------------------------------------
+//
+// The stack guard bounds how DEEP a computation goes; nothing bounded how LONG it runs. Conversion of two stuck values that share structure is exponential in the sharing (the same sub-value is compared
+// once per path to it), unification of a wrongly instantiated lemma walks into exactly that, and a tactic that is merely wrong (an `apply` with an argument in the wrong position) then ran for minutes
+// -- inside a training loop or a proof search, a hang, not a failure. Every guarded function (all of eval, quote, instantiate, conversion, unification, inference...) now also spends one unit of a budget
+// per call: ITP_STACK_CHECK() decrements `fuel` and throws FuelExhausted when it is spent. The budget is per call into the kernel (the Python module resets it on every entry, see ExecutionContext::fuel_limit
+// and KernelWrapper::activate), counts calls rather than seconds so that it is deterministic (the same input spends the same on every machine and every run), and fails closed like the stack guard: an
+// exhausted budget is a failed check, never an accepted one. Once spent it stays spent for the rest of the call (every further guarded call throws again), so no handler that swallows the exception can
+// carry on with the work. The tactics roll their metavariable assignments back on any exception (TacticTxn), so a call that ran out of budget leaves the proof state as it found it.
+struct FuelExhausted : std::runtime_error {
+    FuelExhausted() : std::runtime_error("itp: work budget exhausted -- the check or tactic did more work than the kernel's step limit allows (a wrong or pathological action; raise the limit with set_fuel if the work is legitimate)") {}
+};
+[[noreturn, gnu::noinline]] inline void fuel_exhausted() { throw FuelExhausted(); }
+/// Start a new call with `limit` steps (limit <= 0: unlimited).
+inline void reset_fuel(int64_t limit) {
+    ThreadGuardState& g = thread_guard_state();
+    if (g.fuel_start - g.fuel > g.fuel_peak) g.fuel_peak = g.fuel_start - g.fuel;
+    g.fuel_start = g.fuel = limit > 0 ? limit : INT64_MAX;
+}
+/// Steps spent so far in the current (or last) call.
+inline int64_t fuel_used() { const ThreadGuardState& g = thread_guard_state(); return g.fuel_start - g.fuel; }
+/// The most steps any call has used since the last reset_fuel_peak() (the current call included); reset_fuel_peak() starts counting again.
+inline int64_t fuel_peak() { const ThreadGuardState& g = thread_guard_state(); return std::max(g.fuel_peak, g.fuel_start - g.fuel); }
+inline void reset_fuel_peak() { thread_guard_state().fuel_peak = 0; }
 [[gnu::noinline]] inline void stack_check_slow(const char* sp) {
     char*& slot = stack_floor_slot();
     if (!slot) {
@@ -74,8 +109,11 @@ inline void refresh_stack_floor() { stack_floor_slot() = nullptr; }
 }
 // The frame address, not the address of a local: under AddressSanitizer's fake stacks (use-after-return detection) a local lives on the heap and
 // its address would be compared with the real stack's floor.
-#define ITP_STACK_CHECK() do { const char* itp_sp_ = static_cast<const char*>(__builtin_frame_address(0)); \
-    if (__builtin_expect(itp_sp_ < ::itp::stack_floor_slot() || !::itp::stack_floor_slot(), 0)) ::itp::stack_check_slow(itp_sp_); } while (0)
+// It also spends one step of the work budget (see FuelExhausted): every function that can recurse has this check, so the budget covers everything that can run long, by construction.
+#define ITP_STACK_CHECK() do { ::itp::ThreadGuardState& itp_tg_ = ::itp::thread_guard_state(); \
+    const char* itp_sp_ = static_cast<const char*>(__builtin_frame_address(0)); \
+    if (__builtin_expect(itp_sp_ < itp_tg_.stack_floor || !itp_tg_.stack_floor, 0)) ::itp::stack_check_slow(itp_sp_); \
+    if (__builtin_expect(--itp_tg_.fuel < 0, 0)) ::itp::fuel_exhausted(); } while (0)
 
 /// Universe levels, bound-variable indices and context levels are 32-bit; anything above this is rejected at the API boundary, so that `l + 1`, `index + d` etc. cannot wrap around.
 constexpr uint32_t kMaxUniverseLevel = uint32_t{1} << 30;
@@ -868,8 +906,11 @@ struct GlobalEnv {
     /// Function bodies installed into already existing globals (finish_recursive_function*), net of rollbacks. A checkpoint records it: rewinding over such an installation
     /// would leave a surviving global with a body whose nodes have been reclaimed (declaring a NEW global is detected through the size of `defs`, this is not).
     uint64_t body_installs = 0;
-    void install_body(uint32_t gid, NodeId body) { defs.at(gid).value = body; ++body_installs; invalidate_value_caches(); }
-    void uninstall_body(uint32_t gid) { defs.at(gid).value = std::nullopt; --body_installs; invalidate_value_caches(); }
+    /// Counts every installation AND removal of a function body (never decreases): what a term's type can depend on besides its syntax is the bodies of the globals it mentions, so the typing memo of the
+    /// execution context (infer_cache) is valid only for the epoch it was filled in.
+    uint64_t body_epoch = 0;
+    void install_body(uint32_t gid, NodeId body) { defs.at(gid).value = body; ++body_installs; ++body_epoch; invalidate_value_caches(); }
+    void uninstall_body(uint32_t gid) { defs.at(gid).value = std::nullopt; --body_installs; ++body_epoch; invalidate_value_caches(); }
 
     // Declares a constructor global AND indexes it, in one call -- the
     // single chokepoint every inductive declaration goes through,
@@ -1019,6 +1060,31 @@ struct PolyDecl {
     std::string name;
 };
 
+/// What is known about a term from its structure alone, worked out ONCE when the node is created and read in constant time afterwards (the same idea as the data word every Lean expression carries). Every field
+/// is a function of the children's fields, so hash-consing keeps them consistent; the kernel can recompute them from scratch and compare (check_node_info). They replace tree walks and per-node hash tables:
+/// `loose` guards every substitution (lift / instantiate), `fvars` answers "does this mention a context variable of level >= l" and prunes the closing/renaming traversals, `has_meta` is what lets the typing memo
+/// treat a term as fixed, and `size` lets the memo skip terms too small to be worth a table lookup.
+struct NodeInfo {
+    uint32_t loose = 0;     // 1 + the largest loose bound-variable index (0: no loose bound variable)
+    uint32_t fvars = 0;     // 1 + the largest context-variable LEVEL mentioned (0: none)
+    uint32_t size_meta = 1; // bits 0..30: the size of the term as a TREE (a shared subterm counts at every occurrence), saturating; bit 31: the term mentions a metavariable (solved or not)
+    static constexpr uint32_t kMetaBit = 0x80000000u, kSizeMax = 0x7FFFFFFFu;
+    uint32_t size() const { return size_meta & kSizeMax; }
+    bool has_meta() const { return (size_meta & kMetaBit) != 0; }
+    friend bool operator==(const NodeInfo&, const NodeInfo&) = default;
+};
+/// Accumulates the info of a compound node from its children; `under` is the number of binders the child sits under (1 for the body of a lambda / let / pi / fix, else 0).
+struct InfoAcc {
+    uint32_t loose = 0, fvars = 0; uint64_t size = 1; bool meta = false;
+    void add(const NodeInfo& c, uint32_t under = 0) {
+        const uint32_t l = c.loose > under ? c.loose - under : 0;
+        if (l > loose) loose = l;
+        if (c.fvars > fvars) fvars = c.fvars;
+        size += c.size(); meta = meta || c.has_meta();
+    }
+    NodeInfo done() const { return NodeInfo{loose, fvars, static_cast<uint32_t>(std::min<uint64_t>(size, NodeInfo::kSizeMax)) | (meta ? NodeInfo::kMetaBit : 0u)}; }
+};
+
 struct ExecutionContext {
     NodePool<Var>      vars;
     NodePool<App>      apps;
@@ -1045,8 +1111,36 @@ struct ExecutionContext {
     // requiring the caller to supply an impossible branch's body by hand.
     std::optional<uint32_t> unit_type_gid, unit_ctor_gid, empty_type_gid;
     std::unordered_map<uint32_t, uint32_t> same_ctor_gid_by_family;
-    std::unordered_map<uint64_t, uint32_t> loose_cache; // loose_range memo, keyed by NodeId; cleared on rewind
+    /// The NodeInfo of every compound node, parallel to its pool (info_apps[i] describes apps[i]); filled when the node is created, cut back by rewind. (Var, Const, Type, Meta and TypeUniv are leaves: their info is computed on the spot.)
+    std::vector<NodeInfo> info_apps, info_lambdas, info_lets, info_pis, info_matches, info_fixes;
     std::unordered_map<uint64_t, std::vector<bool>> param_cache; // family_param_slots memo, keyed by (family, constructor count); cleared on rewind
+    /// The typing memo (see infer): the type inferred for a compound, metavariable-free term in a metavariable-free context. A term that is shared in a proof (a ring proof shares almost everything: each
+    /// normal form is an argument of dozens of lemma applications) is typed once per context instead of once per occurrence. Valid only for the epoch (function bodies installed, options) it was
+    /// filled in, and cleared on rewind: it is keyed by NodeIds, which a rewind hands out again.
+    struct InferKey {
+        uint64_t node, ctx; uint32_t mode;
+        bool operator==(const InferKey&) const = default;
+    };
+    struct InferKeyHash {
+        std::size_t operator()(const InferKey& k) const noexcept {
+            uint64_t h = k.node * 0x9E3779B97F4A7C15ull;
+            h ^= (k.ctx + 0x7F4A7C15ull) * 0xC2B2AE3D27D4EB4Full; h ^= h >> 31;
+            h ^= (uint64_t(k.mode) + 0x165667B1ull) * 0x94D049BB133111EBull;
+            return static_cast<std::size_t>(h ^ (h >> 29));
+        }
+    };
+    std::unordered_map<InferKey, NodeId, InferKeyHash> infer_cache;
+    static constexpr std::size_t kMaxInferCache = std::size_t(1) << 20;   // entries; the table is dropped when it fills up
+    uint64_t infer_cache_epoch = ~uint64_t(0);
+    uint64_t next_ctx_uid = 0;                       // elaboration contexts (ElabCtx) are numbered as they are extended; never reused, never reset
+    bool verify_memo = false;                        // debugging: on every typing-memo hit, recompute the type and compare (see infer)
+    uint32_t memo_off = 0;                           // > 0: the typing memo is neither read nor written (verification recomputes with it off)
+    struct MemoOff { ExecutionContext& x; explicit MemoOff(ExecutionContext& e) : x(e) { ++x.memo_off; } ~MemoOff() { --x.memo_off; } MemoOff(const MemoOff&) = delete; MemoOff& operator=(const MemoOff&) = delete; };
+    int64_t fuel_limit = 0;                          // the work budget of one call into the kernel (see FuelExhausted); <= 0: unlimited. The Python module applies it at the start of every call.
+    uint64_t memo_hits = 0, memo_misses = 0;         // statistics
+    uint64_t extract_fast = 0, extract_slow = 0;     // proof extractions that took the linear-time path / had to evaluate and quote (see extract_proof_term)
+    uint64_t term_cache_epoch() const { return globals.body_epoch * 4 + (param_mode ? 2 : 0) + (prop_mode ? 1 : 0); }
+    void clear_term_caches() { infer_cache.clear(); infer_cache_epoch = ~uint64_t(0); }
     bool param_mode = false; // option "parameters": distinguish a family's PARAMETERS from its indices (family_param_slots); off = the reference's behaviour
     bool prop_mode = false;  // option "prop_elim": level 0 is Prop. An inductive family that lives in Type0 and is not a SYNTACTIC SUBSINGLETON (it may be eliminated into any sort only if it has no constructor, or one whose every
                              // field is a proof or occurs in the result indices) can only be eliminated into Type0. Large fields are then allowed in such families. Required before classical axioms (Berardi, Reynolds).
@@ -1158,7 +1252,7 @@ struct ExecutionContext {
             if (unit_type_gid && *unit_type_gid >= keep) { unit_type_gid.reset(); unit_ctor_gid.reset(); }
             if (empty_type_gid && *empty_type_gid >= keep) empty_type_gid.reset();
         }
-        loose_cache.clear(); param_cache.clear();
+        param_cache.clear(); clear_term_caches();
         vars.rewind(cp.vars_n);
         apps.rewind(cp.apps_n);
         lambdas.rewind(cp.lambdas_n);
@@ -1170,6 +1264,7 @@ struct ExecutionContext {
         metas.rewind(cp.metas_n);
         type_univs.rewind(cp.type_univs_n);
         fixes.rewind(cp.fixes_n);
+        info_apps.resize(cp.apps_n); info_lambdas.resize(cp.lambdas_n); info_lets.resize(cp.lets_n); info_pis.resize(cp.pis_n); info_matches.resize(cp.matches_n); info_fixes.resize(cp.fixes_n);
         meta_ctx.rewind(cp.meta_mark);
     }
 };
@@ -1205,17 +1300,48 @@ inline ExecutionContext& ctx() {
 
 inline NodeId mk_fvar(uint32_t level) { return NodeId{NodeType::VAR, ctx().vars.intern(Var{level, false})}; }
 inline NodeId mk_bvar(uint32_t index) { return NodeId{NodeType::VAR, ctx().vars.intern(Var{index, true})}; }
+
+/// The NodeInfo of any node: read from the per-pool table for a compound node, built on the spot for a leaf.
+inline NodeInfo node_info(NodeId t) {
+    ExecutionContext& c = ctx();
+    switch (t.tag) {
+        case NodeType::VAR: { const Var v = c.vars[t.index]; return v.bound ? NodeInfo{v.n + 1, 0, 1} : NodeInfo{0, v.n + 1, 1}; }
+        case NodeType::CONST: case NodeType::TYPE: case NodeType::TYPE_UNIV: return NodeInfo{0, 0, 1};
+        case NodeType::META:   return NodeInfo{0, 0, 1u | NodeInfo::kMetaBit};
+        case NodeType::APP:    return c.info_apps[t.index];
+        case NodeType::LAMBDA: return c.info_lambdas[t.index];
+        case NodeType::LET:    return c.info_lets[t.index];
+        case NodeType::PI:     return c.info_pis[t.index];
+        case NodeType::MATCH:  return c.info_matches[t.index];
+        case NodeType::FIX:    return c.info_fixes[t.index];
+    }
+    std::unreachable();
+}
+
+// A compound node is new exactly when the pool handed out the next index (indices are consecutive); only then is its NodeInfo worked out and appended, so the info tables stay parallel to the pools.
 inline NodeId mk_app(NodeId fn, NodeId arg) {
-    return NodeId{NodeType::APP, ctx().apps.intern(App{fn, arg})};
+    ExecutionContext& c = ctx(); const uint32_t before = c.apps.size();
+    const uint32_t idx = c.apps.intern(App{fn, arg});
+    if (idx == before) { InfoAcc a; a.add(node_info(fn)); a.add(node_info(arg)); c.info_apps.push_back(a.done()); }
+    return NodeId{NodeType::APP, idx};
 }
 inline NodeId mk_lambda(NodeId type_id, NodeId body_id) {
-    return NodeId{NodeType::LAMBDA, ctx().lambdas.intern(Lambda{type_id, body_id})};
+    ExecutionContext& c = ctx(); const uint32_t before = c.lambdas.size();
+    const uint32_t idx = c.lambdas.intern(Lambda{type_id, body_id});
+    if (idx == before) { InfoAcc a; a.add(node_info(type_id)); a.add(node_info(body_id), 1); c.info_lambdas.push_back(a.done()); }
+    return NodeId{NodeType::LAMBDA, idx};
 }
 inline NodeId mk_let(NodeId type_id, NodeId value_id, NodeId body_id) {
-    return NodeId{NodeType::LET, ctx().lets.intern(Let{type_id, value_id, body_id})};
+    ExecutionContext& c = ctx(); const uint32_t before = c.lets.size();
+    const uint32_t idx = c.lets.intern(Let{type_id, value_id, body_id});
+    if (idx == before) { InfoAcc a; a.add(node_info(type_id)); a.add(node_info(value_id)); a.add(node_info(body_id), 1); c.info_lets.push_back(a.done()); }
+    return NodeId{NodeType::LET, idx};
 }
 inline NodeId mk_pi(NodeId dom_id, NodeId cod_id) {
-    return NodeId{NodeType::PI, ctx().pis.intern(Pi{dom_id, cod_id})};
+    ExecutionContext& c = ctx(); const uint32_t before = c.pis.size();
+    const uint32_t idx = c.pis.intern(Pi{dom_id, cod_id});
+    if (idx == before) { InfoAcc a; a.add(node_info(dom_id)); a.add(node_info(cod_id), 1); c.info_pis.push_back(a.done()); }
+    return NodeId{NodeType::PI, idx};
 }
 inline NodeId mk_type(uint32_t universe_level) {
     return NodeId{NodeType::TYPE, ctx().types.intern(Type{universe_level})};
@@ -1263,7 +1389,8 @@ inline NodeId mk_match(NodeId scrutinee_id, NodeId motive_id, std::vector<NodeId
     };
     MatchKey key{scrutinee_id, motive_id, branches};
 
-    uint32_t idx = ctx().matches.intern_lazy(
+    ExecutionContext& c = ctx(); const uint32_t before = c.matches.size();
+    uint32_t idx = c.matches.intern_lazy(
         key,
         [](const MatchKey& k) {
             std::size_t seed = hash_fields(k.scrutinee_id, k.motive_id);
@@ -1277,6 +1404,11 @@ inline NodeId mk_match(NodeId scrutinee_id, NodeId motive_id, std::vector<NodeId
         [&]() {
             return Match{scrutinee_id, motive_id, std::make_shared<const std::vector<NodeId>>(std::move(branches))};
         });
+    if (idx == before) {      // (`branches` was moved into the stored node on this miss, so read them from there)
+        InfoAcc a; a.add(node_info(scrutinee_id)); a.add(node_info(motive_id));
+        for (NodeId b : *c.matches[idx].branches) a.add(node_info(b));
+        c.info_matches.push_back(a.done());
+    }
     return NodeId{NodeType::MATCH, idx};
 }
 
@@ -1296,7 +1428,10 @@ inline NodeId mk_type_univ(uint32_t param_index) {
     return NodeId{NodeType::TYPE_UNIV, ctx().type_univs.intern(TypeUniv{param_index})};
 }
 inline NodeId mk_fix(NodeId fn_type, uint32_t decreasing_arg, NodeId body) {
-    return NodeId{NodeType::FIX, ctx().fixes.intern(Fix{fn_type, decreasing_arg, body})};
+    ExecutionContext& c = ctx(); const uint32_t before = c.fixes.size();
+    const uint32_t idx = c.fixes.intern(Fix{fn_type, decreasing_arg, body});
+    if (idx == before) { InfoAcc a; a.add(node_info(fn_type)); a.add(node_info(body), 1); c.info_fixes.push_back(a.done()); }
+    return NodeId{NodeType::FIX, idx};
 }
 
 using Term = std::variant<Var, App, Lambda, Let, Pi, Type, Const, Match, Meta, TypeUniv, Fix>;
@@ -2122,45 +2257,55 @@ inline NodeId map_children(NodeId t, F&& f) {
 
 inline uint32_t sat_dec(uint32_t x) { return x > 0 ? x - 1 : 0; }
 
-/// 1 + the largest loose bound-variable index in t (0 when t has no loose bound variable). Memoised per node.
-inline uint32_t loose_range(NodeId t) {
-    ITP_STACK_CHECK();
-    auto& cache = ctx().loose_cache;
-    const uint64_t key = (static_cast<uint64_t>(static_cast<uint32_t>(t.tag)) << 32) | t.index;
-    if (auto it = cache.find(key); it != cache.end()) return it->second;
-    uint32_t r = inspect(t,
-        [&](Var v) -> uint32_t { return v.bound ? v.n + 1 : 0; },
-        [&](App a) -> uint32_t { return std::max(loose_range(a.fn_id), loose_range(a.arg_id)); },
-        [&](Lambda l) -> uint32_t { return std::max(loose_range(l.type_id), sat_dec(loose_range(l.body_id))); },
-        [&](Let l) -> uint32_t { return std::max({loose_range(l.type_id), loose_range(l.value_id), sat_dec(loose_range(l.body_id))}); },
-        [&](Pi p) -> uint32_t { return std::max(loose_range(p.dom_id), sat_dec(loose_range(p.cod_id))); },
-        [&](Match m) -> uint32_t {
-            uint32_t r2 = std::max(loose_range(m.scrutinee_id), loose_range(m.motive_id));
-            for (NodeId b : *m.branches) r2 = std::max(r2, loose_range(b));
-            return r2;
-        },
-        [&](Fix x) -> uint32_t { return std::max(loose_range(x.fn_type), sat_dec(loose_range(x.body))); },
-        [&](auto) -> uint32_t { return 0; });
-    cache[key] = r;
-    return r;
-}
+/// 1 + the largest loose bound-variable index in t (0 when t has no loose bound variable): read from the node's NodeInfo.
+inline uint32_t loose_range(NodeId t) { return node_info(t).loose; }
 inline bool has_loose_bvars(NodeId t) { return loose_range(t) > 0; }
 
+/// A per-call memo table for a rebuilding traversal of the term DAG, keyed by (node, one small parameter such as the binder depth). Terms are hash-consed, so a proof is a DAG in which the same normal form is
+/// an argument of dozens of lemma applications; a traversal that recurses into every occurrence costs the size of the TREE, which for such a proof is polynomially larger than the DAG (a ring proof of a
+/// product of two 40-term polynomials: minutes). Memoising pays off only once a traversal is big, so the table is not touched during the first kMemoAfter nodes of a call.
+struct DagMemo {
+    static constexpr uint32_t kMemoAfter = 48;
+    struct Key { uint64_t node; uint32_t aux; bool operator==(const Key&) const = default; };
+    struct Hash {
+        std::size_t operator()(const Key& k) const noexcept {
+            uint64_t h = (k.node + 0x9E3779B97F4A7C15ull) * 0xBF58476D1CE4E5B9ull; h ^= (uint64_t(k.aux) + 1) * 0x94D049BB133111EBull;
+            return static_cast<std::size_t>(h ^ (h >> 31));
+        }
+    };
+    std::unordered_map<Key, NodeId, Hash> m; uint32_t visits = 0;
+    static uint64_t node_key(NodeId t) { return (static_cast<uint64_t>(static_cast<uint32_t>(t.tag)) << 32) | t.index; }
+    /// Called on entry to a node that is about to be rebuilt; true (with the result in `out`) when it was rebuilt before in this call.
+    bool lookup(NodeId t, uint32_t aux, NodeId& out) {
+        if (++visits <= kMemoAfter) return false;
+        auto it = m.find(Key{node_key(t), aux});
+        if (it == m.end()) return false;
+        out = it->second; return true;
+    }
+    void store(NodeId t, uint32_t aux, NodeId r) { if (visits > kMemoAfter) m.emplace(Key{node_key(t), aux}, r); }
+};
+
 /// Raises every loose bound index >= cutoff by d.
-inline NodeId lift(NodeId t, uint32_t d, uint32_t cutoff = 0) {
-    ITP_STACK_CHECK();
+inline NodeId lift_impl(NodeId t, uint32_t d, uint32_t cutoff, DagMemo& memo) {
+    // (no stack check here: every step of the recursion goes through map_children, which has one)
     if (d == 0 || loose_range(t) <= cutoff) return t;
     if (t.tag == NodeType::VAR) {
         Var v = ctx().vars[t.index];
         return (v.bound && v.n >= cutoff) ? mk_bvar(v.n + d) : t;
     }
-    return map_children(t, [&](NodeId c, uint32_t extra) { return lift(c, d, cutoff + extra); });
+    NodeId r; if (memo.lookup(t, cutoff, r)) return r;
+    r = map_children(t, [&](NodeId c, uint32_t extra) { return lift_impl(c, d, cutoff + extra, memo); });
+    memo.store(t, cutoff, r); return r;
+}
+inline NodeId lift(NodeId t, uint32_t d, uint32_t cutoff = 0) {
+    if (d == 0 || loose_range(t) <= cutoff) return t;
+    DagMemo memo; return lift_impl(t, d, cutoff, memo);
 }
 
 /// Replaces loose bound variable (offset + k) by vals[k] (lifted past the `offset` binders crossed) for k < vals.size(), and
 /// lowers every higher loose index by vals.size() (those binders are gone). vals[0] replaces the INNERMOST removed binder.
-inline NodeId instantiate_at(NodeId t, const std::vector<NodeId>& vals, uint32_t offset) {
-    ITP_STACK_CHECK();
+inline NodeId instantiate_impl(NodeId t, const std::vector<NodeId>& vals, uint32_t offset, DagMemo& memo) {
+    // (no stack check here: every step of the recursion goes through map_children, which has one)
     const uint32_t n = static_cast<uint32_t>(vals.size());
     if (n == 0 || loose_range(t) <= offset) return t;
     if (t.tag == NodeType::VAR) {
@@ -2169,37 +2314,60 @@ inline NodeId instantiate_at(NodeId t, const std::vector<NodeId>& vals, uint32_t
         const uint32_t k = v.n - offset;
         return k < n ? lift(vals[k], offset) : mk_bvar(v.n - n);
     }
-    return map_children(t, [&](NodeId c, uint32_t extra) { return instantiate_at(c, vals, offset + extra); });
+    NodeId r; if (memo.lookup(t, offset, r)) return r;
+    r = map_children(t, [&](NodeId c, uint32_t extra) { return instantiate_impl(c, vals, offset + extra, memo); });
+    memo.store(t, offset, r); return r;
+}
+inline NodeId instantiate_at(NodeId t, const std::vector<NodeId>& vals, uint32_t offset) {
+    if (vals.empty() || loose_range(t) <= offset) return t;
+    DagMemo memo; return instantiate_impl(t, vals, offset, memo);
 }
 inline NodeId instantiate(NodeId t, const std::vector<NodeId>& vals) { return instantiate_at(t, vals, 0); }
 inline NodeId instantiate1(NodeId t, NodeId v) { return instantiate_at(t, std::vector<NodeId>{v}, 0); }
 
 /// Closes over context variables: FVar(fvars[i]) becomes the bound variable of the i-th of n NEW outermost binders
 /// (fvars.back() is the innermost, index 0 at depth 0). Existing loose bound indices are lifted by n.
-inline NodeId abstract_fvars(NodeId t, const std::vector<uint32_t>& fvars, uint32_t depth = 0) {
-    ITP_STACK_CHECK();
+inline NodeId abstract_fvars_impl(NodeId t, const std::vector<uint32_t>& fvars, uint32_t min_level, uint32_t depth, DagMemo& memo) {
+    // (no stack check here: every step of the recursion goes through map_children, which has one)
     const uint32_t n = static_cast<uint32_t>(fvars.size());
-    if (n == 0) return t;
     if (t.tag == NodeType::VAR) {
         Var v = ctx().vars[t.index];
         if (v.bound) return v.n >= depth ? mk_bvar(v.n + n) : t;
         for (uint32_t i = 0; i < n; ++i) if (fvars[i] == v.n) return mk_bvar(depth + (n - 1 - i));
         return t;
     }
-    return map_children(t, [&](NodeId c, uint32_t extra) { return abstract_fvars(c, fvars, depth + extra); });
+    if (t.tag == NodeType::CONST || t.tag == NodeType::TYPE || t.tag == NodeType::META || t.tag == NodeType::TYPE_UNIV) return t;
+    // nothing to close and nothing to lift: no loose bound variable, and no context variable at or above the lowest level being closed
+    if (const NodeInfo ni = node_info(t); ni.loose == 0 && ni.fvars <= min_level) return t;
+    NodeId r; if (memo.lookup(t, depth, r)) return r;
+    r = map_children(t, [&](NodeId c, uint32_t extra) { return abstract_fvars_impl(c, fvars, min_level, depth + extra, memo); });
+    memo.store(t, depth, r); return r;
+}
+inline NodeId abstract_fvars(NodeId t, const std::vector<uint32_t>& fvars, uint32_t depth = 0) {
+    if (fvars.empty()) return t;
+    uint32_t min_level = fvars[0]; for (uint32_t f : fvars) min_level = std::min(min_level, f);
+    DagMemo memo; return abstract_fvars_impl(t, fvars, min_level, depth, memo);
 }
 
 /// Simultaneously replaces context variables by terms (lifted past the binders crossed if they have loose bound variables).
-inline NodeId replace_fvars(NodeId t, const std::unordered_map<uint32_t, NodeId>& m, uint32_t depth = 0) {
-    ITP_STACK_CHECK();
-    if (m.empty()) return t;
+inline NodeId replace_fvars_impl(NodeId t, const std::unordered_map<uint32_t, NodeId>& m, uint32_t min_level, uint32_t depth, DagMemo& memo) {
+    // (no stack check here: every step of the recursion goes through map_children, which has one)
     if (t.tag == NodeType::VAR) {
         Var v = ctx().vars[t.index];
         if (v.bound) return t;
         auto it = m.find(v.n);
         return it == m.end() ? t : lift(it->second, depth);
     }
-    return map_children(t, [&](NodeId c, uint32_t extra) { return replace_fvars(c, m, depth + extra); });
+    if (t.tag == NodeType::CONST || t.tag == NodeType::TYPE || t.tag == NodeType::META || t.tag == NodeType::TYPE_UNIV) return t;
+    if (node_info(t).fvars <= min_level) return t;      // mentions no context variable at or above the lowest one being replaced
+    NodeId r; if (memo.lookup(t, depth, r)) return r;
+    r = map_children(t, [&](NodeId c, uint32_t extra) { return replace_fvars_impl(c, m, min_level, depth + extra, memo); });
+    memo.store(t, depth, r); return r;
+}
+inline NodeId replace_fvars(NodeId t, const std::unordered_map<uint32_t, NodeId>& m, uint32_t depth = 0) {
+    if (m.empty()) return t;
+    uint32_t min_level = m.begin()->first; for (const auto& kv : m) min_level = std::min(min_level, kv.first);
+    DagMemo memo; return replace_fvars_impl(t, m, min_level, depth, memo);
 }
 
 inline std::optional<NodeId> meta_solution_of(NodeId head) {
@@ -2224,18 +2392,25 @@ inline NodeId splice_meta(NodeId sol, const std::vector<NodeId>& args, P&& proce
     return result;
 }
 
-inline NodeId resolve_metas(NodeId term) {
+inline NodeId resolve_metas_impl(NodeId term, DagMemo& memo) {
     ITP_STACK_CHECK();
-    if (term.tag == NodeType::META) { auto s = meta_solution_of(term); return s ? resolve_metas(*s) : term; }
-    if (term.tag == NodeType::APP) {
-        std::vector<NodeId> args; NodeId head = term;
-        while (head.tag == NodeType::APP) { App a = ctx().apps[head.index]; args.push_back(a.arg_id); head = a.fn_id; }
-        std::reverse(args.begin(), args.end());
-        if (auto sol = meta_solution_of(head))
-            return splice_meta(resolve_metas(*sol), args, [&](NodeId a) { return resolve_metas(a); });
+    if (term.tag == NodeType::VAR || term.tag == NodeType::CONST || term.tag == NodeType::TYPE || term.tag == NodeType::TYPE_UNIV) return term;
+    if (!node_info(term).has_meta()) return term;       // a term that mentions no metavariable has nothing to resolve (however big it is)
+    NodeId r; if (memo.lookup(term, 0, r)) return r;
+    if (term.tag == NodeType::META) { auto s = meta_solution_of(term); r = s ? resolve_metas_impl(*s, memo) : term; }
+    else {
+        bool done = false;
+        if (term.tag == NodeType::APP) {
+            std::vector<NodeId> args; NodeId head = term;
+            while (head.tag == NodeType::APP) { App a = ctx().apps[head.index]; args.push_back(a.arg_id); head = a.fn_id; }
+            std::reverse(args.begin(), args.end());
+            if (auto sol = meta_solution_of(head)) { r = splice_meta(resolve_metas_impl(*sol, memo), args, [&](NodeId a) { return resolve_metas_impl(a, memo); }); done = true; }
+        }
+        if (!done) r = map_children(term, [&](NodeId c, uint32_t) { return resolve_metas_impl(c, memo); });
     }
-    return map_children(term, [&](NodeId c, uint32_t) { return resolve_metas(c); });
+    memo.store(term, 0, r); return r;
 }
+inline NodeId resolve_metas(NodeId term) { DagMemo memo; return resolve_metas_impl(term, memo); }
 
 inline NodeId quote_at(const Value& v, uint32_t n0, uint32_t depth);
 
@@ -2344,13 +2519,50 @@ inline bool any_child(NodeId t, P&& pred) {
         [&](Fix x) -> bool { return pred(x.fn_type) || pred(x.body); },
         [&](auto) -> bool { return false; });
 }
+
+/// Does the term mention ANY metavariable (solved or not)? Read from the node's NodeInfo.
+inline bool mentions_meta(NodeId t) { return node_info(t).has_meta(); }
+
+/// Audit of the NodeInfo tables: recomputes the info of every node below `root` (and of `root`) from the structure alone, by a separate algorithm that reads no stored info, and compares it with what is stored.
+/// Returns "" when they agree, else a description of the first node that does not. Used by the tests (and by the verify switch on every final check); never by the checker itself.
+inline std::string check_node_info(NodeId root) {
+    struct Ref { uint64_t loose = 0, fvars = 0, size = 1; bool meta = false; };
+    std::unordered_map<uint64_t, Ref> memo; std::string bad;
+    std::function<Ref(NodeId)> go = [&](NodeId t) -> Ref {
+        ITP_STACK_CHECK();
+        const uint64_t key = (static_cast<uint64_t>(static_cast<uint32_t>(t.tag)) << 32) | t.index;
+        if (auto it = memo.find(key); it != memo.end()) return it->second;
+        Ref r;
+        auto join = [&](NodeId c, uint32_t under) {
+            const Ref k = go(c);
+            r.loose = std::max<uint64_t>(r.loose, k.loose > under ? k.loose - under : 0); r.fvars = std::max(r.fvars, k.fvars); r.size += k.size; r.meta = r.meta || k.meta;
+        };
+        inspect(t,
+            [&](Var v) { if (v.bound) r.loose = uint64_t(v.n) + 1; else r.fvars = uint64_t(v.n) + 1; },
+            [&](App a) { join(a.fn_id, 0); join(a.arg_id, 0); },
+            [&](Lambda l) { join(l.type_id, 0); join(l.body_id, 1); },
+            [&](Let l) { join(l.type_id, 0); join(l.value_id, 0); join(l.body_id, 1); },
+            [&](Pi p) { join(p.dom_id, 0); join(p.cod_id, 1); },
+            [&](Match m) { join(m.scrutinee_id, 0); join(m.motive_id, 0); for (NodeId b : *m.branches) join(b, 0); },
+            [&](Fix x) { join(x.fn_type, 0); join(x.body, 1); },
+            [&](Meta) { r.meta = true; },
+            [&](auto) {});
+        const NodeInfo want{static_cast<uint32_t>(r.loose), static_cast<uint32_t>(r.fvars),
+                            static_cast<uint32_t>(std::min<uint64_t>(r.size, NodeInfo::kSizeMax)) | (r.meta ? NodeInfo::kMetaBit : 0u)};
+        const NodeInfo have = node_info(t);
+        if (bad.empty() && !(want == have))
+            bad = "node info mismatch at node " + std::to_string(static_cast<uint32_t>(t.tag)) + ":" + std::to_string(t.index) + " (loose " + std::to_string(have.loose) + " vs " + std::to_string(want.loose) +
+                  ", fvars " + std::to_string(have.fvars) + " vs " + std::to_string(want.fvars) + ", size " + std::to_string(have.size()) + " vs " + std::to_string(want.size() & NodeInfo::kSizeMax) +
+                  ", meta " + std::to_string(have.has_meta()) + " vs " + std::to_string(want.has_meta()) + ")";
+        memo.emplace(key, r);
+        return r;
+    };
+    go(root);
+    return bad;
+}
 namespace detail {
 /// Does t mention a context variable of level >= `level`? (bound variables never count)
-inline bool references_level_at_or_above(NodeId t, uint32_t level) {
-    ITP_STACK_CHECK();
-    if (t.tag == NodeType::VAR) { Var v = ctx().vars[t.index]; return !v.bound && v.n >= level; }
-    return any_child(t, [&](NodeId c) { return references_level_at_or_above(c, level); });
-}
+inline bool references_level_at_or_above(NodeId t, uint32_t level) { return node_info(t).fvars > level; }
 } // namespace detail
 
 
@@ -2853,11 +3065,18 @@ struct ElabCtx {
     LocalCtx types;
     Env values;
     std::shared_ptr<const SelfAwareMarker> self_aware; // nullptr = none yet; see SelfAwareMarker above
+    /// The identity of this context for the typing memo (see infer). The empty context is the one with size 0 (identity 0); every other context is made by extend / extend_self_aware, which number it from a counter that is
+    /// never reset and never reused, so two contexts with the same number ARE the same context (a copy of one). `extend` is the only way to build a non-empty context, and its fields are never assigned afterwards;
+    /// a non-empty context that carries no number (not possible today) is simply not memoised.
+    uint64_t uid = 0;
+    /// No hypothesis type mentions a metavariable (solved or not). Only then can the type of a metavariable-free term in this context be remembered: a metavariable's solution can be taken back by a rewind.
+    bool meta_free = true;
 
     uint32_t size() const { return types.size(); }
+    bool memoisable() const { return meta_free && (types.size() == 0 || uid != 0); }
 
     ElabCtx extend(NodeId ty) const {
-        return ElabCtx{types.extend(ty), values.extend(fresh_neutral(types.size())), self_aware};
+        return ElabCtx{types.extend(ty), values.extend(fresh_neutral(types.size())), self_aware, ++ctx().next_ctx_uid, meta_free && !mentions_meta(ty)};
     }
 
     // Used at exactly one call site: infer(Fix)'s own self-extension.
@@ -2866,7 +3085,7 @@ struct ElabCtx {
     // recovered later from the type's own syntax.
     ElabCtx extend_self_aware(NodeId ty) const {
         auto marker = std::make_shared<SelfAwareMarker>(SelfAwareMarker{self_aware, types.size()});
-        return ElabCtx{types.extend(ty), values.extend(fresh_neutral(types.size())), marker};
+        return ElabCtx{types.extend(ty), values.extend(fresh_neutral(types.size())), marker, ++ctx().next_ctx_uid, meta_free && !mentions_meta(ty)};
     }
 
     bool is_self_aware(uint32_t level) const {
@@ -3057,14 +3276,8 @@ inline bool occurs_meta(uint32_t meta_id, NodeId t) {
     if (t.tag == NodeType::META) return ctx().metas[t.index].meta_id == meta_id;
     return any_child(t, [&](NodeId c) { return occurs_meta(meta_id, c); });
 }
-/// Does the term mention ANY metavariable (solved or not)? Linear in the size of the DAG: each shared node is visited once.
-inline bool contains_meta_rec(NodeId t, std::unordered_set<uint64_t>& seen) {
-    ITP_STACK_CHECK();
-    if (t.tag == NodeType::META) return true;
-    if (!seen.insert((static_cast<uint64_t>(static_cast<uint32_t>(t.tag)) << 32) | t.index).second) return false;
-    return any_child(t, [&](NodeId c) { return contains_meta_rec(c, seen); });
-}
-inline bool contains_meta(NodeId t) { std::unordered_set<uint64_t> seen; return contains_meta_rec(t, seen); }
+/// Does the term mention ANY metavariable (solved or not)?
+inline bool contains_meta(NodeId t) { return node_info(t).has_meta(); }
 inline std::optional<uint32_t> unfinished_global_rec(const GlobalEnv& env, NodeId t, uint32_t allowed, std::unordered_set<uint64_t>& seen) {
     ITP_STACK_CHECK();
     if (t.tag == NodeType::CONST) {
@@ -3192,7 +3405,8 @@ inline std::optional<NodeId> proof_type_of(const Value& v, ElabCtx& ec) {
         auto s = sort_level_of(*ty, ec, scratch, "the type of a proof candidate is not a type");
         if (!s || *s != 0 || !scratch.pending.empty()) return std::nullopt;
         return *ty;
-    } catch (const std::exception&) { return std::nullopt; }
+    } catch (const FuelExhausted&) { throw; }                // a spent budget is the answer of the whole call, not "cannot tell" (the budget stays spent, so carrying on would only fail later and less clearly)
+    catch (const std::exception&) { return std::nullopt; }
 }
 
 /// (PI) on a pair the structural comparison rejected. `failure` is the structural verdict, returned unchanged when the pair is not a pair of
@@ -3912,6 +4126,16 @@ inline std::optional<std::size_t> find_goal_index(const ProofState& ps, std::opt
     return std::nullopt;
 }
 
+
+/// A tactic is all-or-nothing against exceptions. A tactic that returns an error already leaves the proof state as it found it (its attempts undo what they assigned); one that THROWS -- the stack guard, the
+/// work budget, an allocation failure -- unwinds past those undo steps, and would leave metavariables assigned and constraints deferred by a half-finished unification: a failed action with side effects. This
+/// guard, declared at the top of every tactic, puts both back if the tactic is left by an exception. (The goals themselves are never touched before the final commit: each tactic works on a copy.)
+struct TacticTxn {
+    ProofState& ps; MetaContext::Mark mark; std::vector<PendingConstraint> pending; int uncaught;
+    explicit TacticTxn(ProofState& p) : ps(p), mark(ctx().meta_ctx.checkpoint()), pending(p.es.checkpoint()), uncaught(std::uncaught_exceptions()) {}
+    ~TacticTxn() { if (std::uncaught_exceptions() > uncaught) { ctx().meta_ctx.rewind(mark); ps.es.rewind(pending); } }
+    TacticTxn(const TacticTxn&) = delete; TacticTxn& operator=(const TacticTxn&) = delete;
+};
 
 /// GlobalEnv::declare() is, by itself, a TRUSTED registration: it never
 /// calls check(value, type, ...) -- confirmed directly this session by
@@ -5326,7 +5550,8 @@ inline NodeId motive_result(NodeId motive, const std::vector<NodeId>& indices, N
     return loose_range(cur) == 0 ? cur : mk_app(apply_all(motive, indices), scrutinee);
 }
 
-inline TypeResult infer(NodeId t, ElabCtx& ec, ElabState& es) {
+/// The typing rules. Everything below reaches `infer` (the memoising wrapper defined after this function) for its subterms.
+inline TypeResult infer_uncached(NodeId t, ElabCtx& ec, ElabState& es) {
     ITP_STACK_CHECK();
     auto err = [&](TypeErrorKind k, NodeId at, const char* msg) { return std::unexpected(TypeError{k, at, std::nullopt, msg}); };
     switch (t.tag) {
@@ -5440,6 +5665,54 @@ inline TypeResult infer(NodeId t, ElabCtx& ec, ElabState& es) {
     std::unreachable();
 }
 
+/// A compound term whose size (as a tree) is below this is typed again every time rather than remembered.
+inline constexpr uint32_t kInferMemoMinSize = 16;
+
+/// The state of the thread-local evaluation switches (NoDeltaScope, GuardedUnfoldScope, FoldSolutionsScope) as a number: they decide how `eval` unfolds and so what `quote(eval(..))` returns inside infer.
+inline uint32_t eval_mode_word() {
+    return (no_delta_flag() ? 1u : 0u) | (guarded_unfold_flag() ? 2u : 0u) | (guarded_compute_flag() ? 4u : 0u) | (fold_solutions_flag() ? 8u : 0u);
+}
+
+/// `infer`, remembering the type found for a compound term. A proof the `ring` tactic produces shares almost everything (each normal form is an argument of dozens of lemma applications), so typing it occurrence
+/// by occurrence costs the size of the TREE; typing each distinct (term, context) once costs the size of the DAG.
+///
+/// What the answer depends on, and so what the key and the guards are: (1) the term -- a NodeId is its structure (hash-consed); (2) the context -- `ElabCtx::uid`; (3) the global environment -- the types of globals
+/// never change, but the bodies of recursive functions are installed later and change what `eval` unfolds (`body_epoch`), and the options `parameters` and `prop_elim` change the rules (both in
+/// `term_cache_epoch`); (4) the evaluation switches (`eval_mode_word`); (5) metavariables -- a solved metavariable can be un-solved by a rewind, so only a term that mentions none, in a context whose
+/// hypotheses mention none, is remembered; (6) the pending constraints -- a successful inference that deferred a constraint did something besides return a type, so nothing is remembered while any is pending,
+/// and nothing is stored if the inference left any. Only successes are stored (a failure carries a message about one occurrence). The table is dropped on every rewind (NodeIds are handed out again).
+/// `verify_memo` re-derives the type on every hit, with the table switched off for the whole re-derivation, and throws if it differs.
+inline TypeResult infer(NodeId t, ElabCtx& ec, ElabState& es) {
+    switch (t.tag) {
+        case NodeType::VAR: case NodeType::CONST: case NodeType::TYPE: case NodeType::META: case NodeType::TYPE_UNIV: return infer_uncached(t, ec, es);
+        default: break;
+    }
+    ExecutionContext& x = ctx();
+    // Small terms are cheaper to type again than to look up and store; so are terms that mention a metavariable, which are never remembered (a metavariable's solution can be taken back).
+    if (const NodeInfo ni = node_info(t); ni.size() < kInferMemoMinSize || ni.has_meta()) return infer_uncached(t, ec, es);
+    if (x.memo_off != 0 || !ec.memoisable() || !es.pending.empty()) return infer_uncached(t, ec, es);
+    const uint64_t epoch = x.term_cache_epoch();
+    if (x.infer_cache_epoch != epoch) { x.infer_cache.clear(); x.infer_cache_epoch = epoch; }
+    const ExecutionContext::InferKey key{DagMemo::node_key(t), ec.size() == 0 ? uint64_t(0) : ec.uid, eval_mode_word()};
+    if (auto it = x.infer_cache.find(key); it != x.infer_cache.end()) {
+        const NodeId cached = it->second;
+        ++x.memo_hits;
+        if (x.verify_memo) {
+            ExecutionContext::MemoOff off(x);
+            TypeResult again = infer_uncached(t, ec, es);
+            if (!again || !(*again == cached)) throw std::logic_error("itp: the typing memo returned a type that differs from a fresh inference (a bug in the memo key or its guards)");
+        }
+        return cached;
+    }
+    ++x.memo_misses;
+    TypeResult r = infer_uncached(t, ec, es);
+    if (r && es.pending.empty() && x.term_cache_epoch() == epoch && x.infer_cache_epoch == epoch && x.memo_off == 0) {
+        if (x.infer_cache.size() >= ExecutionContext::kMaxInferCache) x.infer_cache.clear();
+        x.infer_cache.emplace(key, *r);
+    }
+    return r;
+}
+
 /// Checks a chain of lambdas against a Pi telescope in ONE pass (one instantiate for the body, not one per binder).
 inline ElabResult check_lambda(NodeId t, NodeId expected_ty, ElabCtx& ec, ElabState& es) {
     ITP_STACK_CHECK();
@@ -5548,9 +5821,50 @@ inline ProofState start_proof(NodeId goal_type) {
     return ps;
 }
 inline bool proof_complete(const ProofState& ps) { return ps.goals.empty() && ps.es.all_constraints_resolved(); }
+namespace detail {
+/// Could normalising this term (`quote(eval(t))` with definitions folded) change it? Yes if it contains a beta redex (an application whose head is a lambda), a let, a match or a fix (a match may sit on a constructor,
+/// a fix unfolds when applied, and both are re-quoted from their captured syntax), a Quot.lift application (it reduces on Quot.mk) or a universe-parameter node (evaluation refuses it). Without any of those,
+/// evaluating and quoting returns the term itself: each node kind is rebuilt from its normalised children. Linear in the DAG (a shared node is looked at once).
+inline bool needs_normalising(NodeId root) {
+    // an explicit work list, not recursion: a solution can be as deep as any term, and nothing here needs the C stack
+    std::unordered_set<uint64_t> seen; std::vector<NodeId> todo{root};
+    while (!todo.empty()) {
+        const NodeId t = todo.back(); todo.pop_back();
+        switch (t.tag) {
+            case NodeType::VAR: case NodeType::CONST: case NodeType::TYPE: case NodeType::META: continue;
+            case NodeType::LET: case NodeType::MATCH: case NodeType::FIX: case NodeType::TYPE_UNIV: return true;
+            default: break;
+        }
+        if (!seen.insert(DagMemo::node_key(t)).second) continue;     // already examined (a redex found there would have ended the whole scan)
+        if (t.tag == NodeType::APP) {
+            // every application of a spine is a node of its own and is visited, so looking one step down finds the head of each of them (walking the whole spine from each would be quadratic)
+            const NodeId fn = ctx().apps[t.index].fn_id;
+            if (fn.tag == NodeType::LAMBDA) return true;
+            if (fn.tag == NodeType::CONST && ctx().globals[ctx().consts[fn.index].global_id].quot_role == QuotRole::Lift) return true;
+        }
+        any_child(t, [&](NodeId c) { todo.push_back(c); return false; });
+    }
+    return false;
+}
+} // namespace detail
+
+/// The proof term of a (possibly unfinished) proof: the root metavariable's solution, normalised with definitions folded. When the solution has nothing to normalise -- the usual case for a `ring` proof, which is
+/// a tree of lemma applications -- the normal form IS the solution with its metavariables spliced in, and that is computed in time linear in the DAG; evaluating and quoting a term that shares its subterms
+/// costs the size of the tree. `verify_memo` computes both and throws if they differ.
 inline NodeId extract_proof_term(uint32_t root_meta_id) {
     NoDeltaScope keep_constants_folded; // F2a: do not inline library theorems/definitions into the proof
-    return quote(eval(mk_meta(root_meta_id), {}), 0);
+    const NodeId root = mk_meta(root_meta_id);
+    const NodeId resolved = resolve_metas(root);
+    if (!detail::needs_normalising(resolved)) {
+        if (ctx().verify_memo) {
+            const NodeId slow = quote(eval(root, {}), 0);
+            if (!(slow == resolved)) throw std::logic_error("itp: extract_proof_term fast path differs from evaluating and quoting the solution");
+        }
+        ++ctx().extract_fast;
+        return resolved;
+    }
+    ++ctx().extract_slow;
+    return quote(eval(root, {}), 0);
 }
 inline NodeId meta_applied_to_context(uint32_t meta_id, uint32_t n) {
     NodeId r = mk_meta(meta_id);
@@ -5582,6 +5896,23 @@ inline std::optional<NodeId> expose_pi_folded(NodeId t) {
     return std::nullopt;
 }
 
+/// ONE delta step at the head of `t`, on syntax, with the arguments substituted unevaluated (expose_pi_folded repeats this until a Pi appears): `Z.le a b` becomes `Ex N (fun k => a + of_N k = b)` with `a` and
+/// `b` exactly as they were written, where evaluating it would have unfolded every definition inside them as well. A definition applied to at least as many arguments as its value has leading lambdas; the
+/// arguments beyond those are applied to the body. nullopt when the head is not such a definition: an inductive type, a constructor, an axiom, a recursive function (those compute only on a constructor, which
+/// is the guarded scope's business) or anything that is not a global. Used to present results (apply, cases); the unfolded term is convertible with `t`, and every use of it is checked by the kernel again.
+inline std::optional<NodeId> unfold_head_folded(NodeId t) {
+    std::vector<NodeId> args; NodeId head = t;
+    while (head.tag == NodeType::APP) { args.push_back(ctx().apps[head.index].arg_id); head = ctx().apps[head.index].fn_id; }
+    std::reverse(args.begin(), args.end());
+    if (head.tag != NodeType::CONST) return std::nullopt;
+    const GlobalDef& def = ctx().globals[ctx().consts[head.index].global_id];
+    if (!def.value || def.recursive_info || def.ctor_info) return std::nullopt;
+    NodeId v = *def.value; std::size_t used = 0;
+    while (used < args.size() && v.tag == NodeType::LAMBDA) { v = instantiate1(ctx().lambdas[v.index].body_id, args[used]); ++used; }
+    for (; used < args.size(); ++used) v = mk_app(v, args[used]);
+    return v;
+}
+
 /// The value-level reading of expose_pi_folded: the Pi hidden behind definitions at the head of the VALUE `v` (`Not P`, `Imp A B`). A definition applied to its arguments is unfolded, once per step, and
 /// nothing else is: the arguments and everything the body mentions stay as `v` (and the evaluation mode of the caller) have them, which under a NoDeltaScope means folded; a recursive function computes
 /// only where the guarded scope lets it (on a constructor). nullopt when the head is not such a definition, or when a definition unfolds to something that is not a Pi.
@@ -5605,6 +5936,7 @@ inline std::optional<Value> expose_pi_value(Value v) {
 
 /// `simp`: a Pi hidden behind a definition is exposed with the definition's arguments left folded (see expose_pi_folded), so the hypothesis and the new goal read as the user wrote them.
 inline ElabResult intro(ProofState& ps, const std::string& name = "", std::optional<uint32_t> target_meta_id = std::nullopt, bool simp = false) {
+    TacticTxn txn(ps);                                                 // all-or-nothing against exceptions (see TacticTxn)
     auto idx_opt = find_goal_index(ps, target_meta_id);
     if (!idx_opt) return no_goal_error("intro", target_meta_id);
     Goal& g = ps.goals[*idx_opt];
@@ -5633,6 +5965,7 @@ inline ElabResult intro(ProofState& ps, const std::string& name = "", std::optio
 }
 
 inline ElabResult exact(ProofState& ps, NodeId term, std::optional<uint32_t> target_meta_id = std::nullopt) {
+    TacticTxn txn(ps);                                                 // all-or-nothing against exceptions (see TacticTxn)
     auto idx_opt = find_goal_index(ps, target_meta_id);
     if (!idx_opt) return no_goal_error("exact", target_meta_id);
     Goal& g = ps.goals[*idx_opt];
@@ -5663,12 +5996,20 @@ inline std::optional<NodeId> declared_type_of(NodeId candidate, const ElabCtx& e
     return ty;
 }
 
+/// How many Pi binders lead `t`, counting those hidden behind definitions at the head (`Not P` has one): the arity `apply` compares between a lemma and the goal it is applied to.
+inline uint32_t pi_arity_folded(NodeId t, uint32_t level0) {
+    uint32_t n = 0;
+    while (auto pi = expose_pi_folded(t)) { t = instantiate1(ctx().pis[pi->index].cod_id, mk_fvar(level0 + n)); ++n; }
+    return n;
+}
+
 /// `simp`: the new goals (the premises of the candidate) are written in the display normal form -- definitions folded, a recursive function unfolded only where its decreasing argument is a
 /// constructor -- instead of with every definition unfolded. The goals are convertible either way; the choice only decides what a person (or a tactic that rewrites by pattern) sees.
 /// Unification and the peeling of the candidate's type always use full delta, as before; with `simp` the peeling starts from the candidate's declared type (declared_type_of) rather than from the
 /// inferred, delta-normalised one, so that the premises are not already unfolded when they are read off, and each new goal is read once more after unification so that it mentions what the
 /// lemma's other arguments were solved to instead of the metavariables that stood for them.
 inline ElabResult apply(ProofState& ps, NodeId candidate, std::optional<uint32_t> target_meta_id = std::nullopt, bool simp = false) {
+    TacticTxn txn(ps);                                                 // all-or-nothing against exceptions (see TacticTxn)
     auto idx_opt = find_goal_index(ps, target_meta_id);
     if (!idx_opt) return no_goal_error("apply", target_meta_id);
     Goal g = ps.goals[*idx_opt]; // copy: only committed to ps.goals on success
@@ -5683,15 +6024,17 @@ inline ElabResult apply(ProofState& ps, NodeId candidate, std::optional<uint32_t
     // with simp the lemma's conclusion is also read with definitions folded (and a recursive function unfolded only on a constructor): unifying THAT against the goal is first order, so `?n + ?k` against
     // `n + k` solves ?k := k, which the delta-unfolded stuck `match`es of the same two terms cannot do
     std::optional<NodeId> concl_folded;
-    // One reading of the candidate's type, peeled into one metavariable per argument. `folded`: in the display normal form, where a binder hidden behind a definition (`Not P`, `Imp A B`) is exposed by unfolding
-    // THAT definition alone, so that the premises -- and the arguments of such a definition -- read as the lemma states them; the reading is abandoned (false) if full delta sees a binder it does not (one behind a
-    // recursive type-level function). Otherwise every definition is unfolded, which sees every binder.
-    auto peel = [&](bool folded) -> bool {
+    // One reading of the candidate's type, peeled into one metavariable per argument -- at most `limit` of them, the rest of the Pi telescope staying in the conclusion. `folded`: in the display normal form, where
+    // a binder hidden behind a definition (`Not P`, `Imp A B`) is exposed by unfolding THAT definition alone, so that the premises -- and the arguments of such a definition -- read as the lemma states them; the
+    // reading is abandoned (false) if full delta sees a binder it does not (one behind a recursive type-level function). Otherwise every definition is unfolded, which sees every binder.
+    auto peel = [&](bool folded, uint32_t limit) -> bool {
         arg_metas.clear(); meta_refs.clear(); applied = candidate;
         std::optional<NoDeltaScope> keep_folded; std::optional<GuardedUnfoldScope> guarded;
         if (folded) { keep_folded.emplace(); guarded.emplace(); }
         Value cur = eval(start_ty, g.ec.values);
+        bool stopped = false;
         while (true) {
+            if (arg_metas.size() >= limit) { stopped = true; break; }          // (checked before a hidden Pi is exposed: the conclusion keeps `Not P` as it is written)
             if (folded && !std::holds_alternative<VPi>(cur)) { if (auto exposed_pi = expose_pi_value(cur)) cur = std::move(*exposed_pi); }
             auto* pi = std::get_if<VPi>(&cur);
             if (!pi) break;
@@ -5708,15 +6051,18 @@ inline ElabResult apply(ProofState& ps, NodeId candidate, std::optional<uint32_t
         if (!folded) { concl_ty = concl; return true; }
         guarded.reset(); keep_folded.reset();               // from here on every definition unfolds again
         Value full = eval(concl, g.ec.values);
-        if (std::holds_alternative<VPi>(full)) return false;
+        if (std::holds_alternative<VPi>(full) && !stopped) return false;      // (a conclusion that is a Pi because the limit was reached is meant)
         concl_folded = concl; concl_ty = quote(full, g.ec.size());
         return true;
     };
-    if (simp) {
-        auto mark_peel = ctx().meta_ctx.checkpoint();
-        if (!peel(true)) { ctx().meta_ctx.rewind(mark_peel); peel(false); }
-    } else peel(false);
-    {
+    // The peeling and the unification of the conclusion with the goal, for a given number of arguments to peel. Nothing is left behind when it fails.
+    auto peel_and_unify = [&](uint32_t limit) -> ElabResult {
+        concl_folded.reset();
+        auto entry_mark = ctx().meta_ctx.checkpoint(); ElabState entry_es = ps.es;
+        if (simp) {
+            auto mark_peel = ctx().meta_ctx.checkpoint();
+            if (!peel(true, limit)) { ctx().meta_ctx.rewind(mark_peel); concl_folded.reset(); peel(false, limit); }
+        } else peel(false, limit);
         auto unify_and_drain = [&](NodeId concl) -> ElabResult {
             if (ElabResult r = unify(concl, g.target, g.ec, ps.es); !r) return r;
             return drain_pending(g.ec, ps.es);
@@ -5732,6 +6078,14 @@ inline ElabResult apply(ProofState& ps, NodeId candidate, std::optional<uint32_t
             unified = std::unexpected(TypeError{TypeErrorKind::UnificationFailure, g.target, std::nullopt, "apply: no attempt was made"});
             if (concl_folded) {
                 attempt([&] { NoDeltaScope keep_folded; GuardedUnfoldScope guarded; return unify_and_drain(*concl_folded); });
+                // the goal is headed by a definition that the lemma's conclusion does not mention (`x <= y` against `Ex ?A ?P`): unfold that definition on syntax, one step at a time, and match each result. The
+                // arguments are not evaluated on the way, so the lemma's variables are solved to the terms the goal is written with, and the new goals read as the person wrote them
+                NodeId unfolded = g.target;
+                for (int fuel = 0; !unified && fuel < 8; ++fuel) {
+                    auto next = unfold_head_folded(unfolded); if (!next) break;
+                    unfolded = *next;
+                    attempt([&] { NoDeltaScope keep_folded; GuardedUnfoldScope guarded; if (ElabResult r = unify(*concl_folded, unfolded, g.ec, ps.es); !r) return r; return drain_pending(g.ec, ps.es); });
+                }
                 // the goal reaches the lemma's conclusion only through a definition (`sum3 a b c` for `(a + b) + c`): unfold the definitions but still let a recursive function compute only where its decreasing
                 // argument is a constructor, so that `(?n + ?m) + ?k` stays a first-order pattern. With every recursive call unfolded it is a stuck match on the metavariable ?n, which the unifier can only defer,
                 // and apply would hand back ?n ?m ?k as open goals.
@@ -5743,6 +6097,17 @@ inline ElabResult apply(ProofState& ps, NodeId candidate, std::optional<uint32_t
             if (!unified) attempt([&] { FoldSolutionsScope fold; return unify_and_drain(concl_ty); });
             if (!unified) attempt([&] { return unify_and_drain(concl_ty); });
         }
+        if (!unified) { ctx().meta_ctx.rewind(entry_mark); ps.es = entry_es; }
+        return unified;
+    };
+    {
+        // A goal that is itself a Pi -- an implication, a negation (`Not P` is `P -> False`) -- is met by a lemma whose conclusion is such a Pi: the lemma's binders are peeled only as far as they exceed the goal's
+        // (Lean's rule), so `Z.ne_of_lt : x < y -> x <> y` applies to the goal `x <> y` and leaves `x < y`, instead of peeling the negation's premise too and then failing to match `False`. If that does not
+        // unify, every binder is peeled, as before. Like every improvement on the reference this is the tactic layer's mode (`simp`): without it apply is the reference's, which the lockstep gates compare.
+        const uint32_t goal_arity = simp ? pi_arity_folded(g.target, g.ec.size()) : 0, lemma_arity = simp ? pi_arity_folded(start_ty, g.ec.size()) : 0;
+        ElabResult unified = std::unexpected(TypeError{TypeErrorKind::UnificationFailure, g.target, std::nullopt, "apply: no attempt was made"});
+        if (goal_arity > 0 && lemma_arity >= goal_arity) unified = peel_and_unify(lemma_arity - goal_arity);
+        if (!unified) unified = peel_and_unify(~0u);
         if (!unified) return unified;
     }
     {   // F25: a SOLVED argument meta must have received a solution OF ITS TYPE. Unification solves `?A := goal` for a lemma whose conclusion is a bare variable (choice : Pi (A : Type1), Nonempty A -> A) even when the
@@ -5750,8 +6115,13 @@ inline ElabResult apply(ProofState& ps, NodeId candidate, std::optional<uint32_t
         auto mark = ctx().meta_ctx.checkpoint(); ElabState scratch = ps.es; bool solutions_ok = true; std::string why;
         for (auto& [m, arg_ty] : arg_metas) {
             if (!ctx().meta_ctx.is_solved(m)) continue;
-            NodeId solution = quote(eval(meta_applied_to_context(m, g.ec.size()), g.ec.values), g.ec.size());
-            NodeId wanted = quote(eval(arg_ty, g.ec.values), g.ec.size());
+            NodeId solution, wanted;
+            {   // read the solution and the wanted type as the unifier left them: a NoDeltaScope keeps every definition folded. Unfolding them here would hand `check` a delta-normal form -- an operation of a quotient
+                // applied to neutral arguments normalises to a term hundreds of times larger -- when the type of the folded term is what matters, and conversion unfolds whatever it needs by itself.
+                NoDeltaScope keep_folded;
+                solution = quote(eval(meta_applied_to_context(m, g.ec.size()), g.ec.values), g.ec.size());
+                wanted = quote(eval(arg_ty, g.ec.values), g.ec.size());
+            }
             ElabCtx scratch_ec = g.ec;
             if (ElabResult r = check(solution, wanted, scratch_ec, scratch); !r) { solutions_ok = false; why = r.error().message; break; }
         }
@@ -5779,6 +6149,7 @@ inline ElabResult apply(ProofState& ps, NodeId candidate, std::optional<uint32_t
 /// (the old goal's metavariable is solved by the new one, applied to the context), so nothing is wrapped around it. What this is for: `apply` and `induct` hand back goals normalised with full delta
 /// (a recursive function is unfolded even on a variable); a caller that wants a goal in another convertible form -- the tactic layer's `simpl`-style form, say -- gets it here without that re-normalisation.
 inline ElabResult change_target(ProofState& ps, NodeId new_target, std::optional<uint32_t> target_meta_id = std::nullopt) {
+    TacticTxn txn(ps);                                                 // all-or-nothing against exceptions (see TacticTxn)
     auto idx_opt = find_goal_index(ps, target_meta_id);
     if (!idx_opt) return no_goal_error("change", target_meta_id);
     Goal g = ps.goals[*idx_opt];
@@ -5795,6 +6166,7 @@ inline ElabResult change_target(ProofState& ps, NodeId new_target, std::optional
 /// Rewrites occurrences of `x` in the goal by `y`, given eq_term : Eq A x y.  goal[x] <-- transport A (fun z => goal[z]) y x (symm eq) goal[y]
 inline ElabResult rewrite_eq(ProofState& ps, NodeId eq_term, NodeId x, NodeId y, uint32_t transport_gid, uint32_t symm_gid,
                               std::optional<uint32_t> target_meta_id = std::nullopt) {
+    TacticTxn txn(ps);                                                 // all-or-nothing against exceptions (see TacticTxn)
     auto idx_opt = find_goal_index(ps, target_meta_id);
     if (!idx_opt) return no_goal_error("rewrite_eq", target_meta_id);
     Goal g = ps.goals[*idx_opt]; // copy: only committed to ps.goals on success
@@ -5907,10 +6279,17 @@ inline std::expected<detail::ScrutInfo, TypeError> scrutinee_info(const char* wh
     // Only when the head is itself a definition (`Iff A B`) does the type have to be evaluated with every definition unfolded to reach the family, and the arguments are what that evaluation made of them.
     bool read_folded = false;
     if (simp) {
-        NoDeltaScope keep_folded; GuardedUnfoldScope guarded;
-        v = eval(scrut_ty, g.ec.values);
-        auto* nt0 = std::get_if<VNeutral>(&v);
-        read_folded = nt0 && nt0->head.kind == NeutralHead::Kind::GlobalConst && ctx().globals[nt0->head.id].is_inductive;
+        // A head that is a plain definition (`Z.le a b`, `Iff A B`) is unfolded on SYNTAX, one step at a time, until the family appears: the arguments of that family are then the terms the hypothesis was written
+        // with. (Evaluating the type with every definition unfolded would hand back what unfolding made of `a` and `b` -- `Z.zero` as `Quot.mk ...` -- and a person's `rw Z.zero_add` would not find them.)
+        NodeId ty = scrut_ty;
+        for (int fuel = 0; fuel < 16 && !read_folded; ++fuel) {
+            {   NoDeltaScope keep_folded; GuardedUnfoldScope guarded; v = eval(ty, g.ec.values); }
+            auto* nt0 = std::get_if<VNeutral>(&v);
+            read_folded = nt0 && nt0->head.kind == NeutralHead::Kind::GlobalConst && ctx().globals[nt0->head.id].is_inductive;
+            if (read_folded) break;
+            auto next = unfold_head_folded(ty); if (!next) break;
+            ty = *next;
+        }
     }
     if (!read_folded) v = eval(scrut_ty, g.ec.values);
     auto* nt = std::get_if<VNeutral>(&v);
@@ -5936,6 +6315,7 @@ inline NodeId generalized_goal(const Goal& g, const std::vector<std::pair<NodeId
 }
 
 inline ElabResult cases(ProofState& ps, uint32_t hyp_level, std::optional<uint32_t> target_meta_id = std::nullopt, const std::vector<uint32_t>& generalizing = {}, bool simp = false) {
+    TacticTxn txn(ps);                                                 // all-or-nothing against exceptions (see TacticTxn)
     auto idx_opt = find_goal_index(ps, target_meta_id);
     if (!idx_opt) return no_goal_error("cases", target_meta_id);
     Goal g = ps.goals[*idx_opt];
@@ -6086,6 +6466,7 @@ inline ElabResult cases(ProofState& ps, uint32_t hyp_level, std::optional<uint32
 
 inline ElabResult induct(ProofState& ps, uint32_t hyp_level, std::optional<uint32_t> target_meta_id = std::nullopt, const std::vector<uint32_t>& generalizing = {},
                           std::optional<uint32_t> eq_gid = std::nullopt, std::optional<uint32_t> refl_gid = std::nullopt, bool simp = false) {
+    TacticTxn txn(ps);                                                 // all-or-nothing against exceptions (see TacticTxn)
     auto idx_opt = find_goal_index(ps, target_meta_id);
     if (!idx_opt) return no_goal_error("induct", target_meta_id);
     Goal g = ps.goals[*idx_opt];
@@ -6430,16 +6811,10 @@ inline std::vector<NodeId> apply_candidates(const ProofState& ps, const Discrimi
 // accepts a user-built term must reject ill-scoped input with an error first. (The reference aborts on such input too: finding F18.)
 // ===========================================================================
 namespace detail {
-inline bool fvars_below(NodeId t, uint32_t nfree, std::unordered_set<uint64_t>& seen) {
-    ITP_STACK_CHECK();
-    uint64_t key = (static_cast<uint64_t>(static_cast<uint32_t>(t.tag)) << 32) | t.index;
-    if (!seen.insert(key).second) return true;
-    if (t.tag == NodeType::VAR) { Var v = ctx().vars[t.index]; return v.bound || v.n < nfree; }
-    return !any_child(t, [&](NodeId c) { return !fvars_below(c, nfree, seen); });
-}
+/// No loose bound variable and every context variable below `nfree`: both are facts the node carries (NodeInfo::loose, NodeInfo::fvars = 1 + the largest level mentioned), so this is constant time.
 inline bool well_scoped(NodeId t, uint32_t nfree) {
-    if (loose_range(t) != 0) return false;
-    std::unordered_set<uint64_t> seen; return fvars_below(t, nfree, seen);
+    const NodeInfo i = node_info(t);
+    return i.loose == 0 && i.fvars <= nfree;
 }
 } // namespace detail
 

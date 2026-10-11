@@ -370,6 +370,7 @@ class Fuzz:
         if ty == 'itp_env_lnl.NodeId | None': return None if r.random() < 0.5 else self.a_node()
         if ty == 'itp_env_lnl.NodeId': return self.a_node()
         if 'Sequence[itp_env_lnl.NodeId]' in ty: return [self.a_node() for _ in range(r.choice([0, 0, 1, 1, 2, 3, 4]))]
+        if 'Sequence[tuple[int, itp_env_lnl.NodeId]]' in ty: return [(self.small(), self.a_node()) for _ in range(r.choice([0, 0, 1, 1, 2, 3]))]     # replace_fvars: (context level, replacement)
         if 'Sequence[int]' in ty: return [self.small() for _ in range(r.choice([0, 0, 1, 2, 3]))]
         if 'Sequence[str]' in ty: return [r.choice(self.names) for _ in range(r.choice([0, 1, 1, 2, 3]))]
         if 'Sequence[itp_env_lnl.CtorSpec]' in ty:

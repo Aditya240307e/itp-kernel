@@ -6,6 +6,7 @@
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/tuple.h>
 #include <nanobind/stl/vector.h>
+#include <cstdlib>
 #include <functional>
 #include <sys/resource.h>
 #include "itp_kernel.hpp"
@@ -102,7 +103,18 @@ struct ProofStateHandle {
 
 struct KernelWrapper {
     std::unique_ptr<itp::ExecutionContext> exec = std::make_unique<itp::ExecutionContext>();
-    itp::ContextGuard activate() { return itp::ContextGuard(*exec); }
+    // ITP_VERIFY_MEMO=1 in the environment turns the verification of the typing memo on for every kernel made (the gates are run that way too). It can only make the kernel throw more, never accept more.
+    KernelWrapper() { if (const char* e = std::getenv("ITP_VERIFY_MEMO")) exec->verify_memo = e[0] != '\0' && e[0] != '0'; }
+    // Every call into the kernel starts with a fresh work budget (ExecutionContext::fuel_limit; see itp::FuelExhausted). Only the OUTERMOST activation resets it: a wrapper method that calls another one keeps spending the one
+    // budget of the call the caller made.
+    itp::ContextGuard activate() { if (!itp::active_context) itp::reset_fuel(exec->fuel_limit); return itp::ContextGuard(*exec); }
+    /// The work budget of one call into the kernel, in steps (0 or less: unlimited). Takes effect at the next call.
+    void set_fuel(int64_t limit) { exec->fuel_limit = limit; }
+    int64_t get_fuel() const { return exec->fuel_limit; }
+    /// Steps the current (or last) call has used, and the most any call has used since reset_fuel_peak() -- for calibrating limits.
+    int64_t fuel_used() const { return itp::fuel_used(); }
+    int64_t fuel_peak() const { return itp::fuel_peak(); }
+    void reset_fuel_peak() const { itp::reset_fuel_peak(); }
 
     // ---- S5: the search's probing protocol. A probe is: checkpoint, fork the goal, apply a tactic to the fork, read off, rewind. Rewind reverts the
     // ExecutionContext (node pools, metas, derived globals) but cannot see a ProofState, which is why a probe works on a FORK and discards it.
@@ -128,8 +140,19 @@ struct KernelWrapper {
         return h;
     }
     uint32_t loose_range_of(itp::NodeId t) { auto g = activate(); require_node(t, "loose_range_of"); return itp::loose_range(t); }
-    void set_option(const std::string& name, bool value) { auto g = activate(); if (name == "parameters") itp::ctx().param_mode = value; else if (name == "prop_elim") itp::ctx().set_prop_mode(value); else throw ITPError("unknown option: " + name); }
-    bool get_option(const std::string& name) { auto g = activate(); if (name == "parameters") return itp::ctx().param_mode; if (name == "prop_elim") return itp::ctx().prop_mode; throw ITPError("unknown option: " + name); }
+    // "verify_memo" is a debugging switch, not a language option: every hit of the typing memo is re-derived from scratch and compared, and the extraction fast path is compared with evaluate-and-quote.
+    void set_option(const std::string& name, bool value) { auto g = activate(); if (name == "parameters") itp::ctx().param_mode = value; else if (name == "prop_elim") itp::ctx().set_prop_mode(value); else if (name == "verify_memo") itp::ctx().verify_memo = value; else throw ITPError("unknown option: " + name); }
+    bool get_option(const std::string& name) { auto g = activate(); if (name == "parameters") return itp::ctx().param_mode; if (name == "prop_elim") return itp::ctx().prop_mode; if (name == "verify_memo") return itp::ctx().verify_memo; throw ITPError("unknown option: " + name); }
+    /// Audit of the per-node facts (loose range, context-variable range, size, metavariable flag) below a term: "" when the stored values agree with a from-scratch recomputation.
+    std::string check_node_info(itp::NodeId t) { auto g = activate(); require_node(t, "check_node_info"); return itp::check_node_info(t); }
+    /// (loose, fvars, size, mentions a metavariable) of a node, as stored
+    std::tuple<uint32_t, uint32_t, uint32_t, bool> node_info(itp::NodeId t) { auto g = activate(); require_node(t, "node_info"); auto i = itp::node_info(t); return {i.loose, i.fvars, i.size(), i.has_meta()}; }
+    /// With the verify switch on, every term handed to a checking entry point has its per-node facts audited first.
+    void audit(itp::NodeId t) { if (exec->verify_memo) { auto bad = itp::check_node_info(t); if (!bad.empty()) throw ITPError("node info audit failed: " + bad); } }
+    /// (hits, misses, entries) of the typing memo since the context was made
+    std::tuple<uint64_t, uint64_t, uint64_t> memo_stats() { auto g = activate(); return {itp::ctx().memo_hits, itp::ctx().memo_misses, static_cast<uint64_t>(itp::ctx().infer_cache.size())}; }
+    /// (linear-time extractions, extractions that had to evaluate and quote) of proof terms since the context was made
+    std::pair<uint64_t, uint64_t> extract_stats() { auto g = activate(); return {itp::ctx().extract_fast, itp::ctx().extract_slow}; }
     std::vector<int> param_slots(uint32_t family_gid) { auto g = activate(); require_global(family_gid, "param_slots"); std::vector<int> out; for (bool b : itp::family_param_slots(family_gid)) out.push_back(b ? 1 : 0); return out; }
     itp::DiscriminationTree index_library() { auto g = activate(); return itp::index_library(); }
     std::vector<itp::NodeId> apply_candidates(ProofStateHandle& psh, const itp::DiscriminationTree& lib, std::optional<uint32_t> target_meta_id) {
@@ -163,7 +186,7 @@ struct KernelWrapper {
         for (auto& c : ctors) { require_scoped_telescope(c.arg_types, "constructor field type"); for (auto a : c.arg_types) require_meta_free(a, "constructor field type"); for (auto r : c.result_indices) { require_scoped(r, static_cast<uint32_t>(c.arg_types.size()), "constructor result index"); require_meta_free(r, "constructor result index"); } }
         return itp::finish_inductive_unchecked(tid, std::move(ctors)); }
     uint32_t declare_checked(itp::NodeId type, itp::NodeId value, const std::string& name) {
-        auto g = activate(); require_scoped(type, 0, "declared type"); require_scoped(value, 0, "declared value"); auto r = itp::declare_checked(type, value, name);
+        auto g = activate(); require_scoped(type, 0, "declared type"); require_scoped(value, 0, "declared value"); audit(type); audit(value); auto r = itp::declare_checked(type, value, name);
         if (!r) throw ITPError(r.error().message);
         return *r;
     }
@@ -190,6 +213,7 @@ struct KernelWrapper {
             require_meta_free(t, "term"); require_complete_globals(t, "term");
             require_meta_free(expected, "expected type"); require_complete_globals(expected, "expected type");
         }
+        audit(t); audit(expected); for (auto h : hyp_types) audit(h);
         itp::ElabCtx ec; itp::ElabState es;
         // The statement and its context are CLAIMS, not proofs: a final check proves nothing unless they are well-formed types (`check` takes its expected type on trust, and an ill-typed
         // term that merely evaluates to a type would be "proved"). Elaboration-time checks (holes allowed) work on contexts the tactics built.
@@ -258,6 +282,14 @@ struct KernelWrapper {
         return itp::lift(t, d, cutoff); }
     itp::NodeId instantiate(itp::NodeId t, const std::vector<itp::NodeId>& vals) { auto g = activate(); require_node(t, "instantiate"); for (auto v : vals) require_node(v, "instantiate value"); return itp::instantiate(t, vals); }
     itp::NodeId abstract_fvars(itp::NodeId t, const std::vector<uint32_t>& fvars) { auto g = activate(); require_node(t, "abstract_fvars"); return itp::abstract_fvars(t, fvars); }
+    /// Simultaneous replacement of context variables (by closed terms); exposed so that the tests can compare it with a reference.
+    itp::NodeId replace_fvars(itp::NodeId t, const std::vector<std::pair<uint32_t, itp::NodeId>>& repl) {
+        auto g = activate(); require_node(t, "replace_fvars"); std::unordered_map<uint32_t, itp::NodeId> m;
+        for (const auto& [lvl, v] : repl) { require_small(lvl, "replace_fvars level"); require_node(v, "replace_fvars replacement"); if (itp::loose_range(v) != 0) throw ITPError("replace_fvars: a replacement must be closed"); m[lvl] = v; }
+        return itp::replace_fvars(t, m);
+    }
+    /// The term with every solved metavariable replaced by its solution.
+    itp::NodeId resolve_metas(itp::NodeId t) { auto g = activate(); require_node(t, "resolve_metas"); return itp::resolve_metas(t); }
     // Quotients: declares Quot, Quot.mk, Quot.lift, Quot.ind and Quot.sound with kernel-built types (see itp::declare_quot); eq_gid must be the standard equality family.
     std::tuple<uint32_t, uint32_t, uint32_t, uint32_t, uint32_t> declare_quot(uint32_t eq_gid) {
         auto g = activate(); require_global(eq_gid, "declare_quot"); auto r = itp::declare_quot(eq_gid);
@@ -352,7 +384,8 @@ static uint64_t raise_stack_limit(uint64_t want) {
 }
 
 NB_MODULE(itp_env_lnl, m) {
-    nb::exception<ITPError>(m, "ITPError");
+    auto itp_error = nb::exception<ITPError>(m, "ITPError");
+    nb::exception<itp::FuelExhausted>(m, "FuelExhausted", itp_error);      // a kind of ITPError (a failed action), distinguishable from a rejected one
     raise_stack_limit(uint64_t{1} << 30);
     m.def("set_stack_limit", &raise_stack_limit, "bytes"_a, "Raise the soft stack limit of the process (main thread) to at least `bytes` if the hard limit allows; returns the limit now in force.");
     nb::class_<itp::NodeId>(m, "NodeId")
@@ -397,7 +430,18 @@ NB_MODULE(itp_env_lnl, m) {
         .def("materialize_from_node", &KernelWrapper::materialize_from_node, "target"_a, "hyp_types"_a, "hyp_names"_a, nb::keep_alive<0, 1>())
         .def("loose_range_of", &KernelWrapper::loose_range_of, "term"_a)
         .def("set_option", &KernelWrapper::set_option, "name"_a, "value"_a)
+        .def("set_fuel", &KernelWrapper::set_fuel, "steps"_a, "The work budget of one call into the kernel, in steps (0 or less: unlimited); a call that spends it raises FuelExhausted and changes nothing.")
+        .def("get_fuel", &KernelWrapper::get_fuel)
+        .def("fuel_used", &KernelWrapper::fuel_used)
+        .def("fuel_peak", &KernelWrapper::fuel_peak)
+        .def("reset_fuel_peak", &KernelWrapper::reset_fuel_peak)
         .def("get_option", &KernelWrapper::get_option, "name"_a)
+        .def("memo_stats", &KernelWrapper::memo_stats)
+        .def("extract_stats", &KernelWrapper::extract_stats)
+        .def("replace_fvars", &KernelWrapper::replace_fvars, "term"_a, "replacements"_a)
+        .def("resolve_metas", &KernelWrapper::resolve_metas, "term"_a)
+        .def("check_node_info", &KernelWrapper::check_node_info, "term"_a)
+        .def("node_info", &KernelWrapper::node_info, "term"_a)
         .def("param_slots", &KernelWrapper::param_slots, "family_gid"_a)
         .def("index_library", &KernelWrapper::index_library)
         .def("apply_candidates", &KernelWrapper::apply_candidates, "ps"_a, "library"_a, "target_meta_id"_a = nb::none())

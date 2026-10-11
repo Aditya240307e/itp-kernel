@@ -395,6 +395,47 @@ class Proof:
         from ring import ring as _ring
         return _ring(self)
 
+    def induction_on(self, lemma, var, names=()):
+        """induction by a library principle  lemma : forall P z, (premise) -> P z  on a hypothesis `var` whose type is opaque to `induct` (a quotient). The motive is read off the goal by abstracting `var`;
+        the goal becomes the premise, and `names` introduce its binders. Hypotheses that depend on `var` are not generalised: do the induction before introducing them."""
+        w = self.w; lvl = self._level(var)
+        with self.focus():
+            x = self.h(var) if isinstance(var, str) else var; g = self.goal().target
+            ty = w.T(self.ps.goal_hyp_type(0, lvl))
+            motive = w.T(self.k.mk_lambda(ty.n, self.k.abstract_fvars(g.n, [lvl])))
+        self.apply(lemma, motive, x)
+        if names: self.intro(*names)
+        return self
+
+    def calc(self, e0, *steps):
+        """a chain of equations  e0 = e1 = ... = en  closing the first goal (which must be `e0 = en`, up to computation). Each step is `(justification, next_expression)`; the justification of `e_i = e_{i+1}` is
+        'ring' (both sides normalise to the same polynomial), a proof (a term or hypothesis name whose statement is that equation, either way round), or a function of the Proof that proves it by tactics.
+        Expressions may be terms or functions of the Proof (so that they can mention the hypotheses by name)."""
+        w = self.w
+        with self.focus():
+            cur = self.t(e0); A = w.infer(cur); exprs = [cur]
+            for _, nxt in steps: exprs.append(self.t(nxt))
+        names = []
+        for i, (just, _) in enumerate(steps):
+            with self.focus(): stmt = w.Eq(exprs[i], exprs[i + 1])
+            if just == 'ring': script = lambda q: q.ring()
+            elif callable(just) and not isinstance(just, Term): script = just
+            else: script = lambda q, j=just, a=exprs[i], b=exprs[i + 1]: q._calc_exact(j, a, b)
+            name = '_calc%d' % i; self.have(name, stmt, script); names.append(name)
+        with self.focus():
+            acc = self.h(names[0])
+            for i in range(1, len(names)): acc = w.app(w['trans'], A, exprs[0], exprs[i], exprs[i + 1], acc, self.h(names[i]))
+        return self.exact(acc)
+
+    def _calc_exact(self, j, prev, nxt):
+        w = self.w
+        with self.focus():
+            jt = self.t(j); A, a, b = w.eq_parts(w.simp(w.type_of(jt)))
+            fwd = w.conv(a, prev) and w.conv(b, nxt); rev = (not fwd) and w.conv(b, prev) and w.conv(a, nxt)
+            if not (fwd or rev): raise AuthorError('calc: the justification proves %s = %s, not the step %s = %s' % (w.show(a), w.show(b), w.show(prev), w.show(nxt)))
+            proof = jt if fwd else w.app(w['symm'], A, a, b, jt)
+        return self.exact(proof)
+
     def assumption(self):
         """close the first goal with a hypothesis whose type is the goal (up to computation)"""
         g = self.goal(); types, names = self._context()
