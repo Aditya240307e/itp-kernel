@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import itp_env_lnl as E
 import nat_lib
 from author import AuthorError
+from tactics import Proof
 
 FAIL = []; CHECKS = [0]
 def expect(cond, what):
@@ -98,10 +99,11 @@ def main():
         expect(w.simp(t) == want, 'A4 under a lambda: %s' % w.show(w.simp(t)))
         t = w.forall_([Nat], lambda x: w.Eq(add(S(x), Z), x)); want = w.forall_([Nat], lambda x: w.Eq(S(add(x, Z)), x))
         expect(w.simp(t) == want, 'A5 under a Pi, inside an equation: %s' % w.show(w.simp(t)))
-        # a partial application of a recursive function
+        # a partial application of a recursive function is not saturated: it stays folded; with its last argument supplied it computes
         t = add(S(m)); got = w.simp(t)
-        expect(w.view(got)[0] == 'lam' and w.conv(t, got), 'A6 add (S m) unapplied becomes a function: %s' % w.show(got))
-        expect(w.simp(got) == got and w.conv(got, w.lam(Nat, lambda y: S(add(m, y)))), 'A7 and the function is the expected one')
+        expect(got == t, 'A6 add (S m) unapplied stays folded: %s' % w.show(got))
+        got = w.simp(w.lam(Nat, lambda y: add(S(m), y)))
+        expect(got == w.lam(Nat, lambda y: S(add(m, y))), 'A7 and the function with its argument supplied computes: %s' % w.show(got))
         # the mode does not leak into ordinary normalisation: full delta still unfolds the stuck recursion and the definitions
         full = w.normalize(add(m, n))
         expect(full != add(m, n) and w.view(full)[0] == 'match', 'A8 normalize (add m n) is no longer the stuck match -- the folded mode leaked: %s' % w.show(full))
@@ -147,6 +149,25 @@ def main():
         expect(got == lit(v), 'A12 closed term %d: %s should compute to %d, got %s' % (i, w.show(t), v, w.show(got)))
         expect(w.normalize(t) == lit(v), 'A13 closed term %d: full normalisation disagrees with Python' % i)
     expect(checked > 300, 'A14 the closed-term sample was too small (%d)' % checked)
+
+    # a recursive function that, once its decreasing argument is a constructor, still splits on ANOTHER argument: cmp x y = match x [y, p => match y [p, q => cmp p q]]. The unfolded layer of
+    # `cmp (S m) n` is a stuck `match n with ...`, which is not shown: the call stays folded until n is a constructor too
+    w.recursive('cmp', w.forall_([Nat, Nat], lambda x, y: Nat),
+                lambda f: w.fun([Nat, Nat], lambda x, y: w.match(x, lambda _: Nat, [y, lambda p: w.match(y, lambda _: Nat, [p, lambda q: f(p, q)])])))
+    cmp_ = w['cmp']
+    with Ctx(w, 'm', 'n') as (m, n):
+        for name, term, want in [
+                ('cmp (S m) n stays (unfolding would only expose a split on n)', cmp_(S(m), n), cmp_(S(m), n)),
+                ('cmp (S m) Zero',                                             cmp_(S(m), Z), m),
+                ('cmp (S m) (S n)',                                            cmp_(S(m), S(n)), cmp_(m, n)),
+                ('cmp Zero n',                                                 cmp_(Z, n), n),
+                ('cmp m n stays',                                              cmp_(m, n), cmp_(m, n)),
+                ('cmp (S m) unapplied stays',                                  cmp_(S(m)), cmp_(S(m)))]:
+            got = w.simp(term)
+            expect(got == want, 'A15 %s: got %s, wanted %s' % (name, w.show(got), w.show(want)))
+            expect(w.conv(term, got) and w.simp(got) == got, 'A16 %s: not convertible with the input or not a fixed point' % name)
+        st = w.view(w.normalize(cmp_(S(m), n)))
+        expect(st[0] == 'match', 'A17 full normalisation still unfolds the stuck call (the guard leaked into conversion)')
 
     # ------------------------------------------------------------------------------------------------------------------------------ B. change
     Eq = w.Eq
@@ -279,6 +300,25 @@ def main():
     with GoalCtx(w, ps): ok = ps.num_goals() == 1 and w.conv(w.T(ps.goal_target(0)), folded)
     expect(ok, 'C10 a lambda-headed candidate still gives the right premise')
     ps.exact(hv.n); expect(ps.is_complete(), 'C11 finished')
+
+    # intro through a definition: with simp the hypothesis is what the user wrote (`n < n`), not what `<` is defined as; without it the definition is unfolded all the way
+    stmt_nl = w.forall_([Nat], lambda n: w['Not'](w['Lt'](n, n)))
+    for simp in (True, False):
+        ps = fresh_proof(stmt_nl); intros(ps, 'n'); nv = w.T(k.mk_fvar(0))
+        ps.intro('h', None, simp)
+        ty = w.T(ps.goal_hyp_type(0, 1)); folded = w['Lt'](nv, nv)
+        if simp: expect(ty == folded, 'C14 intro of `Not (n < n)` gives the hypothesis n < n, got %s' % w.show(ty, names=['n']))
+        else: expect(ty != folded, 'C15 (control) without simp the hypothesis is the unfolded definition')
+        with GoalCtx(w, ps): expect(w.conv(ty, folded), 'C16 the hypothesis is convertible with n < n (simp=%s)' % simp)
+        expect(ps.goal_target(0) == w['False'].n, 'C17 the new goal is False (simp=%s)' % simp)
+        ps.exact(w['lt_irrefl'](nv, w.T(k.mk_fvar(1))).n); expect(ps.is_complete(), 'C18 finished (simp=%s)' % simp); admit(ps, stmt_nl, 'c_intro_not_%s' % simp)
+    ps = fresh_proof(stmt_nl); intros(ps, 'n'); ps.intro('h', None, True)
+    expect(raises(lambda: ps.intro('x', None, True)), 'C19 intro on a goal that is not a Pi (False) is refused with simp too')
+    stmt_ndef = w.forall_([Nat, Nat], lambda n, m: Eq(n, m))
+    ps = fresh_proof(stmt_ndef); intros(ps, 'n', 'm')
+    expect(raises(lambda: ps.intro('x', None, True)), 'C20 intro on an equation is refused with simp')
+    ps = fresh_proof(w.forall_([Nat], lambda n: w['Not'](w['Not'](w['Le'](n, n))))); intros(ps, 'n'); ps.intro('h', None, True)
+    with GoalCtx(w, ps): expect(w.T(ps.goal_hyp_type(0, 1)) == w['Not'](w['Le'](w.T(k.mk_fvar(0)), w.T(k.mk_fvar(0)))), 'C21 intro of `Not (Not P)` gives `Not P`, still folded')
 
     # a candidate with the right head but an argument that does not fit: refused, state unchanged
     ps = fresh_proof(stmt_c); intros(ps, 'm', 'n', 'k', 'h'); meta0 = ps.goal_meta_id(0)
@@ -418,6 +458,315 @@ def main():
         names = [nm for nm, _ in p.goal(1).hyps]; fv = lambda nm: w.T(k.mk_fvar(names.index(nm)))
         hm_ty = p.goal(1).hyps[names.index('hm')][1] if 'hm' in names else None
         expect(hm_ty is not None and hm_ty == Le(fv('a'), add(fv('j'), fv('y'))), 'G7 `a <= S j + y` read as `a <= S (j + y)`: the le_S case knows its predecessor is `j + y`: %s' % (w.show(hm_ty) if hm_ty is not None else None))
+
+    # ------------------------------------------------------------------------------------------------------------------------------ H. apply reaches a lemma's conclusion through a definition
+    # sum3 x y z := (x + y) + z is a DEFINITION. add_assoc's conclusion `(?n + ?m) + ?k = ?n + (?m + ?k)` meets the goal `sum3 a b c = a + (b + c)` only by unfolding sum3; with every recursive call unfolded
+    # as well the left side is a stuck match on the metavariable ?n, which the unifier can only defer, and apply would hand ?n ?m ?k back as three open goals
+    w.define('sum3', w.forall_([Nat, Nat, Nat], lambda x, y, z: Nat), w.fun([Nat, Nat, Nat], lambda x, y, z: add(add(x, y), z)))
+    stmt_h3 = w.forall_([Nat, Nat, Nat], lambda a, b, c: Eq(w['sum3'](a, b, c), add(a, add(b, c))))
+    p = Proof(w, stmt_h3, 'h_sum3'); p.intro('a', 'b', 'c'); p.apply('add_assoc')
+    expect(p.done, 'H1 apply add_assoc to a goal stated with a definition: the arguments are found by unification, no goal is left\n%s' % p)
+    w.k.declare_checked(stmt_h3.n, p.term().n, 'h_sum3')
+    # the same through two definitions, and with an argument that is not a variable
+    w.define('sum3b', w.forall_([Nat, Nat, Nat], lambda x, y, z: Nat), w.fun([Nat, Nat, Nat], lambda x, y, z: w['sum3'](x, y, z)))
+    stmt_h4 = w.forall_([Nat, Nat], lambda a, b: Eq(w['sum3b'](S(a), b, a), add(S(a), add(b, a))))
+    p = Proof(w, stmt_h4, 'h_sum3b'); p.intro('a', 'b'); p.apply('add_assoc')
+    expect(p.done, 'H2 ... through two definitions and with a non-variable argument\n%s' % p)
+    w.k.declare_checked(stmt_h4.n, p.term().n, 'h_sum3b')
+    # a conclusion that does not fit is still refused
+    stmt_h5 = w.forall_([Nat, Nat, Nat], lambda a, b, c: Eq(w['sum3'](a, b, c), add(a, add(c, b))))
+    p = Proof(w, stmt_h5, 'h_bad'); p.intro('a', 'b', 'c')
+    n_before = p.n_goals
+    try: p.apply('add_assoc'); ok = not p.done
+    except AuthorError: ok = True
+    expect(ok, 'H3 add_assoc does not close sum3 a b c = a + (c + b)')
+
+    # a failed attempt leaves nothing behind. `konst x := Zero` ignores its argument, so the first-order match of `konst ?x` against `konst a` (the first attempt, on the folded forms) guesses ?x := a --
+    # and then fails on the other side of the equation, where the lemma still has `konst` and the goal has Zero. The attempt with the definitions unfolded then finds ?x not constrained at all, and the
+    # lemma's argument comes back as an open goal; had the guess survived, that goal would be gone, and the result would depend on an accident of the order of the attempts
+    w.define('konst', w.arrow(Nat, Nat), w.lam(Nat, lambda x: Z))
+    def _konst_refl(pp): pp.intro('x'); pp.refl()
+    w.prove('konst_refl', w.forall_([Nat], lambda x: Eq(w['konst'](x), w['konst'](x))), _konst_refl)
+    stmt_k = w.forall_([Nat], lambda a: Eq(w['konst'](a), Z))
+    ps = fresh_proof(stmt_k); (av,) = intros(ps, 'a')
+    ps.apply(w['konst_refl'].n, None, True)
+    expect(ps.num_goals() == 1 and ps.goal_target(0) == Nat.n, 'H4 apply konst_refl to `konst a = 0`: the argument is not determined by the goal, so it is the one open goal (no guess of the first attempt survives)')
+    ps.exact(av.n); expect(ps.is_complete(), 'H4b ... and it can be chosen freely'); admit(ps, stmt_k, 'h_konst')
+    # a refused apply leaves the state as it was: the goal, and nothing guessed or deferred (`?f ?x = 0` against `S a = S b` is a constraint the unifier first defers, then loses on `0 = S b`)
+    stmt_r = w.forall_([Nat, Nat, lambda a, b: w.forall_([w.arrow(Nat, Nat), Nat], lambda f, x: Eq(f(x), Z))], lambda a, b, hh: Eq(S(a), S(b)))
+    ps = fresh_proof(stmt_r); intros(ps, 'a', 'b', 'hh'); meta0 = ps.goal_meta_id(0)
+    expect(raises(lambda: ps.apply(w.T(k.mk_fvar(2)).n, None, True)), 'H5 apply of `forall f x, f x = 0` to `S a = S b` is refused')
+    expect(ps.num_goals() == 1 and ps.goal_meta_id(0) == meta0 and ps.num_pending() == 0, 'H5b a refused apply leaves the goal alone and no deferred constraint behind (%d pending)' % ps.num_pending())
+    expect(raises(lambda: ps.apply(w.T(k.mk_fvar(2)).n, None, False)) and ps.num_pending() == 0, 'H5c ... also without simp')
+
+    # a lemma whose arrow sits behind a definition (`Imp A B := A -> B`): only the full-delta reading sees the conclusion, but the premise and the arguments solved by unification must still read as written
+    PROP = w.PROP
+    w.define('Imp', w.forall_([PROP, PROP], lambda a, b: PROP), w.fun([PROP, PROP], lambda a, b: w.arrow(a, b)))
+    Imp = w['Imp']
+    def _imp_le(pp): pp.intro('x'); pp.intro('h'); pp.apply('le_refl')
+    w.prove('imp_le', w.forall_([Nat], lambda x: Imp(Le(Z, x), Le(x, x))), _imp_le)
+    sum3 = w['sum3']
+    stmt_i = w.forall_([Nat, Nat, Nat], lambda a, b, c: Le(sum3(a, b, c), sum3(a, b, c)))
+    for simp in (True, False):
+        ps = fresh_proof(stmt_i); av, bv, cv = intros(ps, 'a', 'b', 'c')
+        ps.apply(w['imp_le'].n, None, simp)
+        tgt = w.T(ps.goal_target(0)); folded = Le(Z, sum3(av, bv, cv))
+        expect(ps.num_goals() == 1, 'H6 apply imp_le leaves the premise as the one goal (simp=%s)' % simp)
+        if simp: expect(tgt == folded, 'H6b the premise reads `0 <= sum3 a b c`, the argument found by unification stays folded: %s' % w.show(tgt, names=['a', 'b', 'c']))
+        else: expect(tgt != folded, 'H6c (control) without simp the argument is not read back folded: %s' % w.show(tgt, names=['a', 'b', 'c']))
+        with GoalCtx(w, ps): expect(w.conv(tgt, folded), 'H6d the premise is convertible with `0 <= sum3 a b c` (simp=%s)' % simp)
+        ps.apply(w['zero_le'].n, None, simp); expect(ps.is_complete(), 'H6e finished (simp=%s)' % simp); admit(ps, stmt_i, 'h_imp_le_%s' % simp)
+    # the same lemma with its first argument and the proof of the first premise given: the arrow that is left is behind the definition too, and its premise is read off the declared type
+    def _imp2_le(pp): pp.intro('x'); pp.intro('h'); pp.intro('h2'); pp.apply('le_refl')
+    w.prove('imp2_le', w.forall_([Nat], lambda x: Imp(Le(Z, x), Imp(Le(x, S(x)), Le(x, x)))), _imp2_le)
+    stmt_j = w.forall_([Nat, Nat, Nat, lambda a, b, c: Le(Z, sum3(a, b, c))], lambda a, b, c, hz: Le(sum3(a, b, c), sum3(a, b, c)))
+    ps = fresh_proof(stmt_j); av, bv, cv, zv = intros(ps, 'a', 'b', 'c', 'hz')
+    with GoalCtx(w, ps): cand = w['imp2_le'](sum3(av, bv, cv), zv); folded = Le(sum3(av, bv, cv), S(sum3(av, bv, cv)))
+    ps.apply(cand.n, None, True)
+    expect(ps.num_goals() == 1 and ps.goal_target(0) == folded.n, 'H7 apply (imp2_le t hz): the premise behind the definition is read folded, `sum3 a b c <= S (sum3 a b c)`: %s' % w.show(w.T(ps.goal_target(0)), names=['a', 'b', 'c', 'hz']))
+    # the arrow behind a RECURSIVE function (`Imps n A B` is A -> ... -> B, n times): the folded reading gives up, and everything still works through full delta
+    w.recursive('Imps', w.forall_([Nat, PROP, PROP], lambda n, a, b: PROP),
+                lambda f: w.fun([Nat, PROP, PROP], lambda n, a, b: w.match(n, lambda _: PROP, [b, lambda m: w.arrow(a, f(m, a, b))])))
+    Imps = w['Imps']
+    stmt_m = w.forall_([PROP, PROP, lambda a, b: w.arrow(a, w.arrow(a, b))], lambda a, b, f: Imps(S(S(Z)), a, b))
+    ps = fresh_proof(stmt_m); av, bv, fv_ = intros(ps, 'A', 'B', 'f')
+    ps.intro('x', None, True); ps.intro('y', None, True)
+    expect(ps.num_goals() == 1 and ps.goal_target(0) == bv.n and ps.goal_num_hyps(0) == 5 and ps.goal_hyp_type(0, 3) == av.n and ps.goal_hyp_type(0, 4) == av.n, 'C22 intro through a recursive function that computes to an arrow gives its premises and the conclusion')
+    ps.exact(w.T(k.mk_app(k.mk_app(fv_.n, k.mk_fvar(3)), k.mk_fvar(4))).n); expect(ps.is_complete(), 'C22b finished'); admit(ps, stmt_m, 'c_imps')
+    ps = fresh_proof(w.forall_([PROP, PROP, lambda a, b: Imps(S(Z), a, b)], lambda a, b, h: a)); intros(ps, 'A', 'B', 'h')
+    with GoalCtx(w, ps): cand = w.T(k.mk_fvar(2))(w['Zero'])
+    expect(raises(lambda: ps.apply(cand.n, None, True)), 'C22c an argument of the wrong type given to a hypothesis whose type hides its arrow behind a recursive function is refused')
+    ps = fresh_proof(w.forall_([PROP, PROP, lambda a, b: Imps(S(Z), a, b), lambda a, b, h: a], lambda a, b, h, x: b)); intros(ps, 'A', 'B', 'h', 'x')
+    with GoalCtx(w, ps): cand = w.T(k.mk_fvar(2))(w.T(k.mk_fvar(3)))
+    ps.apply(cand.n, None, True); expect(ps.is_complete(), 'C23 apply (h x) with h : Imps 1 A B and x : A closes the goal B (the hidden arrow is only seen by full delta)'); admit(ps, w.forall_([PROP, PROP, lambda a, b: Imps(S(Z), a, b), lambda a, b, h: a], lambda a, b, h, x: b), 'c_imps2')
+    stmt_ap = w.forall_([PROP, PROP, lambda a, b: Imps(S(Z), a, b)], lambda a, b, h: w.arrow(a, b))
+    ps = fresh_proof(stmt_ap); av, bv, hv = intros(ps, 'A', 'B', 'h'); ps.intro('x', None, True)
+    ps.apply(hv.n, None, True)
+    expect(ps.num_goals() == 1 and ps.goal_target(0) == av.n, 'C23b apply h with h : Imps 1 A B to the goal B gives the premise A (the arrow is behind a recursive function: found by full delta)')
+    # a negated hypothesis whose argument mentions a definition: the premise of `apply h` is what the hypothesis says, not what the definitions unfold to
+    stmt_nh = w.forall_([Nat, Nat, Nat, lambda a, b, c: w['Not'](Le(a, sum3(a, b, c)))], lambda a, b, c, h: w['False'])
+    ps = fresh_proof(stmt_nh); av, bv, cv, hv = intros(ps, 'a', 'b', 'c', 'h')
+    ps.apply(hv.n, None, True)
+    with GoalCtx(w, ps): folded = Le(av, sum3(av, bv, cv))
+    expect(ps.num_goals() == 1 and w.T(ps.goal_target(0)) == folded, 'C25 apply (h : Not (a <= sum3 a b c)) to False leaves `a <= sum3 a b c`: %s' % w.show(w.T(ps.goal_target(0)), names=['a', 'b', 'c', 'h']))
+    # a definition with two arguments: intro substitutes them in order (a mix-up would give the hypothesis B and the goal A)
+    w.define('imp2', w.forall_([PROP, PROP], lambda a, b: PROP), w.fun([PROP, PROP], lambda a, b: w.arrow(a, b)))
+    stmt_d = w.forall_([PROP, PROP, lambda a, b: a], lambda a, b, x: w['imp2'](b, a))
+    ps = fresh_proof(stmt_d); av, bv, xv = intros(ps, 'A', 'B', 'x')
+    ps.intro('y', None, True)
+    expect(ps.goal_num_hyps(0) == 4 and ps.goal_hyp_type(0, 3) == bv.n and ps.goal_target(0) == av.n, 'C24 intro of `imp2 B A` gives the hypothesis B and the goal A')
+    ps.exact(xv.n); expect(ps.is_complete(), 'C24b finished'); admit(ps, stmt_d, 'c_imp2')
+
+    # ------------------------------------------------------------------------------------------------------------------------------ I. cases and induct write what they introduce as a person would
+    # a parameterised family whose parameter is a lambda: the field `R a b` is `(fun x y => y = S x) a z` after the parameter is substituted, and must read `z = S a`
+    TYPE = w.TYPE
+    rel = lambda A: w.arrow(A, w.arrow(A, PROP))
+    w.inductive('Star', w.forall_([TYPE, lambda A: rel(A), lambda A, R: A, lambda A, R, a: A], lambda A, R, a, b: PROP),
+                [('star_refl', [TYPE, lambda A: rel(A), lambda A, R: A], lambda A, R, a: [A, R, a, a]),
+                 ('star_step', [TYPE, lambda A: rel(A), lambda A, R: A, lambda A, R, a: A, lambda A, R, a, b: A, lambda A, R, a, b, c: R(a, b), lambda A, R, a, b, c, h: w['Star'](A, R, b, c)],
+                  lambda A, R, a, b, c, h1, h2: [A, R, a, c])])
+    Star = w['Star']
+    step = w.lam(Nat, lambda x: w.lam(Nat, lambda y: Eq(y, S(x))))
+    stmt_s = w.forall_([Nat, Nat, lambda a, b: Star(Nat, step, a, b)], lambda a, b, h: Eq(a, a))
+    for how in ('induct', 'cases'):
+        p = Proof(w, stmt_s, 'i_star_' + how); p.intro('a', 'b', 'h')
+        if how == 'induct': p.induct('h', names=['x', 'y', 'z', 'r', 'hs', 'ih'])
+        else: p.cases('h', names=['x', 'y', 'z', 'r', 'hs'])
+        names = [nm for nm, _ in p.goal(1).hyps]
+        expect('hs' in names, 'I1 %s: the step case has the hypothesis hs (%s)' % (how, names))
+        if 'hs' in names:
+            with GoalCtx(w, p.ps, 1):
+                fv = lambda nm: w.T(k.mk_fvar(names.index(nm)))
+                hs_ty = p.goal(1).hyps[names.index('hs')][1]
+                expect(hs_ty == Eq(fv('z'), S(fv('a'))), 'I2 %s: the relation field reads `z = S a`, not a beta-redex: %s' % (how, w.show(hs_ty, names=names)))
+                expect(not has_redex(hs_ty), 'I3 %s: no beta-redex in the field' % how)
+
+    # a hypothesis after the scrutinee is reverted and introduced again: it is shown folded (`Zero < m`, not what `<` unfolds to) and keeps its name, also through a second cases
+    stmt_l = w.forall_([Nat, Nat, lambda n, m: w['Lt'](n, m)], lambda n, m, hh: Eq(n, n))
+    p = Proof(w, stmt_l, 'i_lt'); p.intro('n', 'm', 'hh'); p.cases('n', names=['k'])
+    expect(p.n_goals == 2, 'I4 cases n gives two goals')
+    names0 = [nm for nm, _ in p.goal(0).hyps]; names1 = [nm for nm, _ in p.goal(1).hyps]
+    expect(names0 == ['n', 'm', 'hh', 'm', 'hh'] and names1 == ['n', 'm', 'hh', 'k', 'm', 'hh'], 'I5 the hypotheses that were reverted come back under their names: %s / %s' % (names0, names1))
+    with GoalCtx(w, p.ps, 0):
+        mv = w.T(k.mk_fvar(3)); expect(p.goal(0).hyps[4][1] == w['Lt'](Z, mv), 'I6 the reverted hypothesis is `Zero < m` (folded): %s' % w.show(p.goal(0).hyps[4][1], names=names0))
+    with GoalCtx(w, p.ps, 1):
+        kv, mv = w.T(k.mk_fvar(3)), w.T(k.mk_fvar(4)); expect(p.goal(1).hyps[5][1] == w['Lt'](S(kv), mv), 'I7 ... and `Succ k < m` in the other case: %s' % w.show(p.goal(1).hyps[5][1], names=names1))
+    p.refl()                                                                                   # the first case
+    p.cases(1, names=['j'])                                                                    # the original m: everything after it is reverted, among it k, which only the tactic layer named
+    names0 = [nm for nm, _ in p.goal(0).hyps]; names1 = [nm for nm, _ in p.goal(1).hyps]
+    expect(names0 == ['n', 'm', 'hh', 'k', 'm', 'hh', 'hh', 'k', 'm', 'hh'] and names1 == ['n', 'm', 'hh', 'k', 'm', 'hh', 'j', 'hh', 'k', 'm', 'hh'], 'I8 a second cases keeps the names of what it reverted, including the one only the tactic layer had given: %s / %s' % (names0, names1))
+    expect(p.n_goals == 2 and p.ps.goal_hyp_name(0, 7) == 'k' and p.ps.goal_hyp_name(1, 8) == 'k', 'I9 the kernel knows those names too')
+
+    # ------------------------------------------------------------------------------------------------------------------------------ J. rewriting inside a hypothesis (`rw_at`)
+    # `rw_at h lemma` finds the lemma's left side (right side with rev) in the display form of h, and adds the rewritten hypothesis under the same name (or `new`); the original stays, shadowed.
+    # The proof is `transport` along the instantiated equation, so everything below is also re-checked by the kernel when the theorem is declared.
+    F_ = w.forall_
+    def finish(p_, stmt_, name_, last):
+        p_.exact(last); expect(p_.done, 'J %s: the proof is finished' % name_)
+        k.declare_checked(w.term(stmt_, 's').n, p_.term().n, name_)
+    def hyp_summary(p_, i=0):
+        return [(nm, w.show(ty, names=[n for n, _ in p_.goal(i).hyps][:j])) for j, (nm, ty) in enumerate(p_.goal(i).hyps)]
+    stmt_j1 = F_([Nat, Nat, lambda a, b: Eq(add(a, Z), b)], lambda a, b, h: Eq(a, b))
+    p = Proof(w, stmt_j1, 'j1'); p.intro('a', 'b', 'h'); p.rw_at('h', 'add_zero')
+    with GoalCtx(w, p.ps):
+        a_, b_ = w.T(k.mk_fvar(0)), w.T(k.mk_fvar(1)); hs = p.goal().hyps
+        expect(len(hs) == 4 and hs[3][0] == 'h' and hs[3][1] == Eq(a_, b_), 'J1 rw_at adds the rewritten hypothesis `h : a = b`: %s' % hyp_summary(p))
+        expect(hs[2][0] == 'h' and hs[2][1] == Eq(add(a_, Z), b_), 'J1b the original stays, shadowed: %s' % hyp_summary(p))
+        expect(p.goal().target == Eq(a_, b_), 'J1c the goal is not touched')
+    expect(k.view(p.h('h').n) == ('fvar', 3), 'J1d the name `h` now means the new hypothesis (level 3), not the shadowed one')
+    finish(p, stmt_j1, 'j1_thm', 'h')
+    # a hypothesis that is not called `h`: the rewritten one keeps ITS name
+    stmt_j1q = F_([Nat, Nat, lambda a, b: Eq(add(a, Z), b)], lambda a, b, hq: Eq(a, b))
+    p = Proof(w, stmt_j1q, 'j1q'); p.intro('a', 'b', 'hq'); p.rw_at('hq', 'add_zero')
+    expect([nm for nm, _ in p.goal().hyps] == ['a', 'b', 'hq', 'hq'], 'J1e the rewritten hypothesis keeps the name `hq`: %s' % hyp_summary(p))
+    finish(p, stmt_j1q, 'j1q_thm', 'hq')
+    # given as a term, the new hypothesis is called `h`
+    p = Proof(w, stmt_j1q, 'j1t'); p.intro('a', 'b', 'hq'); p.rw_at(p.h('hq'), 'add_zero')
+    expect([nm for nm, _ in p.goal().hyps] == ['a', 'b', 'hq', 'h'], 'J1f a hypothesis given as a term: the new one is called h: %s' % hyp_summary(p))
+    finish(p, stmt_j1q, 'j1t_thm', 'h')
+    # `new=` names the result; the original keeps its name AND its type
+    p = Proof(w, stmt_j1, 'j2'); p.intro('a', 'b', 'h'); p.rw_at('h', 'add_zero', new='h2')
+    with GoalCtx(w, p.ps):
+        a_, b_ = w.T(k.mk_fvar(0)), w.T(k.mk_fvar(1)); hs = p.goal().hyps
+        expect([nm for nm, _ in hs] == ['a', 'b', 'h', 'h2'] and hs[2][1] == Eq(add(a_, Z), b_) and hs[3][1] == Eq(a_, b_), 'J2 new= names the result and the original is unchanged: %s' % hyp_summary(p))
+    finish(p, stmt_j1, 'j2_thm', 'h2')
+    # reverse direction, and the pattern is read off the DISPLAY form: h is `Succ a + b = c`, shown as `Succ (a + b) = c`, which is what `add_succ` read right to left looks for
+    stmt_j3 = F_([Nat, Nat, Nat, lambda a, b, c: Eq(add(S(a), b), c)], lambda a, b, c, h: Eq(add(a, S(b)), c))
+    p = Proof(w, stmt_j3, 'j3'); p.intro('a', 'b', 'c', 'h'); p.rw_at('h', 'add_succ', rev=True)
+    with GoalCtx(w, p.ps):
+        a_, b_, c_ = (w.T(k.mk_fvar(i)) for i in range(3))
+        expect(p.goal().hyps[-1][1] == Eq(add(a_, S(b_)), c_), 'J3 rev: `Succ (a + b) = c` becomes `a + Succ b = c`: %s' % hyp_summary(p))
+    finish(p, stmt_j3, 'j3_thm', 'h')
+    # explicit arguments choose the instance; without them the first instance in the display form is taken (outermost, leftmost)
+    stmt_j4 = F_([Nat, Nat, Nat, lambda a, b, c: Eq(add(add(a, b), add(b, a)), c)], lambda a, b, c, h: Eq(add(add(a, b), add(a, b)), c))
+    p = Proof(w, stmt_j4, 'j4a'); p.intro('a', 'b', 'c', 'h'); p.rw_at('h', 'add_comm', 'b', 'a')
+    with GoalCtx(w, p.ps):
+        a_, b_, c_ = (w.T(k.mk_fvar(i)) for i in range(3))
+        expect(p.goal().hyps[-1][1] == Eq(add(add(a_, b_), add(a_, b_)), c_), 'J4a add_comm b a: only the instance `b + a` is rewritten: %s' % hyp_summary(p))
+    finish(p, stmt_j4, 'j4a_thm', 'h')
+    p = Proof(w, stmt_j4, 'j4b'); p.intro('a', 'b', 'c', 'h'); p.rw_at('h', 'add_comm')
+    with GoalCtx(w, p.ps):
+        a_, b_, c_ = (w.T(k.mk_fvar(i)) for i in range(3))
+        expect(p.goal().hyps[-1][1] == Eq(add(add(b_, a_), add(a_, b_)), c_), 'J4b add_comm: the first instance found is the outermost sum (b + a + (a + b)): %s' % hyp_summary(p))
+    # every occurrence of the instance is rewritten, not only the first
+    stmt_j5 = F_([Nat, lambda a: Eq(add(a, Z), S(add(a, Z)))], lambda a, h: Eq(a, S(a)))
+    p = Proof(w, stmt_j5, 'j5'); p.intro('a', 'h'); p.rw_at('h', 'add_zero')
+    with GoalCtx(w, p.ps):
+        a_ = w.T(k.mk_fvar(0)); expect(p.goal().hyps[-1][1] == Eq(a_, S(a_)), 'J5 both occurrences of `a + 0` are rewritten: %s' % hyp_summary(p))
+    finish(p, stmt_j5, 'j5_thm', 'h')
+    # no instance: an error that names the pattern, and the proof state is as before
+    stmt_j6 = F_([Nat, Nat, lambda a, b: Eq(a, b)], lambda a, b, h: Eq(a, b))
+    p = Proof(w, stmt_j6, 'j6'); p.intro('a', 'b', 'h'); before = hyp_summary(p)
+    try: p.rw_at('h', 'add_zero'); msg = ''
+    except AuthorError as e: msg = str(e)
+    expect('no instance of the pattern' in msg and hyp_summary(p) == before and p.n_goals == 1, 'J6 no instance of the pattern: refused, nothing added (%s)' % msg[:60])
+    # a variable of the lemma that the pattern does not mention must be given
+    w.prove('j_extra', F_([Nat, Nat], lambda n, m: Eq(add(n, Z), n)), lambda q: (q.intro('n', 'm'), q.rw('add_zero')))
+    p = Proof(w, stmt_j1, 'j7'); p.intro('a', 'b', 'h')
+    try: p.rw_at('h', 'j_extra'); msg = ''
+    except AuthorError as e: msg = str(e)
+    expect('does not determine' in msg and len(p.goal().hyps) == 3, 'J7 the pattern does not determine the quantified variables: refused (%s)' % msg[:60])
+    try: p.rw_at('h', 'j_extra', 'a'); msg = ''
+    except AuthorError as e: msg = str(e)
+    expect('does not determine' in msg and len(p.goal().hyps) == 3, 'J7b ... also when only the first is given (%s)' % msg[:60])
+    p.rw_at('h', 'j_extra', 'a', 'b')
+    with GoalCtx(w, p.ps):
+        a_, b_ = w.T(k.mk_fvar(0)), w.T(k.mk_fvar(1)); expect(p.goal().hyps[-1][1] == Eq(a_, b_), 'J7c given both, the lemma applies: %s' % hyp_summary(p))
+    finish(p, stmt_j1, 'j7_thm', 'h')
+    # the LEMMA is read in display form too: `Succ n + m = m + Succ n` reads `Succ (n + m) = m + Succ n`, and that is what it finds in the (display form of the) hypothesis `Succ a + b = c`
+    w.prove('j_sac', F_([Nat, Nat], lambda n, m: Eq(add(S(n), m), add(m, S(n)))), lambda q: (q.intro('n', 'm'), q.exact(lambda q2: w['add_comm'](S(q2.h('n')), q2.h('m')))))
+    stmt_j9 = F_([Nat, Nat, Nat, lambda a, b, c: Eq(add(S(a), b), c)], lambda a, b, c, h: Eq(add(b, S(a)), c))
+    p = Proof(w, stmt_j9, 'j9'); p.intro('a', 'b', 'c', 'h'); p.rw_at('h', 'j_sac')
+    with GoalCtx(w, p.ps):
+        a_, b_, c_ = (w.T(k.mk_fvar(i)) for i in range(3))
+        expect(p.goal().hyps[-1][1] == Eq(add(b_, S(a_)), c_), 'J9 a lemma whose left side is a recursive call on a constructor is found in the display form of the hypothesis: %s' % hyp_summary(p))
+    finish(p, stmt_j9, 'j9_thm', 'h')
+    # something that is not an equation cannot be rewritten with
+    p = Proof(w, stmt_j1, 'j8'); p.intro('a', 'b', 'h')
+    expect(raises(lambda: p.rw_at('h', 'succ_ne_zero'), ''), 'J8 a lemma that is not an equation is refused')
+    expect(len(p.goal().hyps) == 3, 'J8b ... and nothing was added')
+
+    # ------------------------------------------------------------------------------------------------------------------------------ K. which reading of the lemma meets the goal, and how what unification found is written
+    # apply with simp tries its readings of the lemma's conclusion in a fixed order (see apply); each case below is one that only a particular reading, or a particular way of writing down a solution, gets right
+    # K1: the goal reaches the conclusion through a definition AND has a constructor where the lemma has a metavariable. `k_def2 (S a) b` is `add (S a) b` once the definition is unfolded, and that computes (its
+    # decreasing argument is a constructor) to `S (add a b)`: the lemma's `R (S (add ?n ?m))` meets it first order. Without that reading, the full-delta one meets two stuck matches, defers a constraint and hands ?n ?m back as goals
+    w.define('k_def2', w.forall_([Nat, Nat], lambda x, y: Nat), w.fun([Nat, Nat], lambda x, y: add(x, y)))
+    w.axiom('k_R', w.arrow(Nat, PROP)); w.axiom('k_lemS', w.forall_([Nat, Nat], lambda n, m: w['k_R'](S(add(n, m)))))
+    stmt_k1 = w.forall_([Nat, Nat], lambda a, b: w['k_R'](w['k_def2'](S(a), b)))
+    ps = fresh_proof(stmt_k1); intros(ps, 'a', 'b')
+    ps.apply(w['k_lemS'].n, None, True)
+    expect(ps.num_goals() == 0 and ps.num_pending() == 0, 'K1 apply (R (S (n + m))) to `R (def2 (S a) b)`: both arguments found by first-order matching, nothing left over (%d goals, %d pending)' % (ps.num_goals(), ps.num_pending()))
+    expect(ps.is_complete(), 'K1b ... and the proof is complete')
+    if ps.is_complete(): admit(ps, stmt_k1, 'k_def2_thm')
+
+    # K2: a lemma whose arrow sits behind a recursive function whose decreasing argument is itself hidden behind a definition (`Imps one A B`, one := S Zero). The folded reading cannot see the arrow (`one` is not
+    # a constructor) while full delta can: the folded reading is then abandoned -- it must not be kept (it never found a conclusion), and it must leave nothing behind -- and the lemma is read with every definition
+    # unfolded. The premise and the function that unification finds for `f` (a LAMBDA, which is written down when it is quoted) must still read as the lemma states them: `Q (fun x => x + 0)`
+    w.define('k_one', Nat, S(Z))
+    w.axiom('k_Q', w.arrow(NN, PROP)); w.axiom('k_Q2', w.arrow(NN, PROP)); kQ, kQ2 = w['k_Q'], w['k_Q2']
+    w.axiom('k_lemH', w.forall_([NN], lambda f: Imps(w['k_one'], kQ(f), kQ2(f))))          # Q f -> Q2 f, behind `Imps one`
+    w.axiom('k_lemA', w.forall_([NN], lambda f: w.arrow(kQ(f), kQ2(f))))                   # the same lemma with its arrow in plain sight
+    fn0 = w.lam(Nat, lambda x: add(x, Z))
+    w.axiom('k_qq', kQ(fn0))
+    stmt_kh = w.forall_([Nat], lambda a: kQ2(fn0))
+    made = {}
+    for lem in ('k_lemH', 'k_lemA'):
+        ps = fresh_proof(stmt_kh); intros(ps, 'a'); m0 = k.fresh_meta(Nat.n, 0)
+        try: ps.apply(w[lem].n, None, True); err = ''
+        except Exception as e: err = str(e)[:80]
+        made[lem] = k.fresh_meta(Nat.n, 0) - m0 - 1
+        expect(not err and ps.num_goals() == 1, 'K2 apply %s to `Q2 (fun x => x + 0)` leaves the premise as the one goal (%s)' % (lem, err or '%d goals' % ps.num_goals()))
+        if err or ps.num_goals() != 1: continue
+        expect(ps.goal_target(0) == kQ(fn0).n, 'K2b %s: the premise reads `Q (fun x => x + 0)`, not an unfolded function: %s' % (lem, w.show(w.T(ps.goal_target(0)), names=['a'])))
+        ps.exact(w['k_qq'].n)
+        expect(ps.is_complete() and ps.extract() == w.fun([Nat], lambda a: w[lem](fn0, w['k_qq'])).n, 'K2c %s: and the function found for f is written folded in the proof term: %s' % (lem, w.show(w.T(ps.extract()))))
+    expect(len(made) == 2 and made['k_lemH'] == made['k_lemA'], 'K2d the abandoned reading leaves no metavariable behind: %s created for the hidden arrow, %s for the plain one' % (made.get('k_lemH'), made.get('k_lemA')))
+    # ... and without simp the solution is written the way unification found it, definitions unfolded: the folded writing belongs to the simp readings alone (it must neither be missing from them nor outlive them --
+    # this runs after many simp applications, so a folding mode that is never switched off again shows here)
+    unfolded = w.normalize(fn0)
+    expect(unfolded != fn0 and w.conv(unfolded, fn0), 'K3 (test setup) the normal form of `fun x => x + 0` is another, convertible term')
+    for lem in ('k_lemH', 'k_lemA'):
+        ps = fresh_proof(stmt_kh); intros(ps, 'a'); ps.apply(w[lem].n, None, False); ps.exact(w['k_qq'].n)
+        expect(ps.is_complete() and ps.extract() == w.fun([Nat], lambda a: w[lem](unfolded, w['k_qq'])).n, 'K3b %s without simp: the function found for f is the unfolded one: %s' % (lem, w.show(w.T(ps.extract()))))
+
+    # K4: an arrow behind TWO definitions (`Imp2 A B := Imp A B`, `Imp A B := A -> B`): the folded reading unfolds one definition after the other until the arrow shows, so the premise is the lemma's, not its unfolding
+    w.define('k_Imp2', w.forall_([PROP, PROP], lambda a, b: PROP), w.fun([PROP, PROP], lambda a, b: Imp(a, b)))
+    w.axiom('k_lem2', w.forall_([Nat, Nat], lambda x, y: w['k_Imp2'](Eq(add(x, y), add(y, x)), Eq(add(x, y), add(y, x)))))
+    stmt_k4 = w.forall_([Nat, Nat], lambda x, y: Eq(add(x, y), add(y, x)))
+    ps = fresh_proof(stmt_k4); xv, yv = intros(ps, 'x', 'y')
+    with GoalCtx(w, ps): folded = Eq(add(xv, yv), add(yv, xv)); pf = w['add_comm'](xv, yv)
+    ps.apply(w['k_lem2'].n, None, True)
+    expect(ps.num_goals() == 1 and ps.goal_target(0) == folded.n, 'K4 the premise behind two definitions reads `x + y = y + x`: %s' % [w.show(w.T(ps.goal_target(i)), names=['x', 'y']) for i in range(ps.num_goals())])
+    try: ps.exact(pf.n)
+    except Exception as e: expect(False, 'K4b the premise is closed by add_comm x y: %s' % str(e)[:80])
+    expect(ps.is_complete(), 'K4c finished')
+    if ps.is_complete(): admit(ps, stmt_k4, 'k_lem2_thm')
+
+    # K5: a candidate headed by a HYPOTHESIS whose second argument goes through a hidden arrow: the premise that is left is written the way the hypothesis states it, not with `+` unfolded
+    w.axiom('k_Q0', w.arrow(Nat, PROP)); kQ0 = w['k_Q0']
+    stmt_k5 = w.forall_([Nat, lambda n: w.forall_([Nat], lambda x: Imp(Le(x, x), Imp(Eq(add(x, x), x), kQ0(x)))), lambda n, h: Le(n, n)], lambda n, h, hl: kQ0(n))
+    ps = fresh_proof(stmt_k5); nv, hv, hlv = intros(ps, 'n', 'h', 'hl')
+    with GoalCtx(w, ps): cand = hv(nv, hlv); folded = Eq(add(nv, nv), nv)
+    ps.apply(cand.n, None, True)
+    expect(ps.num_goals() == 1 and ps.goal_target(0) == folded.n, 'K5 apply (h n hl) leaves `n + n = n` as the premise: %s' % [w.show(w.T(ps.goal_target(i)), names=['n', 'h', 'hl']) for i in range(ps.num_goals())])
+
+    # K6: a constructor field that is a definition (`Zero < n`, with `x < y` defined as `Succ x <= y`): `cases` shows the field as the constructor states it
+    w.inductive('k_Box', w.forall_([Nat], lambda n: PROP), [('k_mk_box', [Nat, lambda n: w['Lt'](Z, n)], lambda n, h: [n])])
+    stmt_k6 = w.forall_([Nat, lambda m: w['k_Box'](m)], lambda m, b: Eq(m, m))
+    p = Proof(w, stmt_k6, 'k_box'); p.intro('m', 'b'); p.cases('b')
+    with GoalCtx(w, p.ps):
+        mv = w.T(k.mk_fvar(0)); field_ty = p.goal().hyps[-1][1]
+        expect(field_ty == w['Lt'](Z, mv), 'K6 the field of the only case reads `0 < m`, not what `<` unfolds to: %s' % w.show(field_ty, names=[nm for nm, _ in p.goal().hyps][:-1]))
+    p.refl(); expect(p.done, 'K6b finished')
+
+    # K7: a recursive function whose body is a constructor, not a match on the decreasing argument: on a variable it must stay folded (its unfolding would be shown whatever the argument was), on a constructor
+    # it computes one layer
+    w.recursive('k_hh', w.arrow(Nat, Nat), lambda f: w.fun([Nat], lambda n: S(w.match(n, lambda _: Nat, [Z, lambda p: f(p)]))), on=0)
+    khh = w['k_hh']
+    with Ctx(w, 'm') as (m,):
+        expect(w.simp(khh(m)) == khh(m), 'K7 `hh m` stays folded: %s' % w.show(w.simp(khh(m))))
+        expect(w.simp(khh(S(m))) == S(khh(m)), 'K7b `hh (S m)` computes one layer: %s' % w.show(w.simp(khh(S(m)))))
+        expect(w.simp(khh(Z)) == S(Z), 'K7c `hh 0` computes: %s' % w.show(w.simp(khh(Z))))
 
     # nothing leaks out of the folded mode into later work
     with Ctx(w, 'm', 'n') as (m, n):

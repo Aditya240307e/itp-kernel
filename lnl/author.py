@@ -64,6 +64,37 @@ class Notation:
     def lit(self, n): self._no('numerals')
 
 
+class DispatchNotation(Notation):
+    """the operators and numerals of a world with several kinds of number: each registered Notation serves one type, and an operator picks the one of its operand's type (a Python int takes the type of
+    the other operand, or the `default` type). So `a + b` is `add` on Nat and `N.add` on N with the same source text."""
+    def __init__(self, w): self.w = w; self.by_type = {}; self.default = None
+    def register(self, ty, nota, default=False):
+        self.by_type[self.w._n(ty)] = nota
+        if default or self.default is None: self.default = nota
+    def using(self, ty):
+        """`with w.nota.using(N):` -- Python ints without a Term operand mean numerals of this type"""
+        d = self; nota = self.by_type[self.w._n(ty)]
+        class _Using:
+            def __enter__(s): s.prev = d.default; d.default = nota
+            def __exit__(s, *exc): d.default = s.prev
+        return _Using()
+    def _pick(self, *ops):
+        if len(self.by_type) <= 1: return self.default                 # one kind of number: no need to look at the operands
+        for o in ops:
+            if isinstance(o, Term):
+                nt = self.by_type.get(self.w.type_of(o).n)
+                if nt is not None: return nt
+        return self.default
+    def add(self, a, b): return self._pick(a, b).add(a, b)
+    def mul(self, a, b): return self._pick(a, b).mul(a, b)
+    def pow(self, a, b): return self._pick(a).pow(a, b)
+    def sub(self, a, b): return self._pick(a, b).sub(a, b)
+    def neg(self, a): return self._pick(a).neg(a)
+    def le(self, a, b): return self._pick(a, b).le(a, b)
+    def lt(self, a, b): return self._pick(a, b).lt(a, b)
+    def lit(self, n): return self.default.lit(n)
+
+
 class World:
     def __init__(self, parameters=True, prop_elim=True):
         self.k = E.Kernel()

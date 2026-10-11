@@ -123,7 +123,7 @@ MUTANTS = {
  'C2 checker: proof irrelevance also without prop_elim': ("        return self.prop_elim and ctx is not None and self.irrelevant(a, b, depth, ctx)", "        return ctx is not None and self.irrelevant(a, b, depth, ctx)", 'indep_checker.py'),
  'C3 checker: irrelevance does not require the type to be a proposition': ("            if self.sort_of(ctx, pa) != 0: return False\n", "", 'indep_checker.py'),
  'C4 checker: irrelevance does not compare the two types': ("            return self.conv(pa, pb, depth + 1, ctx)\n        except (CheckError, Unsupported, KeyError, IndexError): return False", "            return True\n        except (CheckError, Unsupported, KeyError, IndexError): return False", 'indep_checker.py'),
- 'C5 checker: the type checker converts without a context (no irrelevance while checking)': ("        if not self.conv(inferred, expected, 0, ctx): raise CheckError('type mismatch')", "        if not self.conv(inferred, expected): raise CheckError('type mismatch')", 'indep_checker.py'),
+ 'C5 checker: the type checker converts without a context (no irrelevance while checking)': ("        if not self.conv(inferred, expected, 0, ctx):\n", "        if not self.conv(inferred, expected):\n", 'indep_checker.py'),
  'C6 checker: binders do not extend the context of the comparison': ("        ext = lambda z, A: None if ctx is None else {**ctx, z[1]: A}", "        ext = lambda z, A: ctx", 'indep_checker.py'),
  'C7 checker: a type in Type1 counts as a proposition': ("            if self.sort_of(ctx, pa) != 0: return False\n", "            if self.sort_of(ctx, pa) > 1: return False\n", 'indep_checker.py'),
  'C8 checker: eta is not applied (a lambda against a non-lambda)': ("        if (ka == 'lam') != (kb == 'lam'):                  # eta:", "        if False and (ka == 'lam') != (kb == 'lam'):                  # eta:", 'indep_checker.py'),
@@ -305,13 +305,13 @@ MUTANTS = {
  'V46 instantiate does not validate the values': ('for (auto v : vals) require_node(v, "instantiate value"); ', '', 'itp_bindings.cpp'),
  'V47 abstract_fvars does not validate the handle': ('require_node(t, "abstract_fvars"); ', '', 'itp_bindings.cpp'),
  'V48 dump_raw does not validate the handle': ('auto g = activate(); require_node(n, "dump_raw");', 'auto g = activate();', 'itp_bindings.cpp'),
- 'D1 guarded unfolding happens in every no-delta evaluation, not only in the guarded scope': ('if (guarded_unfold_flag() && def.recursive_info && def.value) {', 'if (def.recursive_info && def.value) {'),
- 'D2 guarded unfolding waits for one more argument than the decreasing one': ('if (n.spine.size() == d + 1) {', 'if (n.spine.size() == d + 2) {'),
- 'D3 guarded unfolding never fires (the spine is never d long)': ('if (n.spine.size() == d + 1) {', 'if (n.spine.size() == d + 1000000) {'),
- 'D4 guarded unfolding inspects the first argument instead of the decreasing one': ('const auto* last = std::get_if<ApplyFrame>(&n.spine[d]);', 'const auto* last = std::get_if<ApplyFrame>(&n.spine[0]);'),
- 'D5 guarded unfolding unfolds whatever the decreasing argument is': ('if (last && std::holds_alternative<VCtor>(last->arg)) {', 'if (last) {'),
- 'D6 the guarded scope does not switch guarded unfolding on': ('GuardedUnfoldScope() : prev(guarded_unfold_flag()) { guarded_unfold_flag() = true; }', 'GuardedUnfoldScope() : prev(guarded_unfold_flag()) { guarded_unfold_flag() = false; }'),
- 'D7 the guarded scope leaves guarded unfolding switched on when it ends': ('~GuardedUnfoldScope() { guarded_unfold_flag() = prev; }', '~GuardedUnfoldScope() { guarded_unfold_flag() = true; }'),
+ 'D1 guarded unfolding happens in every no-delta evaluation, not only in the guarded scope': ('if (guarded_unfold_flag() && guarded_compute_flag() && def.recursive_info && def.value) {', 'if (guarded_compute_flag() && def.recursive_info && def.value) {'),
+ 'D2 guarded unfolding waits for one more argument than the function takes': ('if (n.spine.size() == arity && d < arity) {', 'if (n.spine.size() == arity + 1 && d < arity) {'),
+ 'D3 guarded unfolding never fires (the spine is never that long)': ('if (n.spine.size() == arity && d < arity) {', 'if (n.spine.size() == arity + 1000000 && d < arity) {'),
+ 'D4 guarded unfolding inspects the first argument instead of the decreasing one': ('const auto* dec = std::get_if<ApplyFrame>(&n.spine[d]);', 'const auto* dec = std::get_if<ApplyFrame>(&n.spine[0]);'),
+ 'D5 guarded unfolding unfolds whatever the decreasing argument is': ('if (dec && std::holds_alternative<VCtor>(dec->arg)) {', 'if (dec) {'),
+ 'D6 the guarded scope does not switch guarded unfolding on': ('guarded_unfold_flag() = true; guarded_compute_flag() = compute; }', 'guarded_unfold_flag() = false; guarded_compute_flag() = compute; }'),
+ 'D7 the guarded scope leaves guarded unfolding switched on when it ends': ('~GuardedUnfoldScope() { guarded_unfold_flag() = prev; guarded_compute_flag() = prev_compute; }', '~GuardedUnfoldScope() { guarded_unfold_flag() = true; guarded_compute_flag() = prev_compute; }'),
  'D8 simp_normalize unfolds every definition (no no-delta scope)': ('itp::NoDeltaScope keep_folded; itp::GuardedUnfoldScope guarded; return itp::normalize(t, fresh_env(n0));', 'itp::GuardedUnfoldScope guarded; return itp::normalize(t, fresh_env(n0));', 'itp_bindings.cpp'),
  'D9 simp_normalize never unfolds anything (no guarded scope)': ('itp::NoDeltaScope keep_folded; itp::GuardedUnfoldScope guarded; return itp::normalize(t, fresh_env(n0));', 'itp::NoDeltaScope keep_folded; return itp::normalize(t, fresh_env(n0));', 'itp_bindings.cpp'),
  'D10 simp_normalize does not validate the term': ('auto g = activate(); require_small(n0, "context size"); require_scoped(t, n0, "term");\n        itp::NoDeltaScope keep_folded;', 'auto g = activate(); require_small(n0, "context size");\n        itp::NoDeltaScope keep_folded;', 'itp_bindings.cpp'),
@@ -325,10 +325,18 @@ MUTANTS = {
  'D18 change does not validate the target': ('auto g = activate(); require_scoped(new_target, scope_of(tm), "change"); raise_if_error(', 'auto g = activate(); raise_if_error(', 'itp_bindings.cpp'),
  'D19 apply with simp does not use the declared type of the candidate': ('    if (simp) { if (auto declared = declared_type_of(candidate, g.ec)) start_ty = *declared; }\n', ''),
  'D20 declared_type_of substitutes the head for each argument': ('ty = instantiate1(ctx().pis[ty.index].cod_id, a);', 'ty = instantiate1(ctx().pis[ty.index].cod_id, sp.head);'),
- 'D21 declared_type_of returns a partly peeled type when a binder is hidden': ('if (ty.tag != NodeType::PI) return std::nullopt;', 'if (ty.tag != NodeType::PI) return ty;'),
+ 'D21 declared_type_of returns a partly peeled type when a binder is hidden': ('if (ty.tag != NodeType::PI) { auto exposed_pi = expose_pi_folded(ty); if (!exposed_pi) return std::nullopt; ty = *exposed_pi; }', 'if (ty.tag != NodeType::PI) { auto exposed_pi = expose_pi_folded(ty); if (!exposed_pi) return ty; ty = *exposed_pi; }'),
+ 'D21b declared_type_of does not expose a binder hidden behind a definition': ('if (ty.tag != NodeType::PI) { auto exposed_pi = expose_pi_folded(ty); if (!exposed_pi) return std::nullopt; ty = *exposed_pi; }', 'if (ty.tag != NodeType::PI) return std::nullopt;'),
+ 'D25 the guarded scope does not restore the compute flag when it ends': ('~GuardedUnfoldScope() { guarded_unfold_flag() = prev; guarded_compute_flag() = prev_compute; }', '~GuardedUnfoldScope() { guarded_unfold_flag() = prev; }'),
+ 'D26 the guarded scope computes by default no more': ('explicit GuardedUnfoldScope(bool compute = true)', 'explicit GuardedUnfoldScope(bool compute = false)'),
+ 'D27 guarded unfolding also fires on a partial application': ('if (n.spine.size() == arity && d < arity) {', 'if (d < n.spine.size()) {'),
+ 'D28 guarded unfolding does not check that the decreasing argument is one of the lambdas of the function': ('if (n.spine.size() == arity && d < arity) {', 'if (n.spine.size() == arity) {'),
+ 'D29 guarded unfolding shows the stuck match of a layer that only splits on another argument': ('if (!stuck) return body;', 'return body;'),
+ 'D30 the guarded compute flag is ignored by the unfolding rule': ('if (guarded_unfold_flag() && guarded_compute_flag() && def.recursive_info && def.value) {', 'if (guarded_unfold_flag() && def.recursive_info && def.value) {'),
+ 'D31 a recursive function unfolds like any definition in the guarded scope without no-delta': ('if (def.value && !no_delta_flag() && !(guarded_unfold_flag() && def.recursive_info)) {', 'if (def.value && !no_delta_flag()) {'),
+ 'D32 guarded unfolding gives up on a spine with an eliminator frame that is not an application': ('if (!af) return Value{std::move(n)};\n                            body = apply(std::move(body), af->arg);', 'body = apply(std::move(body), af->arg);'),
  'D22 declared_type_of ignores variable heads': ('else if (sp.head.tag == NodeType::VAR) {', 'else if (false) {'),
  'D23 apply with simp leaves solved metavariables in the new goals': ('        if (simp) { NoDeltaScope keep_folded; GuardedUnfoldScope guarded; goal_ty = quote(eval(arg_ty, g.ec.values), g.ec.size()); }\n', ''),
- 'D24 apply with simp reads the premises with every definition unfolded': ('if (simp) { NoDeltaScope keep_folded; GuardedUnfoldScope guarded; arg_ty = quote(eval(pi->dom_id, pi->env), g.ec.size()); }\n        else arg_ty', 'if (false) { }\n        arg_ty'),
  # ---- E: typing without evaluation (infer(App), check_lambda, the identical-term shortcuts)
  'E1 infer(App): arguments are substituted in the wrong order': ('done_rev.insert(done_rev.begin(), args[i]); chain = p.cod_id;', 'done_rev.push_back(args[i]); chain = p.cod_id;'),
  'E2 infer(App): the domain is not instantiated with the earlier arguments': ('NodeId dom = done_rev.empty() ? p.dom_id : instantiate(p.dom_id, done_rev);', 'NodeId dom = p.dom_id;'),
@@ -344,14 +352,26 @@ MUTANTS = {
  'E14 check_lambda: the binders are recorded in the wrong order': ('chain_rev.insert(chain_rev.begin(), mk_fvar(n + j));', 'chain_rev.push_back(mk_fvar(n + j));'),
  # ---- F: apply with simp, cases/induct with simp
  'F1 apply with simp: no first-order attempt on the folded conclusion': ('            if (concl_folded) {', '            if (false && concl_folded) {'),
- 'F2 apply with simp: a failed first-order attempt is not undone': ('unified = unify_and_drain(*concl_folded); }\n                if (!unified) undo();', 'unified = unify_and_drain(*concl_folded); }'),
- 'F3 apply with simp: a failed full-delta attempt is not undone': ('unified = unify_and_drain(concl_ty); } if (!unified) undo(); }', 'unified = unify_and_drain(concl_ty); } }'),
- 'F4 apply with simp: the full-delta attempt keeps its solutions unfolded': ('{ { FoldSolutionsScope fold; unified = unify_and_drain(concl_ty); }', '{ { unified = unify_and_drain(concl_ty); }'),
- 'F5 apply with simp: the first-order attempt keeps its solutions unfolded': ('NoDeltaScope keep_folded; GuardedUnfoldScope guarded; FoldSolutionsScope fold; unified = unify_and_drain(*concl_folded);', 'NoDeltaScope keep_folded; GuardedUnfoldScope guarded; unified = unify_and_drain(*concl_folded);'),
+ 'F2 apply: a failed unification attempt is not undone (what it guessed or deferred stays)': ('auto attempt = [&](auto&& run) { unified = run(); if (!unified) undo(); };', 'auto attempt = [&](auto&& run) { unified = run(); };'),
+ 'F3 apply with simp: no attempt with the definitions unfolded and the recursive functions computing on constructors': ('if (!unified) attempt([&] { GuardedUnfoldScope guarded; FoldSolutionsScope fold; return unify_and_drain(*concl_folded); });', 'if (false) attempt([&] { GuardedUnfoldScope guarded; FoldSolutionsScope fold; return unify_and_drain(*concl_folded); });'),
+ 'F3b apply with simp: no attempt with the recursive functions not computing': ('if (!unified) attempt([&] { GuardedUnfoldScope guarded(false); FoldSolutionsScope fold; return unify_and_drain(*concl_folded); });', 'if (false) attempt([&] { GuardedUnfoldScope guarded(false); FoldSolutionsScope fold; return unify_and_drain(*concl_folded); });'),
+ 'F3c apply with simp: the attempt meant not to compute does compute': ('GuardedUnfoldScope guarded(false); FoldSolutionsScope fold; return unify_and_drain(*concl_folded);', 'GuardedUnfoldScope guarded(true); FoldSolutionsScope fold; return unify_and_drain(*concl_folded);'),
+ 'F4 apply with simp: the full-delta attempt keeps its solutions unfolded': ('if (!unified) attempt([&] { FoldSolutionsScope fold; return unify_and_drain(concl_ty); });', 'if (!unified) attempt([&] { return unify_and_drain(concl_ty); });'),
+ 'F5 apply with simp: no ordinary attempt at the end': ('if (!unified) attempt([&] { return unify_and_drain(concl_ty); });', ''),
  'F6 quote_solution ignores the folding flag': ('    if (!fold_solutions_flag()) return quote(v, depth);\n', ''),
  'F7 the folding scope does not switch folding on': ('FoldSolutionsScope() : prev(fold_solutions_flag()) { fold_solutions_flag() = true; }', 'FoldSolutionsScope() : prev(fold_solutions_flag()) { }'),
  'F8 the folding scope leaves folding on when it ends': ('~FoldSolutionsScope() { fold_solutions_flag() = prev; }', '~FoldSolutionsScope() { }'),
- 'F9 apply with simp: the folded conclusion is read after fewer arguments': ('        for (NodeId mr : meta_refs) {\n            auto* pi = std::get_if<VPi>(&cur);\n            if (!pi) { exposed = false; break; }', '        for (NodeId mr : std::vector<NodeId>(meta_refs.begin(), meta_refs.end() - (meta_refs.empty() ? 0 : 1))) {\n            auto* pi = std::get_if<VPi>(&cur);\n            if (!pi) { exposed = false; break; }'),
+ 'F9 apply with simp: the folded reading is not checked against full delta (a binder only full delta sees is missed)': ('if (std::holds_alternative<VPi>(full)) return false;', ''),
+ 'F30 apply with simp: a binder hidden behind a definition is not exposed in the folded reading': ('if (folded && !std::holds_alternative<VPi>(cur)) { if (auto exposed_pi = expose_pi_value(cur)) cur = std::move(*exposed_pi); }', ''),
+ 'F31 apply with simp: the folded reading is not abandoned when it fails': ('if (!peel(true)) { ctx().meta_ctx.rewind(mark_peel); peel(false); }', 'peel(true);'),
+ 'F32 apply with simp: the abandoned folded reading leaves its metavariables behind': ('if (!peel(true)) { ctx().meta_ctx.rewind(mark_peel); peel(false); }', 'if (!peel(true)) { peel(false); }'),
+ 'F19 apply with simp: the folded reading peels with every definition unfolded': ('if (folded) { keep_folded.emplace(); guarded.emplace(); }', ''),
+ 'F20 apply: the conclusion for the ordinary attempts is the folded one': ('concl_folded = concl; concl_ty = quote(full, g.ec.size());', 'concl_folded = concl; concl_ty = concl;'),
+ 'F21 intro with simp: a Pi hidden behind a definition is not exposed folded': ('if (simp && g.target.tag != NodeType::PI) folded_pi = expose_pi_folded(g.target);', ''),
+ 'F22 expose_pi_folded substitutes the arguments of a definition in the wrong order': ('v = instantiate1(ctx().lambdas[v.index].body_id, args[used]); ++used;', 'v = instantiate1(ctx().lambdas[v.index].body_id, args[args.size() - 1 - used]); ++used;'),
+ 'F23 expose_pi_folded unfolds the definition without substituting its arguments': ('v = instantiate1(ctx().lambdas[v.index].body_id, args[used]); ++used;', 'v = ctx().lambdas[v.index].body_id; ++used;'),
+ 'F24 expose_pi_folded drops the arguments a definition takes beyond its lambdas': ('if (used < args.size()) return std::nullopt;', ''),
+ 'F25 expose_pi_value gives up after one unfolding': ('        v = std::move(body);\n    }\n    return std::nullopt;\n}\n\n/// `simp`: a Pi hidden behind a definition', '        return body.index() == v.index() ? std::nullopt : std::optional<Value>(std::move(body));\n    }\n    return std::nullopt;\n}\n\n/// `simp`: a Pi hidden behind a definition'),
  'F10 cases/induct with simp: the indices of the hypothesis are read with every definition unfolded': ('        if (simp) { NoDeltaScope keep_folded; si.indices.push_back(quote(af->arg, g.ec.size())); }\n        else si.indices.push_back(quote(af->arg, g.ec.size()));', '        si.indices.push_back(quote(af->arg, g.ec.size()));'),
  'F11 cases with simp: the field types are left as the forcing built them': ('        if (simp) arg_types = fields_in_display_form(arg_types, n, g.ec.values);\n', ''),
  'F12 induct with simp: the field types are left as the forcing built them': ('        if (simp) arg_types_agent = fields_in_display_form(arg_types_agent, n, g.ec.values);\n', ''),
@@ -363,9 +383,60 @@ MUTANTS = {
  'I2 independent checker: two stuck calls are equal when SOME argument agrees': ("            if all(self.conv(x, y, depth + 1, ctx) for x, y in zip(aa0, ab0)): return True", "            if any(self.conv(x, y, depth + 1, ctx) for x, y in zip(aa0, ab0)): return True", 'indep_checker.py'),
  'I3 independent checker: two stuck calls of DIFFERENT functions are compared argument by argument': ("if ha0[0] == 'c' and hb0[0] == 'c' and ha0[1] == hb0[1] and len(aa0) == len(ab0) and self.g[ha0[1]].recursion is not None:", "if ha0[0] == 'c' and hb0[0] == 'c' and len(aa0) == len(ab0) and self.g[ha0[1]].recursion is not None:", 'indep_checker.py'),
  'I4 independent checker: two stuck calls with different numbers of arguments are compared on the common ones': ("if ha0[0] == 'c' and hb0[0] == 'c' and ha0[1] == hb0[1] and len(aa0) == len(ab0) and self.g[ha0[1]].recursion is not None:", "if ha0[0] == 'c' and hb0[0] == 'c' and ha0[1] == hb0[1] and self.g[ha0[1]].recursion is not None:", 'indep_checker.py'),
+
+ 'B50 set_goal_hyp_name does not check the goal index': ("ps->goals.at(i).hyps.at(h).name = name; }", "ps->goals[i].hyps.at(h).name = name; }", 'itp_bindings.cpp'),
+ 'B51 set_goal_hyp_name does not check the hypothesis index': ("ps->goals.at(i).hyps.at(h).name = name; }", "ps->goals.at(i).hyps[h].name = name; }", 'itp_bindings.cpp'),
+
+ # ---- T/N: the Python layers: rewriting inside a hypothesis, hypothesis names, the notation that picks a kind of number, the transfer of N to the unary numerals
+ 'T01 rw_at ignores rev (the pattern is always the left side)': ("        pat = rhs if rev else lhs\n        found = self._find(pat.n, hty.n)", "        pat = lhs\n        found = self._find(pat.n, hty.n)", 'tactics.py'),
+ 'T02 rw_at transports in the wrong direction when rev': ("            x, y = (b, a) if rev else (a, b)\n", "            x, y = (a, b)\n", 'tactics.py'),
+ 'T03 rw_at does not reverse the equation when rev': ("            eq_xy = w.app(w['symm'], A_ty, a, b, full) if rev else full\n", "            eq_xy = full\n", 'tactics.py'),
+ 'T04 rw_at names the result h whatever the hypothesis was called': ("        name = new or (hyp if isinstance(hyp, str) else 'h')\n", "        name = new or 'h'\n", 'tactics.py'),
+ 'T05 rw_at ignores new=': ("        name = new or (hyp if isinstance(hyp, str) else 'h')\n", "        name = (hyp if isinstance(hyp, str) else 'h')\n", 'tactics.py'),
+ 'T06 rw_at does not demand that the pattern determines the lemma variables': ("        if missing: raise AuthorError('rw %s at %s: the pattern does not determine all the quantified variables of the lemma (give them as arguments)' % (lemma, hyp))\n", "", 'tactics.py'),
+ 'T07 rw_at looks for the pattern in the raw hypothesis, not its display form': ("            hty = w.simp(w.type_of(h))\n            args_t", "            hty = w.type_of(h)\n            args_t", 'tactics.py'),
+ 'T08 rw_at reads the lemma in raw form': ("            ety = w.simp(w.type_of(w.app(e, *args_t)) if args_t else w.type_of(e))\n", "            ety = (w.type_of(w.app(e, *args_t)) if args_t else w.type_of(e))\n", 'tactics.py'),
+ 'T09 rw_at drops the explicit arguments': ("            args_t = [self.t(a) for a in args]\n            ety = w.simp(w.type_of(w.app(e, *args_t))", "            args_t = []\n            ety = w.simp(w.type_of(w.app(e, *args_t))", 'tactics.py'),
+ 'T10 rw_at looks for the pattern in the goal': ("        found = self._find(pat.n, hty.n)", "        found = self._find(pat.n, self.goal().target.n)", 'tactics.py'),
+ 'T11 rw_at does not complain when there is no instance': ("            raise AuthorError('rw %s at %s: no instance of the pattern %s in the hypothesis\\n%s' % (lemma if isinstance(lemma, str) else w.show(e), hyp, w.show(pat, names=[]), self))\n", "            return self\n", 'tactics.py'),
+ 'T20 the kernel is not told the hypothesis names the tactic layer chose': ("                if not kern[h]: ps.set_goal_hyp_name(i, h, names[h])", "                pass", 'tactics.py'),
+ 'T21 a hypothesis the kernel already has a name for gets another one': ("                if kern[h]: names.append(kern[h])\n", "                if False: names.append(kern[h])\n", 'tactics.py'),
+ 'T22 the copies of the family parameters are named like ordinary new hypotheses': ("                elif to_skip > 0: names.append('p%d' % h); to_skip -= 1", "                elif False: names.append('p%d' % h)", 'tactics.py'),
+ 'N02 the notation never looks at the operands (always the default kind of number)': ("                nt = self.by_type.get(self.w.type_of(o).n)\n                if nt is not None: return nt", "                pass", 'author.py'),
+ 'N03 the notation looks only at the first operand': ("        for o in ops:\n            if isinstance(o, Term):", "        for o in ops[:1]:\n            if isinstance(o, Term):", 'author.py'),
+ 'N05 ** picks the kind of number by the exponent': ("    def pow(self, a, b): return self._pick(a).pow(a, b)", "    def pow(self, a, b): return self._pick(b).pow(a, b)", 'author.py'),
+ 'N06 <= picks the default kind of number': ("    def le(self, a, b): return self._pick(a, b).le(a, b)", "    def le(self, a, b): return self.default.le(a, b)", 'author.py'),
+ 'N07 using() does not restore the previous default': ("            def __exit__(s, *exc): d.default = s.prev", "            def __exit__(s, *exc): pass", 'author.py'),
+ 'N08 the first registered kind of number does not become the default': ("        if default or self.default is None: self.default = nota", "        if default: self.default = nota", 'author.py'),
+ 'N10 transfer silently accepts a goal it cannot move': ("    else: raise AuthorError('transfer: the goal is not an equation, <= or < on N')\n", "    else: pass\n", 'bin_lib.py'),
+ 'N11 transfer pushes the operations through only once': ("            changed = True\n    return p\n\n\ndef hom_at", "            changed = False\n    return p\n\n\ndef hom_at", 'bin_lib.py'),
+ 'N12 the bridge has no homomorphism for the power': ("HOMS = ('N.to_nat_succ', 'N.to_nat_add', 'N.to_nat_mul', 'N.to_nat_pow', 'N.to_nat_of_nat')", "HOMS = ('N.to_nat_succ', 'N.to_nat_add', 'N.to_nat_mul', 'N.to_nat_of_nat')", 'bin_lib.py'),
+ 'N13 the bridge has no homomorphism for the successor': ("HOMS = ('N.to_nat_succ', 'N.to_nat_add', 'N.to_nat_mul', 'N.to_nat_pow', 'N.to_nat_of_nat')", "HOMS = ('N.to_nat_add', 'N.to_nat_mul', 'N.to_nat_pow', 'N.to_nat_of_nat')", 'bin_lib.py'),
+ 'N14 the bridge has no homomorphism for of_nat': ("HOMS = ('N.to_nat_succ', 'N.to_nat_add', 'N.to_nat_mul', 'N.to_nat_pow', 'N.to_nat_of_nat')", "HOMS = ('N.to_nat_succ', 'N.to_nat_add', 'N.to_nat_mul', 'N.to_nat_pow')", 'bin_lib.py'),
+ 'N15 transfer of <= goes through the equation lemma': ("    elif w.is_app_of(ty, 'N.le', 2): p.apply('N.of_le')", "    elif w.is_app_of(ty, 'N.le', 2): p.apply('N.to_nat_inj')", 'bin_lib.py'),
+ 'N16 to_nat_hyp reads an order hypothesis as an equation': ("        elif w.is_app_of(ty, 'N.le', 2):\n            _, args = w.spine(ty); proof = w.app(w['N.le_to_nat'], args[0], args[1], hy)", "        elif False:\n            _, args = w.spine(ty); proof = w.app(w['N.le_to_nat'], args[0], args[1], hy)", 'bin_lib.py'),
+ 'N17 to_nat_hyp stores the result under the name of the hypothesis': ("    w = p.w; new = new or h + '_nat'\n", "    w = p.w; new = new or h\n", 'bin_lib.py'),
+ # ---- K: the independent checker walks constructor chains (unary numerals) by a loop, names its limits, and does not infer proof irrelevance for data
+ 'K01 independent checker: a rejection at the depth limit is reported as a plain type mismatch': ("        if depth > self.MAX_DEPTH: self.limit_hit = True; return False\n", "        if depth > self.MAX_DEPTH: return False\n", 'indep_checker.py'),
+ 'K02 independent checker: the depth limit of the comparison is gone': ("        if depth > self.MAX_DEPTH: self.limit_hit = True; return False\n", "        if False: return False\n", 'indep_checker.py'),
+ 'K03 independent checker: a constructor chain is compared by recursion (its length is limited by the depth)': ("if aa and ha[0] == 'c' and self.g[ha[1]].ctor_family is not None:", "if False:", 'indep_checker.py'),
+ 'K04 independent checker: the last argument of a constructor application is not compared': ("            return (aa[-1], ab[-1])\n", "            return True\n", 'indep_checker.py'),
+ 'K05 independent checker: the leading arguments of a constructor application are not compared': ("if not all(self.conv(x, y, depth + 1, ctx) for x, y in zip(aa[:-1], ab[:-1])): return False", "if False: return False", 'indep_checker.py'),
+ 'K06 independent checker: the outer levels of a constructor chain get no proof irrelevance': ("            ok = ok or self.proof_irrelevant(pa, pb, pd, ctx)\n", "            ok = ok\n", 'indep_checker.py'),
+ 'K07 independent checker: the innermost level of a constructor chain gets no proof irrelevance': ("        ok = r or self.proof_irrelevant(a, b, depth, ctx)\n", "        ok = r\n", 'indep_checker.py'),
+ 'K08 independent checker: no constructor application is known to be data': ("        return s[0] == 's' and s[1] >= 1\n", "        return False\n", 'indep_checker.py'),
+ 'K09 independent checker: every constructor application is taken for data (no proof by constructor is equated)': ("        return s[0] == 's' and s[1] >= 1\n", "        return True\n", 'indep_checker.py'),
+ 'K10 independent checker: only a family above Type 1 counts as data': ("        return s[0] == 's' and s[1] >= 1\n", "        return s[0] == 's' and s[1] >= 2\n", 'indep_checker.py'),
+ 'K11 independent checker: a term headed by a non-constructor constant is taken for data (opaque proofs are never equated)': ("        if fam is None: return False\n        s = self.g[fam].type", "        if fam is None: return True\n        s = self.g[fam].type", 'indep_checker.py'),
+ 'K12 independent checker: a term headed by a variable is taken for data': ("        if h[0] != 'c': return False\n        fam = self.g[h[1]].ctor_family", "        if h[0] != 'c': return True\n        fam = self.g[h[1]].ctor_family", 'indep_checker.py'),
+ 'K13 independent checker: the depth is not advanced on the tail of ANY application (variable-headed chains are never limited)': ("if aa and ha[0] == 'c' and self.g[ha[1]].ctor_family is not None:", "if aa and ha[0] in ('c', 'v'):", 'indep_checker.py'),
+ 'K14 independent checker: the depth-limit flag survives into the next run': ("        self.fuel = self.fuel0; self.limit_hit = False\n", "        self.fuel = self.fuel0\n", 'indep_checker.py'),
+ 'K15 independent checker: every mismatch is reported as a depth limit': ("(' (a depth limit of the conversion check was reached: treated as a rejection)' if self.limit_hit else '')", "(' (a depth limit of the conversion check was reached: treated as a rejection)' if True else '')", 'indep_checker.py'),
+ 'K16 independent checker: proof irrelevance is not tried through the pending-level helper when the context is empty': ("        return self.prop_elim and ctx is not None and self.irrelevant(a, b, depth, ctx)\n\n    def irrelevant", "        return self.prop_elim and bool(ctx) and self.irrelevant(a, b, depth, ctx)\n\n    def irrelevant", 'indep_checker.py'),
+ 'K17 independent checker: irrelevance gives up at its nesting bound without reporting it': ("        if depth > self.MAX_DEPTH or self._pi_depth >= 4: self.limit_hit = True; return False\n", "        if depth > self.MAX_DEPTH or self._pi_depth >= 4: return False\n", 'indep_checker.py'),
 }
 # Order matters only for speed (a mutant stops at the first gate that fails): fast, high-yield gates first, the 25-second oracle last.
-GATE_CMDS = (['s2_tests.py', '1500'], ['s16_quot_tests.py'], ['s17_irrelevance_tests.py'], ['s18_deep_tests.py'], ['s19_boundary_tests.py'], ['s20_reservation_tests.py'], ['s21_view_tests.py'], ['s22_simp_tests.py'], ['s23_ring_tests.py'], ['harness.py', '1500', '3'], ['s3_tests.py', '600'], ['s4_tests.py', '800'], ['s5_tests.py', '1200', '3'], ['s5_probe_tests.py', '500', '7'], ['s6_logic_tests.py'], ['s6_f6_tests.py'],
+GATE_CMDS = (['s2_tests.py', '1500'], ['s16_quot_tests.py'], ['s17_irrelevance_tests.py'], ['s18_deep_tests.py'], ['s19_boundary_tests.py'], ['s20_reservation_tests.py'], ['s21_view_tests.py'], ['s22_simp_tests.py'], ['s23_ring_tests.py'], ['s24_bin_tests.py'], ['harness.py', '1500', '3'], ['s3_tests.py', '600'], ['s4_tests.py', '800'], ['s5_tests.py', '1200', '3'], ['s5_probe_tests.py', '500', '7'], ['s6_logic_tests.py'], ['s6_f6_tests.py'],
              ['s7_param_tests.py', '150', '600'], ['s8_indep_tests.py', '100'], ['s9_strong_tests.py'], ['s10_noconf_tests.py'], ['s11_eqgen_tests.py'], ['s12_probe_eq_tests.py', '150'], ['s13_prop_tests.py'],
              ['s14_prop_world_tests.py', '600'], ['s15_classical_tests.py', '300'], ['oracle_gate.py'])
 # a gate has failed when it exits non-zero or prints one of these markers
@@ -379,12 +450,30 @@ KNOWN_EQUIVALENT = {
     'E10 check_lambda: the binders opened so far stay recorded after a hidden Pi is exposed': "the same as E4: the quoted Pi mentions the binders opened so far by their context LEVELS, not by loose indices, so the stale entries of the substitution list are beyond the loose range of every term they are applied to",
     'E11 check_lambda: the domain of the expected Pi is not instantiated': "unify evaluates both domains in the context opened so far, whose last entries are exactly the binders of the lambda: a loose index in the uninstantiated domain denotes the same variable as its instantiation. The instantiation only makes equal domains the identical node (so that the shortcut applies and the sort check is skipped); the verdict is the same",
     'E13 check_lambda: a hidden Pi is exposed without substituting the binders opened so far': "the hidden Pi is exposed by EVALUATING the rest of the expected type in the context opened so far, whose last entries are exactly the binders of the lambda, so a loose index in the uninstantiated type denotes the same variable as its instantiation: the value, and everything computed from it, is the same",
+    'K17 independent checker: irrelevance gives up at its nesting bound without reporting it': "the flag only changes the TEXT of a refusal, and the bound (4 nested irrelevance inferences) is a resource guard that no well-typed comparison reaches (the same reason as M113)",
+    'F5 apply with simp: no ordinary attempt at the end': "the attempt before it is this unification again with only the way a FOUND SOLUTION IS QUOTED changed (folded or fully reduced), and a stored solution is only ever evaluated again, never compared as syntax; no input is known on which the two differ in success (K2 builds the cases where they differ in what is shown). The last attempt stays as the rule that apply with simp refuses nothing the plain apply accepts, and as the one whose error is reported",
+    'F20 apply: the conclusion for the ordinary attempts is the folded one': "those attempts unify by EVALUATING the conclusion with every definition unfolded, and evaluating the folded conclusion gives the very value `full` that the quotation was made from: both start from the same value (up to the environments captured inside stuck matches, which unification compares by conversion)",
+    'F24 expose_pi_folded drops the arguments a definition takes beyond its lambdas': "a definition applied to more arguments than it has lambdas, whose body is not already a function type, is an ill-typed application, and everything this reads (a goal, the type of a global or of a hypothesis) has been type-checked; when the body is a constant or an application the next round unfolds it to a lambda or to something that is not a Pi and answers nullopt either way",
+    'D25 the guarded scope does not restore the compute flag when it ends': "the compute flag is only ever read together with the unfold flag (`guarded_unfold_flag() && guarded_compute_flag()`), and every scope sets both when it begins: a stale compute flag outside every scope is never read, and no scope is opened inside another (apply's attempts, simp_normalize and the display of fields each open one on their own)",
+    'D28 guarded unfolding does not check that the decreasing argument is one of the lambdas of the function': "every recursive function is installed through recursive_function_problem, which refuses a decreasing argument that is not one of the lambdas of the body (gate s19: `finish_recursive_function: decreasing argument out of range`), so `d < arity` holds for every function that has recursive_info; the test in apply repeats that condition where the spine is indexed",
     'M12 apply skips drain_pending': "after a successful unify() at the tactic level no deferred constraint is ever pending (every argument meta is applied to the whole context, so its unification is a pattern); drain_pending is exercised by the unifier gate (S3), not by apply",
 }
 
 def mutant_parts(spec):
     """a mutant is (old, new) for the kernel header, or (old, new, file) for another source file of this directory (a Python file needs no rebuild)"""
     return spec[0], spec[1], (spec[2] if len(spec) > 2 else 'itp_kernel.hpp')
+
+def duplicate_names():
+    """a dict literal keeps only the LAST of two equal keys, so a mutant whose name is reused silently disappears: read the keys off the source text instead"""
+    import ast
+    tree = ast.parse(open(os.path.abspath(__file__)).read()); seen, dup = set(), []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == 'MUTANTS' for t in node.targets) and isinstance(node.value, ast.Dict):
+            for k in node.value.keys:
+                if isinstance(k, ast.Constant):
+                    if k.value in seen: dup.append(k.value)
+                    seen.add(k.value)
+    return dup
 
 def check_anchors():
     """every mutant must replace text that occurs EXACTLY ONCE in its file, and must change it; a stale anchor would silently turn a mutant into a no-op (or abort an hour-long run)"""
@@ -400,6 +489,7 @@ def gate_failed(rc, text): return rc != 0 or bool(FAIL_RE.search(text))
 
 def run(names):
     bad, same = check_anchors()
+    if duplicate_names(): print("MUTANT NAMES USED TWICE (the later silently replaces the earlier):", duplicate_names()); sys.exit(2)
     if bad or same:
         print("STALE MUTANT ANCHORS (fix them before running):"); [print("   %d occurrences: %s" % (c, n)) for n, c in bad]; [print("   no-op mutant: %s" % n) for n in same]; sys.exit(2)
     results = []
@@ -442,9 +532,10 @@ def run(names):
 
 if __name__ == '__main__':
     if '--check' in sys.argv:
-        bad, same = check_anchors(); print("%d mutants; %d stale anchors; %d no-op mutants" % (len(MUTANTS), len(bad), len(same)))
+        bad, same = check_anchors(); dup = duplicate_names(); print("%d mutants; %d stale anchors; %d no-op mutants; %d reused names" % (len(MUTANTS), len(bad), len(same), len(dup)))
         for n, c in bad: print("   %d occurrences: %s" % (c, n))
-        sys.exit(1 if bad or same else 0)
+        for n in dup: print("   name used twice: %s" % n)
+        sys.exit(1 if bad or same or dup else 0)
     prefixes = [a for a in sys.argv[1:] if not a.startswith('--')]
     names = [n for n in MUTANTS if any(n.startswith(p) for p in prefixes)] if prefixes else list(MUTANTS)
     res = run(names)

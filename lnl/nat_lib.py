@@ -2,7 +2,7 @@
 and admitted through the kernel's checked path (see author.py / tactics.py). Statements are written with Python operators on Terms (`n + m`, `n * m`, `n ** k`, `n <= m`)."""
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from author import World, AuthorError, Term, Notation
+from author import World, AuthorError, Term, Notation, DispatchNotation
 import lnl_base
 from lnl_base import thm
 
@@ -394,7 +394,7 @@ def ring_lemmas(w):
 
 def build_nat():
     w = lnl_base.build_base()
-    w.nota = NatNotation(w)
+    w.nota = DispatchNotation(w); w.nota.register(w['Nat'], NatNotation(w), default=True)
     declare_arith(w); succ_lemmas(w); add_lemmas(w); mul_lemmas(w); pow_lemmas(w); arith_lemmas(w); order_lemmas(w); ring_lemmas(w)
     return w
 

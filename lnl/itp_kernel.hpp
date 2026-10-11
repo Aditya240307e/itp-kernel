@@ -1844,6 +1844,8 @@ inline std::optional<std::pair<Value, Value>> quot_lift_redex(const VNeutral& n)
 
 /// Set by GuardedUnfoldScope (defined with the NoDeltaScope below, which it is meant to be used with): see the comment there.
 inline bool& guarded_unfold_flag() { static thread_local bool f = false; return f; }
+/// Inside a GuardedUnfoldScope: whether a recursive function whose decreasing argument is a constructor computes (the default) or stays folded whatever its arguments are.
+inline bool& guarded_compute_flag() { static thread_local bool f = true; return f; }
 
 inline Value apply(Value fn, Value arg) {
     ITP_STACK_CHECK();
@@ -1872,19 +1874,26 @@ inline Value apply(Value fn, Value arg) {
             if (def.quot_role == QuotRole::Lift) {
                 if (auto redex = quot_lift_redex(n)) return apply(std::move(redex->first), std::move(redex->second));
             }
-            if (guarded_unfold_flag() && def.recursive_info && def.value) {
-                // the application that supplies the decreasing argument decides: a constructor there means the body can make progress
+            if (guarded_unfold_flag() && guarded_compute_flag() && def.recursive_info && def.value) {
+                // The function is unfolded when it has all the arguments its definition takes and the decreasing one is a constructor -- a constructor there means the body can make progress. A layer that
+                // only exposes a case split on ANOTHER argument that is still a variable (`Npos p + x`, `2 * x`) is not a normal form worth showing: it would leave a stuck `match x with ...` in the goal,
+                // where the folded `Npos p + x` can be read and rewritten, so then the call stays folded.
                 const std::size_t d = def.recursive_info->decreasing_arg_level;
-                if (n.spine.size() == d + 1) {
-                    const auto* last = std::get_if<ApplyFrame>(&n.spine[d]);
-                    if (last && std::holds_alternative<VCtor>(last->arg)) {
+                std::size_t arity = 0;
+                for (NodeId b = *def.value; b.tag == NodeType::LAMBDA; b = ctx().lambdas[b.index].body_id) ++arity;
+                if (n.spine.size() == arity && d < arity) {
+                    const auto* dec = std::get_if<ApplyFrame>(&n.spine[d]);
+                    if (dec && std::holds_alternative<VCtor>(dec->arg)) {
                         Value body = eval(*def.value, Env{});              // a lambda: this only builds a closure, so it is the same in every mode
                         for (const auto& fr : n.spine) {
                             const auto* af = std::get_if<ApplyFrame>(&fr);
                             if (!af) return Value{std::move(n)};
                             body = apply(std::move(body), af->arg);
                         }
-                        return body;
+                        bool stuck = false;
+                        if (const auto* bn = std::get_if<VNeutral>(&body))
+                            for (const auto& fr : bn->spine) if (std::holds_alternative<MatchFrame>(fr)) { stuck = true; break; }
+                        if (!stuck) return body;
                     }
                 }
             }
@@ -1934,14 +1943,15 @@ struct NoDeltaScope {
     NoDeltaScope& operator=(const NoDeltaScope&) = delete;
 };
 
-/// Guarded unfolding (a display and tactic aid, like Coq's `simpl`): inside a NoDeltaScope plus a GuardedUnfoldScope, a recursive function that is applied to its decreasing argument is unfolded
+/// Guarded unfolding (a display and tactic aid, like Coq's `simpl`): inside a GuardedUnfoldScope (with a NoDeltaScope every definition stays folded; without one only the recursive functions do), a recursive function that is applied to its decreasing argument is unfolded
 /// ONE layer exactly when that argument is a constructor application, and stays a folded neutral otherwise. So `add (Succ m) n` computes to `Succ (add m n)` while `add m n` (m a variable)
 /// stays `add m n` instead of turning into the stuck match of its body. Every other global stays folded. NEVER used by conversion checking or by any typing rule: a normal form obtained this
 /// way is only ever handed back through `exact`/`apply`-style steps that the kernel re-checks by ordinary conversion.
 struct GuardedUnfoldScope {
-    bool prev;
-    GuardedUnfoldScope() : prev(guarded_unfold_flag()) { guarded_unfold_flag() = true; }
-    ~GuardedUnfoldScope() { guarded_unfold_flag() = prev; }
+    bool prev, prev_compute;
+    /// `compute` false: the recursive functions stay folded even on a constructor (only the definitions unfold, if no NoDeltaScope is active)
+    explicit GuardedUnfoldScope(bool compute = true) : prev(guarded_unfold_flag()), prev_compute(guarded_compute_flag()) { guarded_unfold_flag() = true; guarded_compute_flag() = compute; }
+    ~GuardedUnfoldScope() { guarded_unfold_flag() = prev; guarded_compute_flag() = prev_compute; }
     GuardedUnfoldScope(const GuardedUnfoldScope&) = delete;
     GuardedUnfoldScope& operator=(const GuardedUnfoldScope&) = delete;
 };
@@ -1990,8 +2000,8 @@ inline Value eval(NodeId term, const Env& env) {
                 // A nullary constructor is already saturated.
                 return Value{VCtor{def.ctor_info->ind_type_global_id, def.ctor_info->ctor_idx, SharedSeq<Value>{}}};
             }
-            if (def.value && !no_delta_flag()) {
-                // Delta-reduction: definitions unfold transparently.
+            if (def.value && !no_delta_flag() && !(guarded_unfold_flag() && def.recursive_info)) {
+                // Delta-reduction: definitions unfold transparently. (Not a recursive function under a GuardedUnfoldScope: it stays a folded neutral that apply() unfolds only on a constructor.)
                 // Definitions are required to be closed, so they are
                 // evaluated in an empty environment, once: the result is cached on the
                 // definition (see GlobalDef::cached_value). (Skipped inside a
@@ -5552,14 +5562,58 @@ inline std::unexpected<TypeError> no_goal_error(const char* tactic, std::optiona
         std::string(tactic) + (target_meta_id ? ": no goal with the given meta_id (already solved or superseded)" : ": no open goals")});
 }
 
-inline ElabResult intro(ProofState& ps, const std::string& name = "", std::optional<uint32_t> target_meta_id = std::nullopt) {
+/// The Pi hidden behind definitions at the head of `t` (`Not P` is `P -> False`), found by unfolding those definitions SYNTACTICALLY: the arguments are substituted unevaluated, so everything they mention
+/// stays folded (the hypothesis introduced from `Not (a < a)` is `a < a`, not what `<` is defined as). nullopt when the head is anything else, or when a definition unfolds to something that is not a Pi and takes
+/// no further argument. (A recursive function unfolds to a `match`, which is not a Pi: it is not exposed here, the full-delta reading of the caller sees through it.)
+inline std::optional<NodeId> expose_pi_folded(NodeId t) {
+    for (int fuel = 0; fuel < 64; ++fuel) {
+        if (t.tag == NodeType::PI) return t;
+        std::vector<NodeId> args; NodeId head = t;
+        while (head.tag == NodeType::APP) { args.push_back(ctx().apps[head.index].arg_id); head = ctx().apps[head.index].fn_id; }
+        std::reverse(args.begin(), args.end());
+        if (head.tag != NodeType::CONST) return std::nullopt;
+        const GlobalDef& def = ctx().globals[ctx().consts[head.index].global_id];
+        if (!def.value) return std::nullopt;                  // an inductive type, a constructor, an axiom: nothing to unfold
+        NodeId v = *def.value; std::size_t used = 0;
+        while (used < args.size() && v.tag == NodeType::LAMBDA) { v = instantiate1(ctx().lambdas[v.index].body_id, args[used]); ++used; }
+        if (used < args.size()) return std::nullopt;
+        t = v;
+    }
+    return std::nullopt;
+}
+
+/// The value-level reading of expose_pi_folded: the Pi hidden behind definitions at the head of the VALUE `v` (`Not P`, `Imp A B`). A definition applied to its arguments is unfolded, once per step, and
+/// nothing else is: the arguments and everything the body mentions stay as `v` (and the evaluation mode of the caller) have them, which under a NoDeltaScope means folded; a recursive function computes
+/// only where the guarded scope lets it (on a constructor). nullopt when the head is not such a definition, or when a definition unfolds to something that is not a Pi.
+inline std::optional<Value> expose_pi_value(Value v) {
+    for (int fuel = 0; fuel < 64; ++fuel) {
+        if (std::holds_alternative<VPi>(v)) return v;
+        const auto* n = std::get_if<VNeutral>(&v);
+        if (!n || n->head.kind != NeutralHead::Kind::GlobalConst) return std::nullopt;
+        const GlobalDef& def = ctx().globals[n->head.id];
+        if (!def.value) return std::nullopt;
+        Value body = eval(*def.value, Env{});
+        for (const auto& fr : n->spine) {
+            const auto* af = std::get_if<ApplyFrame>(&fr);
+            if (!af || std::holds_alternative<VPi>(body)) return std::nullopt;
+            body = apply(std::move(body), af->arg);
+        }
+        v = std::move(body);
+    }
+    return std::nullopt;
+}
+
+/// `simp`: a Pi hidden behind a definition is exposed with the definition's arguments left folded (see expose_pi_folded), so the hypothesis and the new goal read as the user wrote them.
+inline ElabResult intro(ProofState& ps, const std::string& name = "", std::optional<uint32_t> target_meta_id = std::nullopt, bool simp = false) {
     auto idx_opt = find_goal_index(ps, target_meta_id);
     if (!idx_opt) return no_goal_error("intro", target_meta_id);
     Goal& g = ps.goals[*idx_opt];
     const uint32_t n = g.ec.size();
     NodeId dom_ty, new_target;
-    if (g.target.tag == NodeType::PI) { // the common case stays purely syntactic, so the goal keeps its flat (folded) shape
-        Pi p = ctx().pis[g.target.index];
+    std::optional<NodeId> folded_pi;
+    if (simp && g.target.tag != NodeType::PI) folded_pi = expose_pi_folded(g.target);
+    if (g.target.tag == NodeType::PI || folded_pi) { // the common case stays purely syntactic, so the goal keeps its flat (folded) shape
+        Pi p = ctx().pis[(folded_pi ? *folded_pi : g.target).index];
         dom_ty = p.dom_id; new_target = instantiate1(p.cod_id, mk_fvar(n));
     } else {
         Value target_val = eval(g.target, g.ec.values);
@@ -5591,7 +5645,8 @@ inline ElabResult exact(ProofState& ps, NodeId term, std::optional<uint32_t> tar
 /// The type of `candidate` read off its SYNTAX, normalising nothing: the declared type of its head (a global, or a context variable) with the arguments substituted in as the Pi binders are peeled.
 /// `infer` returns the type quoted from a fully delta-reduced value, which unfolds every stuck recursive function into its `match`; this one keeps the definitions folded, which is what the tactic layer
 /// wants to show. It is a type of the candidate only up to conversion (the same as the inferred one) and is used for presentation, never as evidence: `infer` has validated the candidate already.
-/// nullopt when the head is neither a global nor a context variable, or when a binder to peel is hidden behind a definition -- the caller then falls back to the inferred type.
+/// A binder hidden behind a definition (`Not P`, `Imp A B`) is exposed by unfolding that definition syntactically (expose_pi_folded), so what it mentions stays folded. nullopt when the head is neither a global
+/// nor a context variable, or when a binder to peel is hidden behind something that is not such a definition (a recursive function) -- the caller then falls back to the inferred type.
 inline std::optional<NodeId> declared_type_of(NodeId candidate, const ElabCtx& ec) {
     detail::AppSpine sp = detail::decompose_app_spine(candidate);
     NodeId ty;
@@ -5602,7 +5657,7 @@ inline std::optional<NodeId> declared_type_of(NodeId candidate, const ElabCtx& e
         ty = ec.types[v.n];
     } else return std::nullopt;
     for (NodeId a : sp.args) {
-        if (ty.tag != NodeType::PI) return std::nullopt;
+        if (ty.tag != NodeType::PI) { auto exposed_pi = expose_pi_folded(ty); if (!exposed_pi) return std::nullopt; ty = *exposed_pi; }      // a binder hidden behind a definition: unfolded syntactically, its arguments stay folded
         ty = instantiate1(ctx().pis[ty.index].cod_id, a);
     }
     return ty;
@@ -5622,55 +5677,71 @@ inline ElabResult apply(ProofState& ps, NodeId candidate, std::optional<uint32_t
     NodeId applied = candidate;
     NodeId start_ty = *cand_ty_r;
     if (simp) { if (auto declared = declared_type_of(candidate, g.ec)) start_ty = *declared; }
-    Value cur_ty_val = eval(start_ty, g.ec.values);
     std::vector<std::pair<uint32_t, NodeId>> arg_metas; // (reference meta id, its own unwrapped arg type)
     std::vector<NodeId> meta_refs;                      // the metavariable standing for each argument, in order
-    while (true) {
-        auto* pi = std::get_if<VPi>(&cur_ty_val);
-        if (!pi) break;
-        NodeId arg_ty;
-        if (simp) { NoDeltaScope keep_folded; GuardedUnfoldScope guarded; arg_ty = quote(eval(pi->dom_id, pi->env), g.ec.size()); }
-        else arg_ty = quote(eval(pi->dom_id, pi->env), g.ec.size());
-        uint32_t m = ctx().meta_ctx.fresh(close_pi_over_context(arg_ty, g.ec), g.ec.size());
-        arg_metas.push_back({m, arg_ty});
-        NodeId meta_ref = meta_applied_to_context(m, g.ec.size());
-        meta_refs.push_back(meta_ref);
-        applied = mk_app(applied, meta_ref);
-        Value next = eval(pi->cod_id, pi->env.extend(eval(meta_ref, g.ec.values)));
-        cur_ty_val = std::move(next);
-    }
-    NodeId concl_ty = quote(cur_ty_val, g.ec.size());
+    NodeId concl_ty;                                    // the conclusion with every definition unfolded, for the ordinary unification attempts
     // with simp the lemma's conclusion is also read with definitions folded (and a recursive function unfolded only on a constructor): unifying THAT against the goal is first order, so `?n + ?k` against
     // `n + k` solves ?k := k, which the delta-unfolded stuck `match`es of the same two terms cannot do
     std::optional<NodeId> concl_folded;
-    if (simp) {
-        NoDeltaScope keep_folded; GuardedUnfoldScope guarded;
-        Value cur = eval(start_ty, g.ec.values); bool exposed = true;
-        for (NodeId mr : meta_refs) {
+    // One reading of the candidate's type, peeled into one metavariable per argument. `folded`: in the display normal form, where a binder hidden behind a definition (`Not P`, `Imp A B`) is exposed by unfolding
+    // THAT definition alone, so that the premises -- and the arguments of such a definition -- read as the lemma states them; the reading is abandoned (false) if full delta sees a binder it does not (one behind a
+    // recursive type-level function). Otherwise every definition is unfolded, which sees every binder.
+    auto peel = [&](bool folded) -> bool {
+        arg_metas.clear(); meta_refs.clear(); applied = candidate;
+        std::optional<NoDeltaScope> keep_folded; std::optional<GuardedUnfoldScope> guarded;
+        if (folded) { keep_folded.emplace(); guarded.emplace(); }
+        Value cur = eval(start_ty, g.ec.values);
+        while (true) {
+            if (folded && !std::holds_alternative<VPi>(cur)) { if (auto exposed_pi = expose_pi_value(cur)) cur = std::move(*exposed_pi); }
             auto* pi = std::get_if<VPi>(&cur);
-            if (!pi) { exposed = false; break; }          // a binder hidden behind a definition: only full delta sees it
-            Value next = eval(pi->cod_id, pi->env.extend(eval(mr, g.ec.values)));
+            if (!pi) break;
+            NodeId arg_ty = quote(eval(pi->dom_id, pi->env), g.ec.size());
+            uint32_t m = ctx().meta_ctx.fresh(close_pi_over_context(arg_ty, g.ec), g.ec.size());
+            arg_metas.push_back({m, arg_ty});
+            NodeId meta_ref = meta_applied_to_context(m, g.ec.size());
+            meta_refs.push_back(meta_ref);
+            applied = mk_app(applied, meta_ref);
+            Value next = eval(pi->cod_id, pi->env.extend(eval(meta_ref, g.ec.values)));
             cur = std::move(next);
         }
-        if (exposed && !std::holds_alternative<VPi>(cur)) concl_folded = quote(cur, g.ec.size());
-    }
+        NodeId concl = quote(cur, g.ec.size());
+        if (!folded) { concl_ty = concl; return true; }
+        guarded.reset(); keep_folded.reset();               // from here on every definition unfolds again
+        Value full = eval(concl, g.ec.values);
+        if (std::holds_alternative<VPi>(full)) return false;
+        concl_folded = concl; concl_ty = quote(full, g.ec.size());
+        return true;
+    };
+    if (simp) {
+        auto mark_peel = ctx().meta_ctx.checkpoint();
+        if (!peel(true)) { ctx().meta_ctx.rewind(mark_peel); peel(false); }
+    } else peel(false);
     {
         auto unify_and_drain = [&](NodeId concl) -> ElabResult {
             if (ElabResult r = unify(concl, g.target, g.ec, ps.es); !r) return r;
             return drain_pending(g.ec, ps.es);
         };
         ElabResult unified;
-        if (!simp) unified = unify_and_drain(concl_ty);
-        else {   // the attempts in order of preference: first order on the folded forms; full delta with the solutions kept folded; the ordinary attempt (whose error is the one reported)
-            auto mark = ctx().meta_ctx.checkpoint(); ElabState before = ps.es;
-            auto undo = [&] { ctx().meta_ctx.rewind(mark); ps.es = before; };
+        auto mark = ctx().meta_ctx.checkpoint(); ElabState before = ps.es;
+        auto undo = [&] { ctx().meta_ctx.rewind(mark); ps.es = before; };
+        // One attempt: the unification under its own reading of the terms. Whatever a failed attempt assigned or deferred is undone, so that the next attempt -- and a refused apply -- start from the state
+        // apply was called in (a metavariable guessed by a first-order match must not survive into an attempt that would solve it differently).
+        auto attempt = [&](auto&& run) { unified = run(); if (!unified) undo(); };
+        if (!simp) attempt([&] { return unify_and_drain(concl_ty); });
+        else {   // the attempts in order of preference: first order on the folded forms; first order with the definitions unfolded (recursive functions computing on constructors; then not computing at all); full delta with the solutions kept folded; the ordinary attempt (whose error is the one reported)
             unified = std::unexpected(TypeError{TypeErrorKind::UnificationFailure, g.target, std::nullopt, "apply: no attempt was made"});
             if (concl_folded) {
-                { NoDeltaScope keep_folded; GuardedUnfoldScope guarded; FoldSolutionsScope fold; unified = unify_and_drain(*concl_folded); }
-                if (!unified) undo();
+                attempt([&] { NoDeltaScope keep_folded; GuardedUnfoldScope guarded; return unify_and_drain(*concl_folded); });
+                // the goal reaches the lemma's conclusion only through a definition (`sum3 a b c` for `(a + b) + c`): unfold the definitions but still let a recursive function compute only where its decreasing
+                // argument is a constructor, so that `(?n + ?m) + ?k` stays a first-order pattern. With every recursive call unfolded it is a stuck match on the metavariable ?n, which the unifier can only defer,
+                // and apply would hand back ?n ?m ?k as open goals.
+                if (!unified) attempt([&] { GuardedUnfoldScope guarded; FoldSolutionsScope fold; return unify_and_drain(*concl_folded); });
+                // ... and when the goal has a constructor where the lemma has a metavariable (`sum3 (S a) b c` for `(?n + ?m) + ?k`), computing the goal's recursive calls would hide the shape of the pattern: then
+                // no recursive function computes at all
+                if (!unified) attempt([&] { GuardedUnfoldScope guarded(false); FoldSolutionsScope fold; return unify_and_drain(*concl_folded); });
             }
-            if (!unified) { { FoldSolutionsScope fold; unified = unify_and_drain(concl_ty); } if (!unified) undo(); }
-            if (!unified) unified = unify_and_drain(concl_ty);
+            if (!unified) attempt([&] { FoldSolutionsScope fold; return unify_and_drain(concl_ty); });
+            if (!unified) attempt([&] { return unify_and_drain(concl_ty); });
         }
         if (!unified) return unified;
     }

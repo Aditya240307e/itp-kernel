@@ -34,10 +34,14 @@ SUB_CTOR = ('mk', [T1, ('pi', ('var', 0), T0), ('var', 0), ('app', ('var', 1), (
 W_SORT = ('pi', T1, ('pi', T1, ('pi', T0, T0)))
 W_CTOR = ('w', [T1, T1, T0, ('var', 0), ('var', 1), ('var', 2)], [('var', 0), ('var', 1), ('var', 2)])
 
+# a PROPOSITION whose LAST field is data:  NE A : Prop ,  ne : (A : Type1) (a : A) -> NE A   (two proofs ne 0 and ne 1 are equal although their last arguments are different data)
+NE_SORT = ('pi', T1, T0)
+NE_CTOR = ('ne', [T1, ('var', 0)], [('var', 0)])
+
 def world(quot=False):
-    """the Prop/Type library, a subtype family Sub (data in Type1 carrying a proof), a proposition W with two data fields, and two OPAQUE proofs ax1 ax2 of one proposition (Le 0 1)"""
+    """the Prop/Type library, a subtype family Sub (data in Type1 carrying a proof), a proposition W with two data fields, a proposition NE whose last field is data, and two OPAQUE proofs ax1 ax2 of one proposition (Le 0 1)"""
     k, g = pw.build_prop_world()
-    t7.declare_family_new(k, 'Sub', SUB_SORT, [SUB_CTOR]); t7.declare_family_new(k, 'W', W_SORT, [W_CTOR]); g = gmap(k); C = lambda n: ('const', g[n])
+    t7.declare_family_new(k, 'Sub', SUB_SORT, [SUB_CTOR]); t7.declare_family_new(k, 'W', W_SORT, [W_CTOR]); t7.declare_family_new(k, 'NE', NE_SORT, [NE_CTOR]); g = gmap(k); C = lambda n: ('const', g[n])
     le01 = ap(C('Le'), C('Zero'), ap(C('Succ'), C('Zero')))
     k.declare_unchecked(build_new(k, HY(le01)), None, 'ax1'); k.declare_unchecked(build_new(k, HY(le01)), None, 'ax2')
     if quot: k.declare_quot(g['Eq'])
@@ -111,7 +115,34 @@ def build_cases(g):
          lam('P', T0, lam('f', arrow('P', NAT), lam('h1', 'P', lam('h2', 'P', lam('h3', 'P', lam('e1', eq(NAT, ap('f', 'h1'), ap('f', 'h2')),
          lam('e2', eq(NAT, ap('f', 'h2'), ap('f', 'h3')), refl(NAT, ap('f', 'h1'))))))))), True)
 
+    # a CLOSED equation (the typing context is empty, not absent): two opaque proofs inside a subtype value
+    leP = lam('_', NAT, ap(LE, ZERO, one))
+    case('a closed equation between proof-different values: mk 0 ax1 = mk 0 ax2 (empty context)', eq(ap(SUB, NAT, leP), ap(MK, NAT, leP, ZERO, C('ax1')), ap(MK, NAT, leP, ZERO, C('ax2'))),
+         ap(C('refl'), ap(SUB, NAT, leP), ap(MK, NAT, leP, ZERO, C('ax1'))), True)
+    # a proposition whose LAST field is data: the comparison of two constructor applications compares every argument but the last, then goes on with the last (see Checker.conv): when that last pair
+    # is different DATA, the two applications are still proofs of one proposition, so the level above must get its own try at proof irrelevance
+    NE, NE_C, ADD = C('NE'), C('ne'), C('add')
+    def num(n):
+        t = ZERO
+        for _ in range(n): t = ap(S, t)
+        return t
+    neP = ap(NE, NAT)
+    case('a proposition whose last field is data: ne 0 = ne 1', pi('f', arrow(neP, NAT), eq(NAT, ap('f', ap(NE_C, NAT, ZERO)), ap('f', ap(NE_C, NAT, one)))),
+         lam('f', arrow(neP, NAT), refl(NAT, ap('f', ap(NE_C, NAT, ZERO)))), True)
+    case('the same with long numerals in the last field: ne (250) = ne (251)', pi('f', arrow(neP, NAT), eq(NAT, ap('f', ap(NE_C, NAT, num(250))), ap('f', ap(NE_C, NAT, num(251))))),
+         lam('f', arrow(neP, NAT), refl(NAT, ap('f', ap(NE_C, NAT, num(250))))), True)
+    # unary numerals longer than the independent checker's conversion depth (200): the chain Succ (Succ (..)) is walked, not recursed into
+    case('a closed sum beyond the old depth limit: 150 + 150 = 300', eq(NAT, ap(ADD, num(150), num(150)), num(300)), refl(NAT, num(300)), True)
+    case('a closed sum that is long on both sides: 260 + 140 = 400', eq(NAT, ap(ADD, num(260), num(140)), num(400)), refl(NAT, num(400)), True)
+    case('a closed numeral computation under a binder (the typing context is not empty): 220 + 0 = 220', pi('n', NAT, eq(NAT, ap(ADD, num(220), ZERO), num(220))),
+         lam('n', NAT, refl(NAT, num(220))), True)
+
     # ---- rejected
+    case('NOT: an off-by-one numeral claim beyond the old depth limit: 150 + 150 = 301', eq(NAT, ap(ADD, num(150), num(150)), num(301)), refl(NAT, num(301)), False)
+    case('NOT: the same claim with the proof of the true numeral: refl 300 : 150 + 150 = 301', eq(NAT, ap(ADD, num(150), num(150)), num(301)), refl(NAT, num(300)), False)
+    case('NOT: a long numeral is not the numeral one shorter: 260 + 140 = 399', eq(NAT, ap(ADD, num(260), num(140)), num(399)), refl(NAT, num(399)), False)
+    case('NOT: the last argument of a constructor is compared (S a = S b for a b : Nat)', pi('a', NAT, pi('b', NAT, eq(NAT, ap(S, 'a'), ap(S, 'b')))),
+         lam('a', NAT, lam('b', NAT, refl(NAT, ap(S, 'a')))), False)
     case('NOT: data is not irrelevant (a = b for a b : Nat)', pi('a', NAT, pi('b', NAT, eq(NAT, 'a', 'b'))), lam('a', NAT, lam('b', NAT, refl(NAT, 'a'))), False)
     case('NOT: functions are not irrelevant', pi('f', arrow(NAT, NAT), pi('g', arrow(NAT, NAT), eq(arrow(NAT, NAT), 'f', 'g'))), lam('f', arrow(NAT, NAT), lam('g', arrow(NAT, NAT), refl(arrow(NAT, NAT), 'f'))), False)
     case('NOT: propositions are not irrelevant (P = Q for P Q : Prop)', pi('P', T0, pi('Q', T0, eq(T0, 'P', 'Q'))), lam('P', T0, lam('Q', T0, refl(T0, 'P'))), False)
@@ -279,7 +310,53 @@ def section_e(N):
     expect(verified2 >= 5, 'E: the canary has no power: %d true statements proved' % verified2)
     expect(completed2 == verified2, 'E: %d completed proof states did not verify' % (completed2 - verified2))
 
+# ================================================================================================================ F. the independent checker's own limits
+def section_f():
+    """The independent checker is allowed to be INCOMPLETE (it may refuse what the kernel accepts) but never unsound, and a refusal that comes from one of its resource limits must say so.
+    (1) a chain of one constructor (a unary numeral) is walked by a loop, so its length is not limited by the recursion depth; refusing a wrong claim about long numerals is cheap, because
+        proof irrelevance is never inferred for data (counted: `irrelevance_inferences`);
+    (2) a comparison that does hit the depth limit (two chains of applications of a variable, equal only after beta reduction at every level) is refused as 'a depth limit was reached', not as an
+        ordinary type mismatch, while the kernel accepts it."""
+    k, g = world(); chk = checker(k, True); C = lambda n: ('const', g[n])
+    NAT, ZERO, S, EQ, ADD = C('Nat'), C('Zero'), C('Succ'), C('Eq'), C('add'); eq = lambda A, a, b: ap(EQ, A, a, b)
+    def num(n):
+        t = ZERO
+        for _ in range(n): t = ap(S, t)
+        return t
+    chk.irrelevance_inferences = 0; t = time.time()
+    stmt = eq(NAT, ap(ADD, num(300), num(300)), num(601)); proof = ap(C('refl'), NAT, num(601))
+    refused = not indep_ok(chk, proof, stmt); dt = time.time() - t
+    print("F. a wrong claim about long numerals (300 + 300 = 601): refused %s in %.2f s with %d irrelevance inferences (must be refused, at most 2: the comparison of the two equations themselves)" % (refused, dt, chk.irrelevance_inferences))
+    expect(refused, 'F: the independent checker accepted 300 + 300 = 601'); expect(chk.irrelevance_inferences <= 2, 'F: proof irrelevance was inferred for data constructors (%d times)' % chk.irrelevance_inferences)
+    expect(dt < 30, 'F: refusing a wrong claim about long numerals took %.1f s' % dt)
+    # proofs are NOT data: the inference does happen for them
+    chk.irrelevance_inferences = 0
+    stmt2 = pi('P', T0, pi('h1', 'P', pi('h2', 'P', eq(ap(C('Sub'), NAT, lam('_', NAT, 'P')), ap(C('mk'), NAT, lam('_', NAT, 'P'), ZERO, 'h1'), ap(C('mk'), NAT, lam('_', NAT, 'P'), ZERO, 'h2')))))
+    proof2 = lam('P', T0, lam('h1', 'P', lam('h2', 'P', ap(C('refl'), ap(C('Sub'), NAT, lam('_', NAT, 'P')), ap(C('mk'), NAT, lam('_', NAT, 'P'), ZERO, 'h1')))))
+    ok2 = indep_ok(chk, proof2, stmt2)
+    print("   proofs of one proposition are still equated by inference: accepted %s with %d irrelevance inferences (must be accepted, at least 1)" % (ok2, chk.irrelevance_inferences))
+    expect(ok2 and chk.irrelevance_inferences >= 1, 'F: the irrelevance of proofs is no longer inferred')
+
+    def depth_case(label, k_, g_, chk_):
+        Cc = lambda n: ('const', g_[n]); NATc, EQc = Cc('Nat'), Cc('Eq'); eqc = lambda A, a, b: ap(EQc, A, a, b)
+        depth = chk_.MAX_DEPTH + 60
+        lam_f = lambda y_: ap(lam('y', NATc, ap('f', 'y')), y_)
+        plain, lazy = 'x', 'x'
+        for _ in range(depth): plain = ap('f', plain); lazy = lam_f(lazy)
+        stmt3 = pi('f', arrow(NATc, NATc), pi('x', NATc, eqc(NATc, plain, lazy))); proof3 = lam('f', arrow(NATc, NATc), lam('x', NATc, ap(Cc('refl'), NATc, plain)))
+        kv = kernel_ok(k_, proof3, stmt3); iv, msg = chk_.check_closed(HY(proof3), HY(stmt3))
+        print("   %s: %d nested applications of a variable against the same with a beta-redex at every level: kernel %s, independent checker %s (%s)" % (label, depth, kv, iv, msg))
+        expect(kv, 'F: the kernel refused two convertible chains of applications (%s)' % label)
+        expect(not iv and 'depth limit' in msg, 'F: the independent checker %s (%s); it must refuse and name its depth limit (%s)' % ('accepted' if iv else 'refused', msg, label))
+        # the flag belongs to ONE run: an ordinary mismatch afterwards is reported as one
+        stmt_w = eqc(NATc, ap(Cc('Succ'), Cc('Zero')), Cc('Zero')); iv2, msg2 = chk_.check_closed(HY(ap(Cc('refl'), NATc, Cc('Zero'))), HY(stmt_w))
+        print("   %s: an ordinary mismatch afterwards (1 = 0): %s" % (label, msg2))
+        expect(not iv2 and msg2.startswith('type mismatch') and 'depth limit' not in msg2, 'F: an ordinary mismatch is reported as %r (%s)' % (msg2, label))
+    depth_case('with proof irrelevance', k, g, chk)
+    # WITHOUT prop_elim the conversion never calls the irrelevance check, whose own depth guard would also raise the flag: the guard of the comparison itself must report the limit
+    kl, gl = legacy_world(); depth_case('without prop_elim', kl, gl, checker(kl, False))
+
 if __name__ == '__main__':
     t0 = time.time(); N = int(sys.argv[1]) if len(sys.argv) > 1 else 600
-    section_a(); section_b(); section_c(); section_d(); section_e(N)
+    section_a(); section_b(); section_c(); section_d(); section_f(); section_e(N)
     print("elapsed %.0fs" % (time.time() - t0)); print("S17 IRRELEVANCE GATE:", "PASS" if not FAIL else "FAIL -- " + "; ".join(FAIL)); sys.exit(1 if FAIL else 0)

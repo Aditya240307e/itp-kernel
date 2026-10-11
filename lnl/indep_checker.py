@@ -173,7 +173,7 @@ class Checker:
 
     def __init__(self, env, params=False, fuel=400000, prop_elim=False):
         self.env, self.g, self.params, self.fuel0 = env, env.g, params, fuel
-        self.prop_elim = prop_elim; self._restricted = {}; self._pi_depth = 0
+        self.prop_elim = prop_elim; self._restricted = {}; self._pi_depth = 0; self.limit_hit = False; self.irrelevance_inferences = 0
         self.fuel = fuel; self._arity = {}
         self.quot, self.quot_problem = None, None
         self._validate_quot()
@@ -360,17 +360,32 @@ class Checker:
 
     def conv(self, a, b, depth=0, ctx=None):
         """definitional equality. `ctx` (variable -> type) is the typing context the two terms live in; with it, and in the Prop/Type world, two
-        PROOFS of one proposition are equal (proof irrelevance). Without it (ctx is None) the comparison is purely structural."""
-        if self.conv_structural(a, b, depth, ctx): return True
+        PROOFS of one proposition are equal (proof irrelevance). Without it (ctx is None) the comparison is purely structural.
+        A chain of one constructor (the unary numeral Succ (Succ (... Zero)), a list) is walked by this loop, not by recursion: `conv_structural` compares every argument of a constructor
+        application but the last and hands the last pair back, so the length of a chain is limited by the fuel only, not by the recursion depth (a numeral of length 200 used to be
+        rejected as a 'type mismatch'). Proof irrelevance still gets its try at every level, innermost first, exactly as in the recursive formulation."""
+        pending = []                                      # the levels that agreed on everything but their last argument
+        while True:
+            r = self.conv_structural(a, b, depth, ctx)
+            if r.__class__ is not tuple: break
+            pending.append((a, b, depth)); a, b = r
+        ok = r or self.proof_irrelevant(a, b, depth, ctx)
+        while pending:
+            pa, pb, pd = pending.pop()
+            ok = ok or self.proof_irrelevant(pa, pb, pd, ctx)
+        return ok
+
+    def proof_irrelevant(self, a, b, depth, ctx):
         return self.prop_elim and ctx is not None and self.irrelevant(a, b, depth, ctx)
 
     def irrelevant(self, a, b, depth, ctx):
         """(PI)   G |- a : P    G |- b : P'    G |- P : Type 0    P == P'   =>   a == b .   Decided by inference, never by the shape of a term. Types and type formers
         (anything whose own type is a sort) are skipped before inferring anything: they are not proofs."""
-        if depth > self.MAX_DEPTH or self._pi_depth >= 4: return False
+        if depth > self.MAX_DEPTH or self._pi_depth >= 4: self.limit_hit = True; return False
         wa, wb = self.whnf(a), self.whnf(b)
         if wa[0] in ('s', 'pi', 'lam') or wb[0] in ('s', 'pi', 'lam'): return False
-        self._pi_depth += 1
+        if self.data_ctor_app(wa) or self.data_ctor_app(wb): return False         # a numeral, a list: data (inferring its type below would give the same verdict, after type-checking the whole term)
+        self._pi_depth += 1; self.irrelevance_inferences += 1
         try:
             pa = self.infer(ctx, a)
             if self.sort_of(ctx, pa) != 0: return False
@@ -379,10 +394,20 @@ class Checker:
         except (CheckError, Unsupported, KeyError, IndexError): return False
         finally: self._pi_depth -= 1
 
+    def data_ctor_app(self, t):
+        """t (in weak head normal form) is an application of a constructor whose family is declared in Type k, k >= 1: its type is in Type k, so it is data, never a proof"""
+        h = spine(t)[0]
+        if h[0] != 'c': return False
+        fam = self.g[h[1]].ctor_family
+        if fam is None: return False
+        s = self.g[fam].type
+        while s[0] == 'pi': s = s[3]
+        return s[0] == 's' and s[1] >= 1
+
     def conv_structural(self, a, b, depth, ctx):
         self.tick()
         if canon(a) == canon(b): return True
-        if depth > self.MAX_DEPTH: return False
+        if depth > self.MAX_DEPTH: self.limit_hit = True; return False
         # folded first: two stuck calls of one recursive function are equal when their arguments are (unfolding them instead gives two stuck matches whose branches mention the other
         # arguments unevaluated, and comparing those never ends when an argument is not literally the same term, e.g. `add x Zero` and `add x (mul Zero x)`)
         a, b = self.whnf(a, True), self.whnf(b, True)
@@ -414,7 +439,11 @@ class Checker:
             same = (ha[1] == hb[1] and self.conv(ha[2], hb[2], depth + 1, ctx)
                     and self.conv(subst(ha[4], ha[3], z), subst(hb[4], hb[3], z), depth + 1, ext(z, ha[2])))
         else: return False
-        return same and all(self.conv(x, y, depth + 1, ctx) for x, y in zip(aa, ab))
+        if not same: return False
+        if aa and ha[0] == 'c' and self.g[ha[1]].ctor_family is not None:       # a constructor application: all arguments but the last here, the last by the caller's loop (see `conv`)
+            if not all(self.conv(x, y, depth + 1, ctx) for x, y in zip(aa[:-1], ab[:-1])): return False
+            return (aa[-1], ab[-1])
+        return all(self.conv(x, y, depth + 1, ctx) for x, y in zip(aa, ab))
 
     # ------------------------------------------------------------ typing
     def sort_of(self, ctx, A):
@@ -455,7 +484,8 @@ class Checker:
 
     def check(self, ctx, t, expected):
         inferred = self.infer(ctx, t)
-        if not self.conv(inferred, expected, 0, ctx): raise CheckError('type mismatch')
+        if not self.conv(inferred, expected, 0, ctx):
+            raise CheckError('type mismatch' + (' (a depth limit of the conversion check was reached: treated as a rejection)' if self.limit_hit else ''))
 
     # ------------------------------------------------------------ the Match rule
     def match_index(self, pat, conc, fnames, sigma, refuted):
@@ -559,7 +589,7 @@ class Checker:
 
     # ------------------------------------------------------------ entry points
     def run(self, f, *a):
-        self.fuel = self.fuel0
+        self.fuel = self.fuel0; self.limit_hit = False
         try: f(*a); return True, 'OK'
         except CheckError as e: return False, str(e)
         except Unsupported as e: return False, 'unsupported node ' + str(e)

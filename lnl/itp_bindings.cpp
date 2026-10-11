@@ -75,7 +75,7 @@ struct ProofStateHandle {
     uint32_t root_meta_id = 0;
     itp::ContextGuard activate();
     uint32_t scope_of(std::optional<uint32_t> tm) { auto idx = itp::find_goal_index(*ps, tm); return idx ? ps->goals[*idx].ec.size() : 0; }
-    void intro_(const std::string& name, std::optional<uint32_t> tm) { auto g = activate(); raise_if_error(itp::intro(*ps, name, tm)); }
+    void intro_(const std::string& name, std::optional<uint32_t> tm, bool simp) { auto g = activate(); raise_if_error(itp::intro(*ps, name, tm, simp)); }
     void apply_(itp::NodeId term, std::optional<uint32_t> tm, bool simp) { auto g = activate(); require_scoped(term, scope_of(tm), "apply"); raise_if_error(itp::apply(*ps, term, tm, simp)); }
     void cases_(uint32_t hyp_level, std::optional<uint32_t> tm, const std::vector<uint32_t>& gen, bool simp) { auto g = activate(); raise_if_error(itp::cases(*ps, hyp_level, tm, gen, simp)); }
     void induct_(uint32_t hyp_level, std::optional<uint32_t> tm, const std::vector<uint32_t>& gen, std::optional<uint32_t> eq_gid, std::optional<uint32_t> refl_gid, bool simp) {
@@ -96,6 +96,8 @@ struct ProofStateHandle {
     std::size_t goal_num_hyps(std::size_t i) const { return ps->goals.at(i).hyps.size(); }
     std::string goal_hyp_name(std::size_t i, std::size_t h) const { return ps->goals.at(i).hyps.at(h).name; }
     itp::NodeId goal_hyp_type(std::size_t i, std::size_t h) const { return ps->goals.at(i).hyps.at(h).type; }
+    /// The name of a hypothesis is display data (terms are nameless de Bruijn terms); the tactic layer records the names it chooses so that a hypothesis that cases/induct revert and introduce again keeps its name.
+    void set_goal_hyp_name(std::size_t i, std::size_t h, const std::string& name) { ps->goals.at(i).hyps.at(h).name = name; }
 };
 
 struct KernelWrapper {
@@ -369,7 +371,7 @@ NB_MODULE(itp_env_lnl, m) {
     nb::class_<itp::DiscriminationTree>(m, "Library");
     nb::class_<itp::ExecutionContext::Checkpoint>(m, "Checkpoint");
     nb::class_<ProofStateHandle>(m, "ProofState")
-        .def("intro", &ProofStateHandle::intro_, "name"_a = "", "target_meta_id"_a = nb::none())
+        .def("intro", &ProofStateHandle::intro_, "name"_a = "", "target_meta_id"_a = nb::none(), "simp"_a = false)
         .def("apply", &ProofStateHandle::apply_, "term"_a, "target_meta_id"_a = nb::none(), "simp"_a = false)
         .def("cases", &ProofStateHandle::cases_, "hyp_level"_a, "target_meta_id"_a = nb::none(), "generalizing"_a = std::vector<uint32_t>{}, "simp"_a = false)
         .def("induct", &ProofStateHandle::induct_, "hyp_level"_a, "target_meta_id"_a = nb::none(), "generalizing"_a = std::vector<uint32_t>{}, "eq_gid"_a = nb::none(), "refl_gid"_a = nb::none(), "simp"_a = false)
@@ -384,6 +386,7 @@ NB_MODULE(itp_env_lnl, m) {
         .def("goal_target", &ProofStateHandle::goal_target, "i"_a)
         .def("goal_num_hyps", &ProofStateHandle::goal_num_hyps, "i"_a)
         .def("goal_hyp_name", &ProofStateHandle::goal_hyp_name, "i"_a, "h"_a)
+        .def("set_goal_hyp_name", &ProofStateHandle::set_goal_hyp_name, "i"_a, "h"_a, "name"_a)
         .def("goal_hyp_type", &ProofStateHandle::goal_hyp_type, "i"_a, "h"_a);
     nb::class_<KernelWrapper>(m, "Kernel")
         .def(nb::init<>())

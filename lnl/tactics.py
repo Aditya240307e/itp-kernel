@@ -39,7 +39,7 @@ class Proof:
         self.ps = self.k.start_proof(self.stmt.n)
         self._names = {}                  # goal meta id -> display names of its hypotheses (the kernel's own names, completed)
         self.trace = []                   # (tactic, arguments) in the order applied; arguments are handles / numbers
-        self._sync_names(prev=None)
+        self._sync_names()
 
     # ------------------------------------------------------------------------------------------------------------------ goals
     @property
@@ -55,22 +55,23 @@ class Proof:
     def _fail(self, what, e):
         raise AuthorError('%s failed: %s\n%s' % (what, e, self)) from None
 
-    def _sync_names(self, prev, supplied=(), skip=0):
-        """give every goal a name for each hypothesis: a hypothesis that is the same one as before keeps its name, new unnamed ones take the supplied names, then defaults"""
+    def _sync_names(self, supplied=(), skip=0):
+        """give every new goal a name for each hypothesis: the kernel remembers the name of a hypothesis (also when cases/induct revert it and introduce it again), so a hypothesis that has one
+        keeps it; new unnamed ones take the supplied names, then defaults, and the kernel is told what was chosen"""
         ps = self.ps; supplied = list(supplied)
         for i in range(ps.num_goals()):
             meta = ps.goal_meta_id(i)
             if meta in self._names: continue
             n = ps.goal_num_hyps(i); kern = [ps.goal_hyp_name(i, h) for h in range(n)]
-            old_alias, old_kern = prev if prev else ([], [])
             names = []; to_skip = skip
             for h in range(n):
-                if h < len(old_alias) and kern[h] == old_kern[h]: names.append(old_alias[h])
-                elif kern[h]: names.append(kern[h])
+                if kern[h]: names.append(kern[h])
                 elif to_skip > 0: names.append('p%d' % h); to_skip -= 1          # the copies of the family's parameters that a constructor pattern brings along
                 elif supplied: names.append(supplied.pop(0))
                 else: names.append('h%d' % h)
             self._names[meta] = names
+            for h in range(n):
+                if not kern[h]: ps.set_goal_hyp_name(i, h, names[h])          # the kernel keeps the name when it reverts and introduces the hypothesis again (cases/induct with later hypotheses)
 
     def _context(self, i=0):
         ps = self.ps; n = ps.goal_num_hyps(i)
@@ -118,10 +119,9 @@ class Proof:
 
     # ------------------------------------------------------------------------------------------------------------------ the primitive tactics
     def _step(self, what, fn, supplied=(), i=0, skip=0):
-        before_meta = self.ps.goal_meta_id(i); prev = (list(self._names[before_meta]), [self.ps.goal_hyp_name(i, h) for h in range(self.ps.goal_num_hyps(i))])
         try: fn()
         except (E.ITPError, RuntimeError) as e: self._fail(what() if callable(what) else what, e)       # `what` may be a function: describing a big term is not free
-        self._sync_names(prev, supplied=supplied, skip=skip)
+        self._sync_names(supplied=supplied, skip=skip)
 
     def _n_params(self, lvl):
         """how many arguments of the type of hypothesis `lvl` are parameters of its family"""
@@ -134,7 +134,7 @@ class Proof:
         for nm in (names or ('',)):
             if self.done: raise AuthorError('intro: no goals')
             lvl = self.ps.goal_num_hyps(0); nm_ = nm or 'a%d' % lvl
-            self._step('intro %s' % nm_, lambda: self.ps.intro(nm_), supplied=())
+            self._step('intro %s' % nm_, lambda: self.ps.intro(nm_, None, True), supplied=())
             self.trace.append(('intro', nm_))
         return self
     def intros(self, *names): return self.intro(*names)
@@ -314,6 +314,69 @@ class Proof:
         self.rewrite(full, rev=rev)
         if close and not self.done: self.try_refl()
         return self
+
+    def _replace(self, t, old, new):
+        """`t` with every occurrence of the term `old` (which has no loose bound variable) replaced by `new`"""
+        k = self.k; memo = {}
+        def go(x):
+            if x == old: return new
+            r = memo.get(x)
+            if r is not None: return r
+            v = k.view(x); kind = v[0]
+            if kind == 'app': r = k.mk_app(go(v[1]), go(v[2]))
+            elif kind == 'lam': r = k.mk_lambda(go(v[1]), go(v[2]))
+            elif kind == 'pi': r = k.mk_pi(go(v[1]), go(v[2]))
+            elif kind == 'match': r = k.mk_match(go(v[1]), go(v[2]), [go(b) for b in v[3]])
+            elif kind in ('let', 'fix'):
+                if self._contains(x, old): raise AuthorError('rewriting inside a %s is not supported' % kind)
+                r = x
+            else: r = x
+            memo[x] = r; return r
+        return go(t)
+
+    def _contains(self, t, sub):
+        k = self.k; seen = set(); stack = [t]
+        while stack:
+            x = stack.pop()
+            if x == sub: return True
+            if x in seen: continue
+            seen.add(x)
+            v = k.view(x); kind = v[0]
+            if kind == 'app': stack += [v[1], v[2]]
+            elif kind in ('lam', 'pi'): stack += [v[1], v[2]]
+            elif kind == 'let': stack += [v[1], v[2], v[3]]
+            elif kind == 'match': stack += [v[1], v[2]] + list(v[3])
+            elif kind == 'fix': stack += [v[1], v[3]]
+        return False
+
+    def rw_at(self, hyp, lemma, *args, rev=False, new=None):
+        """rewrite inside a hypothesis: like `rw`, but the pattern is looked for in the type of hypothesis `hyp`. The rewritten hypothesis is added under the same name (or `new`); the original stays in the
+        context, shadowed. The proof is `transport` along the equation, with the motive read off the occurrences of the instance in the hypothesis."""
+        w = self.w; k = self.k
+        e = self.t(lemma); h = self.h(hyp) if isinstance(hyp, str) else hyp
+        with self.focus():
+            hty = w.simp(w.type_of(h))
+            args_t = [self.t(a) for a in args]
+            ety = w.simp(w.type_of(w.app(e, *args_t)) if args_t else w.type_of(e))
+            holes, body = self._peel(ety)
+            A, lhs, rhs = w.eq_parts(body)
+        pat = rhs if rev else lhs
+        found = self._find(pat.n, hty.n)
+        if found is None:
+            raise AuthorError('rw %s at %s: no instance of the pattern %s in the hypothesis\n%s' % (lemma if isinstance(lemma, str) else w.show(e), hyp, w.show(pat, names=[]), self))
+        binding, inst = found
+        missing = [hole for hole, dom in holes if k.view(hole.n)[1] not in binding]
+        if missing: raise AuthorError('rw %s at %s: the pattern does not determine all the quantified variables of the lemma (give them as arguments)' % (lemma, hyp))
+        with self.focus():
+            full = w.app(e, *args_t, *[w.T(binding[k.view(hole.n)[1]]) for hole, dom in holes])
+            A_ty, a, b = w.eq_parts(w.simp(w.type_of(full)))
+            x, y = (b, a) if rev else (a, b)
+            eq_xy = w.app(w['symm'], A_ty, a, b, full) if rev else full
+            L = HOLE_BASE + 1
+            motive = w.T(k.mk_lambda(A_ty.n, k.abstract_fvars(self._replace(hty.n, x.n, k.mk_fvar(L)), [L])))
+            proof = w.app(w['transport'], A_ty, motive, x, y, eq_xy, h)
+        name = new or (hyp if isinstance(hyp, str) else 'h')
+        return self.have(name, proof)
 
     def try_refl(self):
         """close the first goal if it is an equation whose sides are the same term"""

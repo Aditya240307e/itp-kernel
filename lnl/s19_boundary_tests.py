@@ -37,11 +37,24 @@ class W:
         self.f0, self.f1, self.f2, self.f5 = (k.mk_fvar(i) for i in (0, 1, 2, 5))
         self.lam_b1 = k.mk_lambda(self.NAT, self.b1)                                                 # fun _ : Nat => #1   -- one loose bound variable
         self.ngl = k.num_globals()
+        self.pi_stmt = k.mk_pi(self.NAT, self.app(self.app(self.app(self.EQ, self.NAT), self.b0), self.b0))                    # forall n : Nat, Eq Nat n n
 
 
 def rejected(r):
     """did the call report failure (as opposed to returning a result)?"""
     return isinstance(r, tuple) and len(r) >= 1 and r[0] is False
+
+
+def ill_typed_spine(w):
+    """simp_normalize on a use that is well-typed but whose UNCHECKED definitions are not: `u (S Zero)` where u (a recursive function, declared without a type check) unfolds to `(match g x with ..) x` -- a match on
+    a function, applied to a further argument -- and `g` (three parameters) then sees a spine of exactly its arity in which one frame is a match, not an argument. Evaluation must leave such a call alone"""
+    k, app = w.k, w.app
+    g = k.reserve_recursive_function('spine_g', k.mk_pi(w.NAT, k.mk_pi(w.NAT, k.mk_pi(w.NAT, w.NAT))))
+    k.finish_recursive_function(g, w.g['Nat'], 0, k.mk_lambda(w.NAT, k.mk_lambda(w.NAT, k.mk_lambda(w.NAT, k.mk_bvar(2)))))              # fun x y z => x
+    u = k.reserve_recursive_function('spine_u', k.mk_pi(w.NAT, w.NAT))
+    matched = k.mk_match(app(k.mk_const(g), k.mk_bvar(0)), k.mk_lambda(w.NAT, w.NAT), [w.Z, k.mk_lambda(w.NAT, k.mk_bvar(0))])           # match g x with Zero => Zero | Succ p => p
+    k.finish_recursive_function(u, w.g['Nat'], 0, k.mk_lambda(w.NAT, app(matched, k.mk_bvar(0))))                                              # fun x => (match g x with ..) x
+    return k.simp_normalize(app(k.mk_const(u), w.one), 0)
 
 
 def cases():
@@ -63,6 +76,7 @@ def cases():
     add('simp_normalize: nested ill-scoped variable', 'reject', lambda w: w.k.simp_normalize(w.app(w.S, w.app(w.S, w.f5)), 3))
     add('simp_normalize: well-scoped variable', 'accept', lambda w: w.k.simp_normalize(w.f1, 2))
     add('simp_normalize: closed term', 'accept', lambda w: w.k.simp_normalize(w.app(w.app(w.ADD, w.one), w.one), 0))
+    add('simp_normalize: a recursive function unfolding into a call whose spine holds a match (unchecked, ill-typed declarations)', 'accept', ill_typed_spine)
     add('conv_open: loose bound variable', 'reject', lambda w: w.k.conv_open(w.b0, w.Z, 0))
     add('conv_open: loose bound variable on the right', 'reject', lambda w: w.k.conv_open(w.Z, w.lam_b1, 0))
     add('conv_open: context variable beyond n0', 'reject', lambda w: w.k.conv_open(w.f0, w.f0, 0))
@@ -135,6 +149,14 @@ def cases():
     add('close_telescope: an absurd base', 'reject', lambda w: w.k.close_telescope('pi', [w.NAT], w.NAT, 2**32 - 1))
     add('close_telescope: well-formed', 'accept', lambda w: w.k.close_telescope('lam', [w.NAT], w.b0, 0))
     add('ProofState.intro: not a Pi', 'reject', lambda w: w.k.start_proof(w.stmt).intro('x'))
+    add('ProofState.intro (display mode): not a Pi', 'reject', lambda w: w.k.start_proof(w.stmt).intro('x', None, True))
+    add('ProofState.intro (display mode): a Pi', 'accept', lambda w: w.k.start_proof(w.pi_stmt).intro('x', None, True))
+    add('ProofState.intro (display mode): no such metavariable as the target', 'reject', lambda w: w.k.start_proof(w.pi_stmt).intro('x', HUGE, True))
+    add('ProofState.set_goal_hyp_name: no such goal', 'reject', lambda w: w.k.start_proof(w.stmt).set_goal_hyp_name(3, 0, 'h'))
+    add('ProofState.set_goal_hyp_name: no such hypothesis (the goal has none)', 'reject', lambda w: w.k.start_proof(w.stmt).set_goal_hyp_name(0, 0, 'h'))
+    add('ProofState.set_goal_hyp_name: no such hypothesis (one past the last)', 'reject', lambda w: (lambda ps: (ps.intro('x'), ps.set_goal_hyp_name(0, 1, 'h'))[1])(w.k.start_proof(w.pi_stmt)))
+    add('ProofState.set_goal_hyp_name: an absurd hypothesis index', 'reject', lambda w: (lambda ps: (ps.intro('x'), ps.set_goal_hyp_name(0, 2**63, 'h'))[1])(w.k.start_proof(w.pi_stmt)))
+    add('ProofState.set_goal_hyp_name: the hypothesis that exists, renamed', 'accept', lambda w: (lambda ps: (ps.intro('x'), ps.set_goal_hyp_name(0, 0, 'renamed'), ps.goal_hyp_name(0, 0))[2])(w.k.start_proof(w.pi_stmt)))
     add('ProofState.apply: no such goal', 'reject', lambda w: w.k.start_proof(w.stmt).apply(w.refl_z, 12345))
     add('ProofState.goal_target: no such goal', 'reject', lambda w: w.k.start_proof(w.stmt).goal_target(3))
     add('ProofState.goal_hyp_type: no such hypothesis', 'reject', lambda w: w.k.start_proof(w.stmt).goal_hyp_type(0, 3))
@@ -157,6 +179,7 @@ def cases():
     add('finish_recursive_function_checked: unknown function id', 'reject', lambda w: w.k.finish_recursive_function_checked(HUGE, w.g['Nat'], 0, w.Z))
     add('finish_recursive_function_checked: unknown inductive id', 'reject', lambda w: w.k.finish_recursive_function_checked(w.k.reserve_recursive_function('bad_rec3', w.k.mk_pi(w.NAT, w.NAT)), HUGE, 0, w.Z))
     add('finish_recursive_function: unknown function id', 'reject', lambda w: w.k.finish_recursive_function(HUGE, w.g['Nat'], 0, w.Z))
+    add('finish_recursive_function: decreasing argument out of range', 'reject', lambda w: w.k.finish_recursive_function(w.k.reserve_recursive_function('bad_rec6', w.k.mk_pi(w.NAT, w.NAT)), w.g['Nat'], 50, w.k.mk_lambda(w.NAT, w.b0)))
     add('finish_recursive_function: ill-scoped body', 'reject', lambda w: w.k.finish_recursive_function(w.k.reserve_recursive_function('bad_rec4', w.k.mk_pi(w.NAT, w.NAT)), w.g['Nat'], 0, w.b0))
     add('finish_recursive_function_checked: decreasing argument out of range', 'reject', lambda w: w.k.finish_recursive_function_checked(w.k.reserve_recursive_function('bad_rec5', w.k.mk_pi(w.NAT, w.NAT)), w.g['Nat'], 50, w.k.mk_lambda(w.NAT, w.b0)))
     # ---- ids that name nothing
