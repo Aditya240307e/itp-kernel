@@ -351,6 +351,16 @@ def main():
     expect(chk_ok(w['refl'](Nat, add(S(Z), S(Z))), Eq(S(S(Z)), add(S(Z), S(Z)))), 'E10 convertible but not identical types are accepted')
     expect(not chk_ok(w['refl'](Nat, S(Z)), Eq(S(Z), S(S(Z)))), 'E10b a type that is not convertible is refused')
 
+    # a lambda whose body is a match with a HOLE for its motive: the motive is built from the expected type, which must therefore mention the binder as a variable, not as a loose index
+    mot_ty = w.pi(Nat, lambda n: w.PROP)
+    def hole_match():
+        meta = k.mk_meta(k.fresh_meta(mot_ty.n, 0))
+        return w.lam(Nat, lambda n: w.T(k.mk_match(n.n, meta, [w['refl'](Nat, Z).n, w.lam(Nat, lambda j: w['refl'](Nat, S(j))).n])))
+    ok1, _ = k.check_partial(hole_match().n, w.pi(Nat, lambda n: Eq(n, n)).n, [])
+    ok2, _ = k.check_partial(hole_match().n, w.pi(Nat, lambda n: Eq(n, S(n))).n, [])
+    expect(ok1, 'E11 fun n => match n with ?motive | refl 0 | fun j => refl (S j)  has the type  forall n, n = n  (the motive is inferred from the expected type)')
+    expect(not ok2, 'E11b ... and not the type  forall n, n = S n')
+
     # ------------------------------------------------------------------------------------------------------------------------------ F. folded goals through the tactic layer
     from tactics import Proof
     stmt_iff = w.forall_([Nat, Nat], lambda n, m: w.Iff(w['Le'](n, m), w.Ex(Nat, lambda j: Eq(add(n, j), m))))
@@ -378,6 +388,36 @@ def main():
         ih_ty = p.goal(1).hyps[names.index('ih')][1]
         fv = lambda nm: w.T(k.mk_fvar(names.index(nm)))
         expect(ih_ty == Eq(add(fv('j'), Z), fv('j')), 'F4 the induction hypothesis is written with the arithmetic folded: %s' % w.show(ih_ty))
+
+    # ------------------------------------------------------------------------------------------------------------------------------ G. a hypothesis of an indexed family whose index is a stuck application
+    Le = w['Le']
+    stmt_gc = w.forall_([Nat, Nat, Nat, lambda a, x, y: Le(a, add(x, y))], lambda a, x, y, h: Le(a, add(y, x)))
+    p = Proof(w, stmt_gc, 'g_comm'); p.intro('a', 'x', 'y', 'h'); p.induct('h', names=['m', 'n', 'ih'], indexed=True)
+    expect(p.n_goals == 2, 'G1 induct on `a <= x + y` (index a stuck call of add) gives the two cases')
+    leaks = [(i, nm) for i in range(p.n_goals) for nm, ty in p.goal(i).hyps if has_match(ty)]
+    expect(not leaks, 'G2 no hypothesis of either case contains a stuck match: the equations are written with `x + y`, as in the hypothesis (%s):\n%s' % (leaks, p))
+    with GoalCtx(w, p.ps, 0):
+        names = [nm for nm, _ in p.goal(0).hyps]; fv = lambda nm: w.T(k.mk_fvar(names.index(nm)))
+        m_ty = p.goal(0).hyps[names.index('m')][1]
+        expect(m_ty == Eq(fv('a'), add(fv('x'), fv('y'))), 'G3 the equation of the first case is `a = x + y` exactly: %s' % w.show(m_ty))
+    p.rw('m'); p.rw('add_comm', 'x', 'y'); p.apply('le_refl')
+    expect(p.n_goals == 1, 'G4 `rw` sees `x + y` in the equation of the first case (the first case is closed)')
+    p.apply('le_trans', 'a', 'n', (w['add'], 'y', 'x')); p.exact('ih')
+    p.apply('le_trans', 'n', (w['Succ'], 'n'), (w['add'], 'y', 'x')); p.apply('le_succ')
+    p.rw('h8'); p.rw('add_comm', 'x', 'y'); p.apply('le_refl')
+    expect(p.done, 'G5 ... and so is the second case: the whole proof goes through')
+    w.k.declare_checked(stmt_gc.n, p.term().n, 'g_comm')
+    # `cases` on the same hypothesis: the same folded reading, whatever it can say about the cases
+    p = Proof(w, stmt_gc, 'g_cases'); p.intro('a', 'x', 'y', 'h'); p.cases('h', names=['m', 'hm'])
+    leaks = [(i, nm) for i in range(p.n_goals) for nm, ty in p.goal(i).hyps if has_match(ty)]
+    expect(p.n_goals == 2 and not leaks, 'G6 cases on the same hypothesis: two cases and no stuck match in any hypothesis (%s)' % leaks)
+
+    stmt_gs = w.forall_([Nat, Nat, Nat, lambda a, j, y: Le(a, add(S(j), y))], lambda a, j, y, h: Eq(a, a))
+    p = Proof(w, stmt_gs, 'g_succ'); p.intro('a', 'j', 'y', 'h'); p.cases('h', names=['m', 'hm'])
+    with GoalCtx(w, p.ps, 1):
+        names = [nm for nm, _ in p.goal(1).hyps]; fv = lambda nm: w.T(k.mk_fvar(names.index(nm)))
+        hm_ty = p.goal(1).hyps[names.index('hm')][1] if 'hm' in names else None
+        expect(hm_ty is not None and hm_ty == Le(fv('a'), add(fv('j'), fv('y'))), 'G7 `a <= S j + y` read as `a <= S (j + y)`: the le_S case knows its predecessor is `j + y`: %s' % (w.show(hm_ty) if hm_ty is not None else None))
 
     # nothing leaks out of the folded mode into later work
     with Ctx(w, 'm', 'n') as (m, n):

@@ -368,6 +368,15 @@ def main():
         expect(kok == expected, 'F  kernel verdict on %s: expected %s, got %s' % (label, expected, kok))
         expect(iok == expected, 'F  independent verdict on %s: expected %s, got %s (%s)' % (label, expected, iok, imsg))
 
+    # ------------------------------------------------------------------------------------------------------------------ H. an identity of open polynomials, with a time bound
+    # (declared AFTER the independent re-check above: the Python checker evaluates unary numerals far too slowly for coefficients in the hundreds)
+    # Typing the statement and the proof compares equal terms. That stays polynomial ONLY because identical terms are never evaluated (the shortcuts in unify); without them the
+    # cost doubles with every increase of the exponent (about 32 s here instead of about 1.5 s at (a+b)^12, minutes beyond).
+    t1 = time.time()
+    prove_ring(['a', 'b'], lambda a, b: Eq((a + b) ** 12, sum_terms(w, [(comb(12, i), 12 - i, i) for i in range(13)], a, b)), '(a+b)^12')
+    dt12 = time.time() - t1
+    expect(dt12 < 10.0, 'H  (a+b)^12 is admitted in under 10 s (took %.2f s)' % dt12)
+
     print("   %d checks; random expressions: %d true identities proved, %d false ones refused; independent re-check of %d globals in %.1f s; %d corrupted proofs %s in %.1f s (%.1f s total)" %
           (CHECKS[0], equal_proved, unequal_refused, len(chk.g), tb, sum(kinds.values()), kinds, te, time.time() - t0))
     for f in FAIL[:40]: print("   FAIL " + f)

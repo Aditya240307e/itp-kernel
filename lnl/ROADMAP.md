@@ -24,6 +24,23 @@ By engineering effort, we are perhaps 5-10% of the way to "most IMO problems, co
 the part that is hard to retrofit (a trustworthy kernel and tactic layer with an independent checker and tests that find real bugs) is in good shape. With the Mathlib-import route I would guess 1.5-3 further years of focused work for the
 engineering, and the search/learning part could dominate beyond that; without it, more than 5. The uncertainty is a factor of 2-3 either way. None of this is a measurement.
 
+## Calibrated plan (2026-10-10; estimates at the pace of Oct 5-10, uncertainty about 2x)
+State: trusted core done (hybrid kernel, independent checker, 26 gates, 352 mutants); authoring layer with intro/apply/exact/rewrite/cases/induct/rw/have/obtain and a kernel-checked `ring` for unary Nat; library = 125 Nat
+lemmas; the RL surface (probing, library index) is on the hybrid kernel, the gym environment / search / model are still on the old kernel.
+
+| Block | Contents | Time |
+|---|---|---|
+| 1. Number tower and arithmetic automation | binary N (Pos/N, Peano induction derived as a theorem), Z (quotient of N x N), Q, R as ONE audited axiomatic complete ordered field; structures with a generic `ring`; linarith/nlinarith as kernel-checked certificates; omega-lite and norm_num | ~1 week |
+| 2. Number theory / algebra vocabulary | divisibility, gcd/Bezout, primes, modular arithmetic, sums and products, floor/abs/sqrt/min/max, strong induction and descent, basic polynomials | ~1 week |
+| 3. Gym environment on the hybrid kernel | observation/action surface, search and model code, curriculum Peano -> algebra -> number theory; can overlap with block 2 | ~1 week |
+| 4. Competition bench | formalise ~100 olympiad problems, write reference proofs to find library/automation gaps; (miniF2F-style AMC/AIME first, then early IMO P1, then shortlist A1-A3 / N1-N3) | 1-3 months |
+
+Scope: algebra and number theory only. About half of all IMO problems are geometry or combinatorics; geometry through coordinates/complex numbers (polynomial arithmetic + Groebner-style certificates) is possible for some
+problems and is a separate project, combinatorics needs finite structures and is long-term. An autonomous learned agent that solves real IMO problems is a research outcome, not an engineering milestone; realistic first targets
+are AMC/AIME-level and early-IMO P1-level problems.
+
+Decisions: R is axiomatised as a single ordered-field structure instance (audit by constructing Q as a model of every non-completeness axiom); Q and Z are constructed; the Mathlib-import route is not pursued now.
+
 ## Suggested order
 1. Nat/Int literals with accelerated arithmetic and `decide`/`norm_num` on them (self-contained, differential-testable against Python integers).
 2. Universe polymorphism (or cumulativity) and propositional proof irrelevance (so Eq works on proofs, structures and subtypes become usable).

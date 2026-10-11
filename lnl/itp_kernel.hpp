@@ -2714,14 +2714,6 @@ inline bool conv_value(const Value& a, const Value& b, uint32_t depth) {
     );
 }
 
-/// Are two syntactic terms definitionally equal under the given semantic
-/// environment? Pass open_context(n) when checking under n ambient
-/// hypotheses, or {} for closed top-level terms.
-inline bool conv(NodeId a, NodeId b, const Env& env) {
-    if (a == b) return true;              // the same term (terms are hash-consed) under the same environment
-    return conv_value(eval(a, env), eval(b, env), env.size());
-}
-
 // ---------------------------------------------------------------------------
 // Elaborator error type and per-elaboration state
 // ---------------------------------------------------------------------------
@@ -3513,10 +3505,10 @@ inline ElabResult check(NodeId t, NodeId expected_ty, ElabCtx& ec, ElabState& es
 ///    a successful analysis outcome, not a failure of the elaborator.
 ///  - anything else -- heads don't match and aren't both constructors of
 ///    the same family, or the term shapes don't line up structurally --
-///    is DECLINED, not refused: `conv()` is tried first (handles cases
-///    not built from bare application spines, e.g. two different-
-///    looking but definitionally-equal closed terms), and if that also
-///    fails, nothing is forced and nothing is an error. This is
+///    is DECLINED, not refused: nothing is forced and nothing is an
+///    error (an earlier version also tried conversion first; it could
+///    not change the outcome -- both answers declined -- and evaluated
+///    both terms for nothing, so it was removed). This is
 ///    deliberate, not a fallback of last resort: the common shape here
 ///    is a structured pattern (`Succ(n_field)`) matched against a bare,
 ///    unrelated free variable -- the ordinary form of a GENERIC,
@@ -3745,31 +3737,8 @@ inline void match_index_pattern(NodeId pat, NodeId conc, uint32_t base_depth, ui
         }
         return;
     }
-    // conv() is only safe to attempt when neither side references a
-    // level env genuinely has no entry for. This is env.size() itself,
-    // not base_depth: an earlier version of this guard used base_depth
-    // (reasoning "env only has entries up to base_depth, this
-    // constructor's fields haven't been bound in it yet"), which is
-    // only a correct proxy for env.size() when a caller happens to pass
-    // an env sized to exactly match base_depth -- true for every caller
-    // until induct()'s own Mode 1 fix, which deliberately passes
-    // g.ec.values (sized to g.ec.size()) against base_depth=body_base (a
-    // genuinely LARGER value, spanning self/idx/scrutinee too) to force
-    // idx_vars_body -- the Fix's own, always-generic Pi parameters --
-    // against ITS OWN fresh fields rather than g.ec's. Using base_depth
-    // there crashed outright (Env::operator[] out of bounds, not a
-    // graceful decline) the first time an indexed family was inducted
-    // on with a genuinely CONCRETE index (Mode 1) rather than a generic
-    // one, confirming this by a real failure rather than by inspection
-    // alone. env.size() is the actual, direct safety boundary
-    // regardless of what base_depth is for in any given call, and is
-    // identical to the old behavior for every other existing caller.
-    bool pat_unresolved = detail::references_level_at_or_above(pat, static_cast<uint32_t>(env.size()));
-    bool conc_unresolved = detail::references_level_at_or_above(conc, static_cast<uint32_t>(env.size()));
-    if (!pat_unresolved && !conc_unresolved && conv(pat, conc, env)) return; // definitionally equal
-    // Neither provably equal (the conv() check above, when it was even
-    // safe to attempt) nor provably inconsistent (rigid, distinct
-    // constructor heads, handled above): genuinely insufficient
+    // Neither provably inconsistent (rigid, distinct constructor heads,
+    // handled above) nor forced: genuinely insufficient
     // information, not a contradiction -- e.g. pat is a structured
     // pattern (Succ(n_field)) and conc is a bare, unrelated free
     // variable (the ordinary shape of a generic, universally-quantified
@@ -5862,7 +5831,17 @@ inline std::vector<NodeId> fields_in_display_form(const std::vector<NodeId>& arg
 /// in the goal and the other hypotheses, which are in the same folded form.
 inline std::expected<detail::ScrutInfo, TypeError> scrutinee_info(const char* who, const Goal& g, uint32_t hyp_level, bool simp = false) {
     NodeId scrut_ty = g.hyps[hyp_level].type;
-    Value v = eval(scrut_ty, g.ec.values);
+    Value v;
+    // simp: read the type as it is written. When its head is already the inductive family (the usual case: `Le a (x + y)`), the arguments are then exactly the written terms, with `x + y` still a call of `add`.
+    // Only when the head is itself a definition (`Iff A B`) does the type have to be evaluated with every definition unfolded to reach the family, and the arguments are what that evaluation made of them.
+    bool read_folded = false;
+    if (simp) {
+        NoDeltaScope keep_folded; GuardedUnfoldScope guarded;
+        v = eval(scrut_ty, g.ec.values);
+        auto* nt0 = std::get_if<VNeutral>(&v);
+        read_folded = nt0 && nt0->head.kind == NeutralHead::Kind::GlobalConst && ctx().globals[nt0->head.id].is_inductive;
+    }
+    if (!read_folded) v = eval(scrut_ty, g.ec.values);
     auto* nt = std::get_if<VNeutral>(&v);
     if (!nt || nt->head.kind != NeutralHead::Kind::GlobalConst)
         return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, scrut_ty, std::nullopt, std::string(who) + ": hypothesis's type is not an inductive type application"});
