@@ -193,12 +193,22 @@ def main():
     # everything else is not a numeral: unevaluated expressions, nearly-numerals, numerals of the other system
     one_n, two_n = inst_n.lit(1), inst_n.lit(2)
     near_n = {
-        'N.succ 0': w['N.succ'](w['N0']), '1 + 1': nadd(one_n, one_n), 'Npos (Pos.succ XH)': w['Npos'](w['Pos.succ'](w['XH'])), 'Npos (XO (Pos.succ XH))': w['Npos'](w['XO'](w['Pos.succ'](w['XH']))),
+        'N.succ 0': w['N.succ'](w['N0']), '1 + 1': nadd(one_n, one_n),
         'XH (a Pos, not an N)': w['XH'], 'Npos XH + 0': nadd(one_n, w['N0']), 'N.double 1': w['N.double'](one_n), 'a unary numeral': inst_nat.lit(2), 'a bound variable': k.mk_bvar(0),
+        'Npos (XO #0) (a digit that is a bound variable)': w['Npos'](w['XO'](w.T(k.mk_bvar(0)))), 'Npos (Pos.add #0 XH) (digits that do not compute)': w['Npos'](w['Pos.add'](w.T(k.mk_bvar(0)), w['XH'])),
     }
     for label, t in near_n.items():
         t = t if hasattr(t, 'n') else w.T(t)
         expect(inst_n.numeral(t) is None, 'B  N numeral() refuses %s' % label)
+    # a CLOSED `Npos` term whose digits the kernel computes to the canonical ones is read as the numeral it evaluates to (the display normal form leaves `1 ^ 2` as `Npos (Pos.sqr XH)`): the reading is
+    # only a claim -- the proof that follows from it is checked by the kernel's conversion, so a wrong reading could only make a proof fail (S34 proves identities that need it)
+    evaluated_n = {'Npos (Pos.succ XH)': (w['Npos'](w['Pos.succ'](w['XH'])), 2), 'Npos (XO (Pos.succ XH))': (w['Npos'](w['XO'](w['Pos.succ'](w['XH']))), 4),
+                   'Npos (Pos.sqr XH)': (w['Npos'](w['Pos.sqr'](w['XH'])), 1), 'Npos (Pos.sqr (XO XH))': (w['Npos'](w['Pos.sqr'](w['XO'](w['XH']))), 4),
+                   'Npos (Pos.add (XI XH) (XO XH))': (w['Npos'](w['Pos.add'](w['XI'](w['XH']), w['XO'](w['XH']))), 5)}
+    for label, (t, value) in evaluated_n.items():
+        t = t if hasattr(t, 'n') else w.T(t)
+        expect(inst_n.numeral(t) == value, 'B  N numeral() reads %s as %d (the kernel computes its digits)' % (label, value))
+        expect(inst_n.numeral(t) == value, 'B  ... and keeps reading it so (the answer is remembered)')
     near_nat = {'pred 1': w['pred'](inst_nat.lit(1)), 'Succ (add 0 0)': w['Succ'](w['add'](w['Zero'], w['Zero'])), 'add 1 1': w['add'](inst_nat.lit(1), inst_nat.lit(1)), 'mul 0 0': w['mul'](w['Zero'], w['Zero']), 'a binary numeral': inst_n.lit(2),
                 'a bound variable': w.T(k.mk_bvar(0))}
     for label, t in near_nat.items():

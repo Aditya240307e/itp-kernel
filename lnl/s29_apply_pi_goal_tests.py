@@ -15,7 +15,9 @@ pattern) reads them:
   D. goals that are not Pis, and lemmas that do not fit: the lemma's negation premise is still peeled when the goal is `False`; a lemma with a Pi conclusion applied to a non-Pi goal peels it; a lemma whose
      conclusion is a bare variable still applies to a Pi goal (the fallback: every binder peeled, the goal becomes the variable); an `apply` that cannot unify fails and leaves the state as it was;
   E. a binder hidden behind a RECURSIVE type-level function (not a definition) is still peeled when the goal is not a Pi; the kernel call WITHOUT `simp` is the reference's (the rule is the tactic layer's);
-     every proof is finished and admitted.
+     every proof is finished and admitted;
+  F. a lemma given an EXPLICIT PREDICATE (`apply nat_ind (fun n => n <= n -> n <= n)`): its conclusion `P n` is then a Pi hidden behind the lambda, so the smallest count of binders to peel does not fit and peeling
+     every binder (the hidden one too) leaves a bare predicate; Lean tries every count from the smallest up to the lemma's own number of binders, and so does `apply` now (finding F41).
 """
 import os, sys
 
@@ -64,6 +66,14 @@ def build():
     # a lemma whose conclusion is a bare variable, and one that is a variable under a premise
     @thm(w, 'id_fn', [PROP, lambda P: P], lambda P, x: P)
     def _(p): p.intro('P', 'x'); p.exact('x')
+
+    # induction, and a lemma that returns its predicate: both are applied to an EXPLICIT predicate in part F
+    @thm(w, 'nat_ind', [w.arrow(Nat, PROP), lambda P: P(Z0), lambda P, h0: w.forall_([Nat, lambda n: P(n)], lambda n, h: P(S(n)))], lambda P, h0, hs: w.forall_([Nat], lambda n: P(n)))
+    def _(p):
+        p.intro('P', 'h0', 'hs', 'n'); p.induct('n', names=['m', 'ih']); p.exact('h0'); p.apply('hs'); p.exact('ih')
+
+    @thm(w, 'id_pred', [w.arrow(Nat, PROP), Nat, lambda P, n: P(n)], lambda P, n, h: P(n))
+    def _(p): p.intro('P', 'n', 'h'); p.exact('h')
 
     # definitions that hide the Pi of a goal: an implication, and a universal statement
     w.define('Imp2', w.forall_([PROP, PROP], lambda a, b: PROP), w.fun([PROP, PROP], lambda a, b: w.arrow(a, b)))
@@ -202,9 +212,25 @@ def part_E(w):
     finish_ok(w, p, 'ap_raw_plain')
 
 
+def part_F(w):
+    Nat, Le, S, Z0, Eq, F = w['Nat'], w['Le'], w['Succ'], w['Zero'], w.Eq, w['False']
+    motive = w.lam(Nat, lambda n: w.arrow(Le(n, n), Le(n, n)))
+    # F1: the lemma's own binders are the base case, the step and the variable; the Pi in its conclusion is the goal's second binder: peel the first two (the count that fits is neither the smallest nor all)
+    run_case(w, 'ap_motive_ind', w.forall_([Nat, lambda n: Le(n, n)], lambda n, h: Le(n, n)), [], ['nat_ind', motive],
+             ['Zero <= Zero -> Zero <= Zero', 'forall (x0 : Nat), (x0 <= x0 -> x0 <= x0) -> Succ x0 <= Succ x0 -> Succ x0 <= Succ x0'],
+             [lambda p: (p.intro('h'), p.exact('h')), lambda p: (p.intro('n', 'ih', 'h'), p.exact('h'))])
+    # F2: the count that fits is ALL the lemma's own binders: the variable and the premise are peeled, the Pi in the conclusion is the goal
+    run_case(w, 'ap_motive_id', w.arrow(Le(Z0, Z0), Le(Z0, Z0)), [], ['id_pred', motive], ['Zero <= Zero -> Zero <= Zero'], [lambda p: (p.intro('h'), p.exact('h'))])
+    # F3: the same lemma with the variable given: nothing but the premise is left
+    run_case(w, 'ap_motive_id_arg', w.arrow(Le(Z0, Z0), Le(Z0, Z0)), [], ['id_pred', motive, Z0], ['Zero <= Zero -> Zero <= Zero'], [lambda p: (p.intro('h'), p.exact('h'))])
+    # F4: and a predicate that is NOT a Pi still works as before (the lemma's conclusion is the goal)
+    run_case(w, 'ap_plain_pred', w.forall_([Nat], lambda n: Le(n, n)), [], ['nat_ind', w.lam(Nat, lambda n: Le(n, n))],
+             ['Zero <= Zero', 'forall (x0 : Nat), x0 <= x0 -> Succ x0 <= Succ x0'], [lambda p: p.apply('le_n'), lambda p: (p.intro('n', 'ih'), p.apply('le_n'))])
+
+
 def main():
     w = build()
-    part_A(w); part_B(w); part_C(w); part_D(w); part_E(w)
+    part_A(w); part_B(w); part_C(w); part_D(w); part_E(w); part_F(w)
     print('%d checks' % CHECKS[0])
     if FAIL:
         print('S29 APPLY ON PI GOALS GATE: FAIL (%d)' % len(FAIL))

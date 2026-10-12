@@ -400,11 +400,18 @@ class World:
     def Ex(self, A, fn): return self.app(self['Ex'], A, self.lam(A, fn))
 
     def eq_parts(self, prop):
-        """(A, a, b) of a proposition  Eq A a b  (seen through definitions by normalising the proposition if need be)"""
-        for cand in (prop, None):
-            if cand is None: cand = self.simp(prop)
+        """(A, a, b) of a proposition  Eq A a b, seen through the definitions at its head (one syntactic delta step at a time: the sides are left as written) -- and, failing that, through its display
+        normal form"""
+        cand = prop
+        for _ in range(32):
             h, args = self.spine(cand)
             if len(args) == 3 and self.head_name(cand) == 'Eq': return args[0], args[1], args[2]
+            nxt = self.k.unfold_head(self._n(cand))
+            if nxt is None: break
+            cand = self.T(nxt)
+        cand = self.simp(prop)
+        h, args = self.spine(cand)
+        if len(args) == 3 and self.head_name(cand) == 'Eq': return args[0], args[1], args[2]
         raise AuthorError('not an equation: %s' % self.show(prop))
 
     # ------------------------------------------------------------------------------------------------------------------ the printer

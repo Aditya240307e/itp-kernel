@@ -5934,6 +5934,36 @@ inline NodeId motive_result(NodeId motive, const std::vector<NodeId>& indices, N
     return loose_range(cur) == 0 ? cur : mk_app(apply_all(motive, indices), scrutinee);
 }
 
+/// The inductive family that the type of a match scrutinee belongs to, with the family's arguments (parameters and indices, in order). The type is read on SYNTAX first: a definition at the head is unfolded one
+/// step at a time (unfold_head_folded), its arguments substituted unevaluated, until an inductive family appears; the arguments are then the terms the type was written with. Evaluating the type (the fallback, for
+/// a type that reaches its family only by computation) unfolds every definition inside the arguments as well, and `quote` hands back their normal forms: for a conjunction of divisibilities over Z that is `Z.mul`
+/// expanded to its quotient construction, several times, on every `match` -- 70 ms for a three-line proof. Nothing is lost: the arguments are only ever used in unification and conversion, which evaluate.
+struct ScrutFamily { uint32_t type_gid; std::vector<NodeId> args; };
+inline std::expected<ScrutFamily, std::string> scrutinee_family(NodeId scrut_ty, ElabCtx& ec) {
+    NodeId cur = scrut_ty;
+    for (int fuel = 0; fuel < 32; ++fuel) {
+        std::vector<NodeId> args; NodeId head = cur;
+        while (head.tag == NodeType::APP) { args.push_back(ctx().apps[head.index].arg_id); head = ctx().apps[head.index].fn_id; }
+        if (head.tag == NodeType::CONST && ctx().globals[ctx().consts[head.index].global_id].is_inductive) {
+            std::reverse(args.begin(), args.end());
+            return ScrutFamily{ctx().consts[head.index].global_id, std::move(args)};
+        }
+        auto next = unfold_head_folded(cur); if (!next) break;
+        cur = *next;
+    }
+    Value v = eval(scrut_ty, ec.values);
+    auto* nt = std::get_if<VNeutral>(&v);
+    if (!nt || nt->head.kind != NeutralHead::Kind::GlobalConst || !ctx().globals[nt->head.id].is_inductive)
+        return std::unexpected(std::string("scrutinee's type is not an inductive type application"));
+    ScrutFamily f; f.type_gid = nt->head.id;
+    for (auto& frame : nt->spine) {
+        auto* af = std::get_if<ApplyFrame>(&frame);
+        if (!af) return std::unexpected(std::string("scrutinee's type has a non-application eliminator frame; cannot enumerate its indices"));
+        f.args.push_back(quote(af->arg, ec.size()));
+    }
+    return f;
+}
+
 inline std::optional<NodeId> expose_pi_folded(NodeId t);       // (defined below)
 
 /// The typing rules. Everything below reaches `infer` (the memoising wrapper defined after this function) for its subterms.
@@ -6025,19 +6055,10 @@ inline TypeResult infer_uncached(NodeId t, ElabCtx& ec, ElabState& es) {
             if (m.motive_id.tag == NodeType::META && !ctx().meta_ctx.is_solved(ctx().metas[m.motive_id.index].meta_id))
                 return err(TypeErrorKind::MotiveInferenceFailure, t, "infer(Match) requires an already-concrete motive; use check() against a goal type to have one constructed automatically");
             ITP_TRY(NodeId scrut_ty, infer(m.scrutinee_id, ec, es));
-            Value scrut_ty_val = eval(scrut_ty, ec.values);
-            auto* scrut_neutral = std::get_if<VNeutral>(&scrut_ty_val);
-            if (!scrut_neutral || scrut_neutral->head.kind != NeutralHead::Kind::GlobalConst)
-                return err(TypeErrorKind::MotiveInferenceFailure, m.scrutinee_id, "scrutinee's type is not an inductive type application");
-            const uint32_t type_global_id = scrut_neutral->head.id;
-            if (!ctx().globals[type_global_id].is_inductive)
-                return err(TypeErrorKind::MotiveInferenceFailure, m.scrutinee_id, "scrutinee's type is not an inductive type application");
-            std::vector<NodeId> concrete_indices;
-            for (auto& frame : scrut_neutral->spine) {
-                auto* af = std::get_if<ApplyFrame>(&frame);
-                if (!af) return err(TypeErrorKind::MotiveInferenceFailure, m.scrutinee_id, "scrutinee's type has a non-application eliminator frame; cannot enumerate its indices");
-                concrete_indices.push_back(quote(af->arg, ec.size()));
-            }
+            auto fam = scrutinee_family(scrut_ty, ec);
+            if (!fam) return err(TypeErrorKind::MotiveInferenceFailure, m.scrutinee_id, "scrutinee's type is not an inductive type application");
+            const uint32_t type_global_id = fam->type_gid;
+            std::vector<NodeId> concrete_indices = std::move(fam->args);
             if (ElabResult r = verify_motive_shape(m.motive_id, static_cast<uint32_t>(concrete_indices.size()), ec, es); !r) return std::unexpected(r.error());
             if (ElabResult r = check_match_branches(type_global_id, m.motive_id, *m.branches, concrete_indices, ec, es); !r) return std::unexpected(r.error());
             return quote(eval(motive_result(m.motive_id, concrete_indices, m.scrutinee_id), ec.values), ec.size());
@@ -6137,19 +6158,10 @@ inline ElabResult check_match(NodeId t, NodeId expected_ty, ElabCtx& ec, ElabSta
     Match m = ctx().matches[t.index];
     TypeResult scrut_ty_r = infer(m.scrutinee_id, ec, es);
     if (!scrut_ty_r) return std::unexpected(scrut_ty_r.error());
-    Value scrut_ty_val = eval(*scrut_ty_r, ec.values);
-    auto* scrut_neutral = std::get_if<VNeutral>(&scrut_ty_val);
-    if (!scrut_neutral || scrut_neutral->head.kind != NeutralHead::Kind::GlobalConst)
-        return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, m.scrutinee_id, expected_ty, "scrutinee's type is not an inductive type application"});
-    const uint32_t type_global_id = scrut_neutral->head.id;
-    if (!ctx().globals[type_global_id].is_inductive)
-        return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, m.scrutinee_id, expected_ty, "scrutinee's type is not an inductive type application"});
-    std::vector<NodeId> concrete_indices;
-    for (auto& frame : scrut_neutral->spine) {
-        auto* af = std::get_if<ApplyFrame>(&frame);
-        if (!af) return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, m.scrutinee_id, expected_ty, "scrutinee's type has a non-application eliminator frame; cannot enumerate its indices"});
-        concrete_indices.push_back(quote(af->arg, ec.size()));
-    }
+    auto fam = scrutinee_family(*scrut_ty_r, ec);
+    if (!fam) return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, m.scrutinee_id, expected_ty, fam.error()});
+    const uint32_t type_global_id = fam->type_gid;
+    std::vector<NodeId> concrete_indices = std::move(fam->args);
     NodeId motive = m.motive_id;
     if (m.motive_id.tag == NodeType::META && !ctx().meta_ctx.is_solved(ctx().metas[m.motive_id.index].meta_id)) {
         // The motive is a hole: build it by abstracting the indices and the scrutinee out of the expected type.
@@ -6493,7 +6505,10 @@ inline ElabResult apply(ProofState& ps, NodeId candidate, std::optional<uint32_t
         // unify, every binder is peeled, as before. Like every improvement on the reference this is the tactic layer's mode (`simp`): without it apply is the reference's, which the lockstep gates compare.
         const uint32_t goal_arity = simp ? pi_arity_folded(g.target, g.ec.size()) : 0, lemma_arity = simp ? pi_arity_folded(start_ty, g.ec.size()) : 0;
         ElabResult unified = std::unexpected(TypeError{TypeErrorKind::UnificationFailure, g.target, std::nullopt, "apply: no attempt was made"});
-        if (goal_arity > 0 && lemma_arity >= goal_arity) unified = peel_and_unify(lemma_arity - goal_arity);
+        // (Lean tries every count from the smallest up to all of them: when the lemma has been given an explicit motive its conclusion `motive ?n` is a Pi that the smallest count does not see, and the right count is
+        // the lemma's own number of binders, with the Pi hidden in the conclusion left alone -- peeling that one too, as the last attempt does, leaves a bare predicate that cannot match a Pi goal)
+        if (goal_arity > 0 && lemma_arity >= goal_arity)
+            for (uint32_t limit = lemma_arity - goal_arity; limit <= lemma_arity && !unified; ++limit) unified = peel_and_unify(limit);
         if (!unified) unified = peel_and_unify(~0u);
         if (!unified) return unified;
     }

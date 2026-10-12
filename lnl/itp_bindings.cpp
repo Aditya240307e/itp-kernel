@@ -285,6 +285,8 @@ struct KernelWrapper {
         auto g = activate(); require_small(n0, "context size"); require_scoped(t, n0, "term");
         itp::NoDeltaScope keep_folded; itp::GuardedUnfoldScope guarded; return itp::normalize(t, fresh_env(n0));
     }
+    // ONE delta step at the head of a term, on syntax, the arguments substituted unevaluated (itp::unfold_head_folded); none when the head is not a definition that unfolds that way
+    std::optional<itp::NodeId> unfold_head(itp::NodeId t) { auto g = activate(); require_node(t, "unfold_head"); return itp::unfold_head_folded(t); }
     bool conv_open(itp::NodeId a, itp::NodeId b, uint32_t n0) {
         auto g = activate(); require_small(n0, "context size"); require_scoped(a, n0, "lhs"); require_scoped(b, n0, "rhs"); itp::Env env = fresh_env(n0);
         return itp::conv_value(itp::eval(a, env), itp::eval(b, env), n0);
@@ -511,6 +513,7 @@ NB_MODULE(itp_env_lnl, m) {
         .def("unify_drain_open", &KernelWrapper::unify_drain_open, "a"_a, "b"_a, "hyp_types"_a)
         .def("normalize_open", &KernelWrapper::normalize_open, "term"_a, "n0"_a)
         .def("simp_normalize", &KernelWrapper::simp_normalize, "term"_a, "n0"_a)
+        .def("unfold_head", &KernelWrapper::unfold_head, "term"_a)
         .def("conv_open", &KernelWrapper::conv_open, "a"_a, "b"_a, "n0"_a)
         .def("loose_range", &KernelWrapper::loose_range, "term"_a)
         .def("stress_value_release", &KernelWrapper::stress_value_release, "depth"_a, "kind"_a)

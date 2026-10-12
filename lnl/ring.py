@@ -87,6 +87,7 @@ class SemiringNat(Semiring):
     def lit(self, k):
         t = self.lit_cache.get(k)
         if t is None:
+            if k < 0: raise AuthorError('the natural numbers have no negative numerals (%d)' % k)
             t = self.zero if k == 0 else self._succ(self.lit(k - 1)) if k < 200 else self._lit_big(k)
             self.lit_cache[k] = t
         return t
@@ -132,6 +133,7 @@ class SemiringN(Semiring):
     def lit(self, k):
         t = self.lit_cache.get(k)
         if t is None:
+            if k < 0: raise AuthorError('N has no negative numerals (%d)' % k)
             if k == 0: t = self.zero
             else:
                 p = self._xh
@@ -140,17 +142,15 @@ class SemiringN(Semiring):
             self.lit_cache[k] = t
         return t
     elit = lit
-    def numeral(self, t):
-        """the value k when t is the canonical numeral of k (N0, or Npos of digits XH / XO / XI), else None"""
-        hit = self.num_cache.get(t)
-        if hit is not None: return None if hit < 0 else hit
+    def _parse(self, t):
+        """the value k when t is spelled as the canonical numeral of k (N0, or Npos of digits XH / XO / XI), else None; `npos` tells whether t is an application of Npos at all"""
         view = self.w.k.view; n0, npos, xh, xo, xi = self._ids
-        v = view(t.n); res = None
+        v = view(t.n); res = None; is_npos = False
         if v[0] == 'const' and v[1] == n0: res = 0
         elif v[0] == 'app':
             f = view(v[1])
             if f[0] == 'const' and f[1] == npos:
-                bits = []; n = v[2]
+                is_npos = True; bits = []; n = v[2]
                 while True:
                     u = view(n)
                     if u[0] == 'const' and u[1] == xh: break
@@ -161,6 +161,16 @@ class SemiringN(Semiring):
                 if bits is not None:
                     res = 1
                     for b in reversed(bits): res = res * 2 + b
+        return res, is_npos
+    def numeral(self, t):
+        """the value k when t is a numeral of k, else None: the canonical spelling (N0, or Npos of digits XH / XO / XI), or a closed `Npos` term whose digits the kernel computes to it (the display
+        normal form leaves `1 ^ 2` as `Npos (Pos.sqr XH)`). The two spellings are convertible, which the kernel checks when it meets the proof"""
+        hit = self.num_cache.get(t)
+        if hit is not None: return None if hit < 0 else hit
+        res, is_npos = self._parse(t)
+        if res is None and is_npos:
+            try: res = self._parse(self.w.normalize(t))[0]
+            except Exception: res = None             # a term with a free variable inside the digits is not a numeral
         self.num_cache[t] = -1 if res is None else res
         return res
     enumeral = numeral
@@ -175,7 +185,8 @@ class SemiringZ(Semiring):
         self.N = SemiringN(w)
         self._add, self._mul, self._pow, self._neg, self._sub, self._of_N = w['Z.add'], w['Z.mul'], w['Z.pow'], w['Z.neg'], w['Z.sub'], w['Z.of_N']
         self._ids = {n: w.gid[n] for n in ('Z.zero', 'Z.one', 'Z.of_N', 'Z.neg', 'Z.add', 'Z.mul')}
-        self.ops = {w.gid['Z.add']: 'add', w.gid['Z.mul']: 'mul', w.gid['Z.pow']: 'pow', w.gid['Z.neg']: 'neg', w.gid['Z.sub']: 'sub'}
+        self.ops = {w.gid['Z.add']: 'add', w.gid['Z.mul']: 'mul', w.gid['Z.pow']: 'pow', w.gid['Z.neg']: 'neg', w.gid['Z.sub']: 'sub', w.gid['Z.sqr']: 'sqr'}      # (the display normal form turns `x ^ 2` into `Z.sqr x`)
+        self.sqr_def = w['Z.sqr_def']
         self.zero_add, self.add_zero = w['Z.zero_add'], w['Z.add_zero']
         self.lit_cache = {}; self.num_cache = {}
         self.one = self.lit(1); self.m1 = self.lit(-1)
@@ -445,6 +456,11 @@ class Ring:
             elif kind == 'sub' and len(args) == 2:
                 e2 = R.add(args[0], R.mul(R.m1, args[1]))
                 eq = Pf(self.L('sub', args[0], args[1]), t, e2)
+                S, ps = self.nf(e2)
+                res = (S, self.trans(eq, ps))
+            elif kind == 'sqr' and len(args) == 1:
+                e2 = R.mul(args[0], args[0])
+                eq = Pf(R.sqr_def(args[0]), t, e2)
                 S, ps = self.nf(e2)
                 res = (S, self.trans(eq, ps))
             elif kind == 'succ' and len(args) == 1:

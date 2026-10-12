@@ -88,6 +88,12 @@ class Proof:
         try: yield
         finally: w.ctx, w.ctx_names = saved
 
+    def T(self, names, f=None, i=0):
+        """terms built under the hypotheses of goal i: `p.T('a b', lambda a, b: a * b)` applies f to the hypotheses called a and b (the notation of the world applies); without `f`, the list of those hypotheses"""
+        with self.focus(i):
+            hs = [self.h(n, i) for n in names.split()]
+            return f(*hs) if f is not None else hs
+
     def h(self, name, i=0):
         """the hypothesis called `name` in goal i (the latest one if the name was reused) as a term"""
         self._check_goal(i); names = self._names[self.ps.goal_meta_id(i)]
@@ -129,8 +135,16 @@ class Proof:
     def _n_params(self, lvl):
         """how many arguments of the type of hypothesis `lvl` are parameters of its family"""
         with self.focus():
-            ty = self.w.normalize(self.w.T(self.ps.goal_hyp_type(0, lvl)))        # the kernel splits on the type with every definition unfolded (Iff is an And)
-            fam, _ = self.w.spine(ty); v = self.k.view(fam.n)
+            ty = self.w.T(self.ps.goal_hyp_type(0, lvl)); v = None
+            for _ in range(32):                    # the kernel splits on the type with the definitions at its head unfolded (Iff is an And): one step at a time, on syntax -- normalising the whole type would unfold what is inside the arguments as well
+                fam, _ = self.w.spine(ty); v = self.k.view(fam.n)
+                if v[0] == 'const' and self.k.is_inductive(v[1]): break
+                nxt = self.k.unfold_head(ty.n)
+                if nxt is None: v = None; break
+                ty = self.w.T(nxt)
+            else: v = None
+            if v is None:                          # the family appears only by computation
+                fam, _ = self.w.spine(self.w.normalize(self.w.T(self.ps.goal_hyp_type(0, lvl)))); v = self.k.view(fam.n)
         return sum(self.k.param_slots(v[1])) if v[0] == 'const' else 0
 
     def intro(self, *names):
@@ -398,6 +412,11 @@ class Proof:
         from ring import ring as _ring
         return _ring(self)
 
+    def linear_combination(self, *pairs):
+        """close the first goal, an equation of a commutative ring, by a linear combination  sum c_i * (l_i - r_i)  of hypotheses  h_i : l_i = r_i, given as pairs (c_i, h_i) (see lincomb.py: kernel-checked)"""
+        from lincomb import linear_combination as _lc
+        return _lc(self, *pairs)
+
     def linarith(self, *extra):
         """close the first goal by linear arithmetic over the integers from the hypotheses, and from the proofs in `extra` (see linarith.py: a certificate found by a simplex, checked by the kernel)"""
         from linarith import linarith as _lin
@@ -407,6 +426,31 @@ class Proof:
         """like `linarith`, after adding the squares of the sub-terms  t * t, t ^ 2  and the products of every two facts (a certificate of degree two)"""
         from linarith import linarith as _lin
         return _lin(self, extra, nonlinear=True)
+
+    def by_contra(self, name='h'):
+        """classical: to prove P, assume  ~P  (named `name`) and prove False. Needs the world's `by_contra` (excluded middle)."""
+        if 'by_contra' not in self.w.gid: raise AuthorError('by_contra: this world has no classical logic (no lemma by_contra)')
+        self.apply('by_contra'); return self.intro(name)
+
+    def interval_cases(self, var, lo, hi, name=None):
+        """case analysis on an integer hypothesis `var`: the bounds  lo <= var <= hi  are proved by `linarith` from the context, and the goal is replaced by hi - lo + 1 goals, in increasing order of the value,
+        each with a hypothesis  <name or var_eq> : var = k  (a few helper hypotheses `_ic_*` stay in the context). The proof is a chain of the library's `Z.lt_or_eq_of_le`."""
+        import ring as R
+        w = self.w; name = name or (var + '_eq')
+        if not isinstance(lo, int) or not isinstance(hi, int) or isinstance(lo, bool) or isinstance(hi, bool): raise AuthorError('interval_cases: the bounds must be Python ints')
+        if hi < lo: raise AuthorError('interval_cases: empty range %d..%d' % (lo, hi))
+        if hi - lo >= 500: raise AuthorError('interval_cases: %d cases are too many' % (hi - lo + 1))
+        with self.focus():
+            A = w.infer(self.h(var))
+        if 'Z' not in w.gid or A != w['Z']: raise AuthorError('interval_cases: %s is not an integer' % var)
+        lit = R.instance_for(w, A).lit; le = w['Z.le']
+        self.have('_ic_lo', self.T(var, lambda x: le(lit(lo), x)), lambda q: q.linarith())
+        self.have('_ic_hi', self.T(var, lambda x: le(x, lit(hi))), lambda q: q.linarith())
+        for k in range(hi, lo, -1):
+            self.obtain(['_ic_c', name], ('Z.lt_or_eq_of_le', var, lit(k), '_ic_hi'))          # var < k  \/  var = k : the first case goes on
+            self.have('_ic_hi', self.T(var, lambda x, k=k: le(x, lit(k - 1))), lambda q: q.linarith())
+        self.have(name, self.T(var, lambda x: w.Eq(x, lit(lo))), lambda q: q.linarith())
+        return self
 
     def induction_on(self, lemma, var, names=()):
         """induction by a library principle  lemma : forall P z, (premise) -> P z  on a hypothesis `var` whose type is opaque to `induct` (a quotient). The motive is read off the goal by abstracting `var`;

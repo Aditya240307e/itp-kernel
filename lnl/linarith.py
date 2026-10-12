@@ -101,6 +101,7 @@ class Reader:
             elif kind == 'pow' and len(args) == 2 and (e := rg.const_exp(args[1])[0]) is not None: res = p_pow(self.poly(args[0]), e)
             elif kind == 'neg' and len(args) == 1: res = p_scale(self.poly(args[0]), -1)
             elif kind == 'sub' and len(args) == 2: res = p_add(self.poly(args[0]), self.poly(args[1]), -1)
+            elif kind == 'sqr' and len(args) == 1: res = p_mul(self.poly(args[0]), self.poly(args[0]))         # `Z.sqr t` is what the display normal form makes of `t ^ 2`
             else: res = {((rg.atom(t), 1),): 1}
         self.memo[t] = res
         return res
@@ -290,6 +291,7 @@ class Problem:
             kind = self.inst.ops.get(hv[1])
             if kind == 'mul' and len(args) == 2 and args[0] == args[1] and args[0] not in seen: seen.add(args[0]); out.append(args[0])
             if kind == 'pow' and len(args) == 2 and self.inst.enumeral(args[1]) == 2 and args[0] not in seen: seen.add(args[0]); out.append(args[0])
+            if kind == 'sqr' and len(args) == 1 and args[0] not in seen: seen.add(args[0]); out.append(args[0])
             stack.extend(args)
         return out
 

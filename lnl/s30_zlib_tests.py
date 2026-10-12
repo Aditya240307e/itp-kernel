@@ -206,10 +206,11 @@ def definition_types(w):
 def pscale(p, c): return {m: c * v for m, v in p.items()}
 
 def zpoly(e, natoms):
-    """expression -> {exponent vector: signed coefficient}; the atoms are x_0..x_{n-1} and sqr x_0 .. sqr x_{n-1}"""
+    """expression -> {exponent vector: signed coefficient}; the atoms are x_0..x_{n-1} and g x_0 .. g x_{n-1} for a function variable g; `sqr x_i` is the square x_i * x_i (what the display normal form makes of x_i ^ 2)"""
     n = 2 * natoms; k = e[0]
     if k == 'x': v = [0] * n; v[e[1]] = 1; return {tuple(v): 1}
-    if k == 'sqr': v = [0] * n; v[natoms + e[1]] = 1; return {tuple(v): 1}
+    if k == 'sqr': v = [0] * n; v[e[1]] = 2; return {tuple(v): 1}
+    if k == 'app': v = [0] * n; v[natoms + e[1]] = 1; return {tuple(v): 1}
     if k == 'n': return {tuple([0] * n): e[1]} if e[1] else {}
     if k == '+': return padd(zpoly(e[1], natoms), zpoly(e[2], natoms))
     if k == '-': return padd(zpoly(e[1], natoms), pscale(zpoly(e[2], natoms), -1))
@@ -223,7 +224,7 @@ def zclean(p): return {m: c for m, c in p.items() if c}
 def terms_bound(e):
     """an upper bound on the number of monomials of the expanded expression (so that a power tower of sums is not asked for: the proof of it would be millions of steps)"""
     k = e[0]
-    if k in ('x', 'sqr', 'n'): return 1
+    if k in ('x', 'sqr', 'app', 'n'): return 1
     if k == 'neg': return terms_bound(e[1])
     if k in '+-': return terms_bound(e[1]) + terms_bound(e[2])
     if k == '*': return terms_bound(e[1]) * terms_bound(e[2])
@@ -234,6 +235,7 @@ def zshow(e):
     k = e[0]
     if k == 'x': return 'xyz'[e[1]]
     if k == 'sqr': return 'sqr(%s)' % 'xyz'[e[1]]
+    if k == 'app': return 'g(%s)' % 'xyz'[e[1]]
     if k == 'n': return str(e[1])
     if k == 'neg': return '-(%s)' % zshow(e[1])
     if k == '^': return '(%s)^%d' % (zshow(e[1]), e[2])
@@ -253,6 +255,7 @@ def rand_expr(rng, natoms, depth, numeral=rand_num):
         c = rng.random()
         if c < 0.55: return ('x', rng.randrange(natoms))
         if c < 0.82: return ('n', numeral(rng))
+        if c < 0.92: return ('app', rng.randrange(natoms))
         return ('sqr', rng.randrange(natoms))
     r = rng.random()
     if r < 0.28: return ('+', rand_expr(rng, natoms, depth - 1, numeral), rand_expr(rng, natoms, depth - 1, numeral))
@@ -315,7 +318,7 @@ def perturb(e, rng, natoms):
     if k == 'neg': return ('neg', perturb(e[1], rng, natoms)) if rng.random() < 0.5 else e[1]
     if k == 'n': return ('n', e[1] + rng.choice([-1, 1]))
     if k == 'x': return ('x', rng.randrange(natoms)) if rng.random() < 0.5 else ('n', 1)
-    if k == 'sqr': return ('x', e[1])
+    if k in ('sqr', 'app'): return ('x', e[1])
     if k in '+-*': return (rng.choice([c for c in '+-*' if c != k]), e[1], e[2])
     return e
 
@@ -329,14 +332,18 @@ class Syntax:
         if self.rng is not None and self.rng.random() < 0.3:
             return self.of_N(self.nlit(k)) if k >= 0 else self.neg(self.of_N(self.nlit(-k)))
         return self.inst.lit(k)
-    def build(self, e, xs):
+    def build(self, e, xs, g=None):
+        """the term of the expression over the variables xs; `g` is the function variable that the nodes ('app', i) apply to xs[i]"""
         k = e[0]
         if k == 'x': return xs[e[1]]
         if k == 'sqr': return self.sqr(xs[e[1]])
+        if k == 'app':
+            if g is None: raise ValueError('an application node needs the function variable')
+            return g(xs[e[1]])
         if k == 'n': return self.numeral(e[1])
-        if k == 'neg': return self.neg(self.build(e[1], xs))
-        if k == '^': return self.pw(self.build(e[1], xs), self.nlit(e[2]))
-        a, b = self.build(e[1], xs), self.build(e[2], xs)
+        if k == 'neg': return self.neg(self.build(e[1], xs, g))
+        if k == '^': return self.pw(self.build(e[1], xs, g), self.nlit(e[2]))
+        a, b = self.build(e[1], xs, g), self.build(e[2], xs, g)
         return self.add(a, b) if k == '+' else self.sub(a, b) if k == '-' else self.mul(a, b)
 
 
@@ -364,7 +371,7 @@ def main():
     nadd, nmul = w['N.add'], w['N.mul']
     inst = R.instance_for(w, Z); inst_n = R.instance_for(w, N)
     expect(isinstance(inst, R.SemiringZ) and isinstance(inst_n, R.SemiringN), 'A  the instances of Z and N are found')
-    SY = Syntax(w)
+    SY = Syntax(w); ZZ = w.arrow(Z, Z)
 
     # ------------------------------------------------------------------------------------------------------------------ A. statements
     spec = zspec(w); n_ok = 0
@@ -540,8 +547,18 @@ def main():
     prove_z(['a'], lambda a: Eq(ZP(neg(a), 2), ZP(a, 2)), '(-a)^2 = a^2')
     prove_z(['a'], lambda a: Eq(ZP(neg(a), 3), neg(ZP(a, 3))), '(-a)^3 = -a^3')
     prove_z(['a', 'b'], lambda a, b: Eq(add(mul(L(0), a), mul(b, L(0))), L(0)), 'zeros')
-    prove_z(['a'], lambda a: Eq(ZP(add(zsqr(a), L(1)), 2), add(add(ZP(zsqr(a), 2), mul(L(2), zsqr(a))), L(1))), 'application as an atom')
-    prove_z(['a'], lambda a: Eq(mul(zsqr(a), zsqr(a)), ZP(zsqr(a), 2)), 'sqr a * sqr a = (sqr a)^2')
+    prove_z(['a'], lambda a: Eq(ZP(add(zsqr(a), L(1)), 2), add(add(ZP(zsqr(a), 2), mul(L(2), zsqr(a))), L(1))), '(sqr a + 1)^2: Z.sqr is the square')
+    prove_z(['a'], lambda a: Eq(mul(zsqr(a), zsqr(a)), ZP(a, 4)), 'sqr a * sqr a = a^4')
+    prove_z(['a'], lambda a: Eq(zsqr(a), mul(a, a)), 'sqr a = a * a')
+    prove_z(['a'], lambda a: Eq(ZP(zsqr(add(a, L(1))), 2), ZP(add(a, L(1)), 4)), '(sqr (a + 1))^2 = (a + 1)^4')
+    def prove_zg(names, stmt_fn, label):
+        counter[0] += 1; nm = 's30_g%d' % counter[0]; indep.add(nm)
+        try: w.prove(nm, F([ZZ] + [Z] * len(names), stmt_fn), lambda p: (p.intro('g', *names), p.ring()))
+        except AuthorError as e: FAIL.append('C  ring failed on %s: %s' % (label, str(e).splitlines()[0]))
+    prove_zg(['a'], lambda g, a: Eq(ZP(add(g(a), L(1)), 2), add(add(ZP(g(a), 2), mul(L(2), g(a))), L(1))), 'an application of a function variable is an atom')
+    prove_zg(['a'], lambda g, a: Eq(mul(g(a), g(a)), ZP(g(a), 2)), 'g a * g a = (g a)^2')
+    prove_zg(['a', 'b'], lambda g, a, b: Eq(add(g(a), g(b)), add(g(b), g(a))), 'g a + g b = g b + g a')
+    prove_zg(['a', 'b'], lambda g, a, b: Eq(mul(sub(g(a), g(b)), add(g(a), g(b))), sub(ZP(g(a), 2), ZP(g(b), 2))), '(g a - g b)(g a + g b) = (g a)^2 - (g b)^2')
     prove_z(['a'], lambda a: Eq(mul(add(a, L(-3)), add(a, L(5))), add(add(ZP(a, 2), mul(L(2), a)), L(-15))), '(a-3)(a+5) = a^2 + 2a - 15')
     big = 10**30 + 7
     prove_z(['a'], lambda a: Eq(ZP(sub(a, L(big)), 2), add(sub(ZP(a, 2), mul(L(2 * big), a)), L(big * big))), '100-bit coefficients', heavy=True)
@@ -613,6 +630,10 @@ def main():
     msg = refused_with(lambda: w.prove('s30_np%d' % counter[0], F([NN, NN], lambda a, b: Eq(pair(N, N, nadd(w['fst'](N, N, a), w['fst'](N, N, b)), N0), pair(N, N, nadd(w['fst'](N, N, b), w['fst'](N, N, a)), N0))),
                                        lambda p: (p.intro('a', 'b'), p.ring())))
     expect('no commutative-semiring structure' in msg and 'Prod' in msg, 'C  ring says it knows no number system for pairs: %s' % msg[:100])
+    # distinct applications of a function variable are distinct atoms
+    counter[0] += 1
+    msg = refused_with(lambda: w.prove('s30_ga%d' % counter[0], F([ZZ, Z, Z], lambda g, a, b: Eq(g(a), g(b))), lambda p: (p.intro('g', 'a', 'b'), p.ring())))
+    expect('different normal forms' in msg, 'C  ring does not identify g a with g b: %s' % msg[:80])
     tc = time.time() - t_start
     trace('section C done at %.1f s' % tc)
 
@@ -628,10 +649,10 @@ def main():
         if size(e2) > 90 or terms_bound(e2) > 400: continue
         same = zclean(zpoly(e1, natoms)) == zclean(zpoly(e2, natoms))
         names = ['a', 'b', 'c'][:natoms]
-        stmt = F([Z] * natoms, lambda *xs: Eq(SYr.build(e1, xs), SYr.build(e2, xs)))
+        stmt = F([ZZ] + [Z] * natoms, lambda g, *xs: Eq(SYr.build(e1, xs, g), SYr.build(e2, xs, g)))
         t_case = time.time()
         try:
-            w.prove('s30_r%d' % case, stmt, lambda p: (p.intro(*names), p.ring())); got = 'proved'
+            w.prove('s30_r%d' % case, stmt, lambda p: (p.intro('g', *names), p.ring())); got = 'proved'
             if case % 8 == 0: indep.add('s30_r%d' % case)
         except AuthorError as e: got = 'refused' if 'different normal forms' in str(e) else 'error: ' + str(e).splitlines()[0]
         except (E.ITPError, RuntimeError) as e: got = 'KERNEL REJECTED: ' + str(e)[:200]
@@ -652,11 +673,11 @@ def main():
         natoms = rng.choice([1, 2, 3]); e = rand_expr(rng, natoms, rng.choice([2, 3, 4]), small_num)
         if size(e) > 50 or terms_bound(e) > 200: continue
         oracle = zclean(zpoly(e, natoms)); width = 2 * natoms; names = ['a', 'b', 'c'][:natoms]
-        p = Proof(w, F([Z] * natoms, lambda *xs: Eq(SY0.build(e, xs), SY0.build(e, xs))), 'e%d' % case); p.intro(*names)
-        xs = [p.h(nm) for nm in names]
-        rg = R.Ring(w, inst); NFe, _ = rg.nf(SY0.build(e, xs))
+        p = Proof(w, F([ZZ] + [Z] * natoms, lambda g, *xs: Eq(SY0.build(e, xs, g), SY0.build(e, xs, g))), 'e%d' % case); p.intro('g', *names)
+        xs = [p.h(nm) for nm in names]; gv = p.h('g')
+        rg = R.Ring(w, inst); NFe, _ = rg.nf(SY0.build(e, xs, gv))
         slot = {}
-        for j in range(natoms): slot[xs[j]] = j; slot[zsqr(xs[j])] = natoms + j
+        for j in range(natoms): slot[xs[j]] = j; slot[gv(xs[j])] = natoms + j
         got = {}
         for m in NFe.monos:
             vec = [0] * width
