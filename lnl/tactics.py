@@ -73,8 +73,11 @@ class Proof:
             for h in range(n):
                 if not kern[h]: ps.set_goal_hyp_name(i, h, names[h])          # the kernel keeps the name when it reverts and introduces the hypothesis again (cases/induct with later hypotheses)
 
+    def _check_goal(self, i):
+        if not 0 <= i < self.ps.num_goals(): raise AuthorError('no goal %d (%d open)' % (i, self.ps.num_goals()))
+
     def _context(self, i=0):
-        ps = self.ps; n = ps.goal_num_hyps(i)
+        self._check_goal(i); ps = self.ps; n = ps.goal_num_hyps(i)
         return [ps.goal_hyp_type(i, h) for h in range(n)], list(self._names[ps.goal_meta_id(i)])
 
     @contextmanager
@@ -87,7 +90,7 @@ class Proof:
 
     def h(self, name, i=0):
         """the hypothesis called `name` in goal i (the latest one if the name was reused) as a term"""
-        names = self._names[self.ps.goal_meta_id(i)]
+        self._check_goal(i); names = self._names[self.ps.goal_meta_id(i)]
         for lvl in range(len(names) - 1, -1, -1):
             if names[lvl] == name: return self.w.T(self.k.mk_fvar(lvl))
         raise AuthorError('no hypothesis called %r; the hypotheses are %s' % (name, names))
@@ -394,6 +397,16 @@ class Proof:
         """close the first goal, an equation between polynomial expressions of natural numbers, by normalising both sides (see ring.py: the proof it builds is checked by the kernel like any other)"""
         from ring import ring as _ring
         return _ring(self)
+
+    def linarith(self, *extra):
+        """close the first goal by linear arithmetic over the integers from the hypotheses, and from the proofs in `extra` (see linarith.py: a certificate found by a simplex, checked by the kernel)"""
+        from linarith import linarith as _lin
+        return _lin(self, extra)
+
+    def nlinarith(self, *extra):
+        """like `linarith`, after adding the squares of the sub-terms  t * t, t ^ 2  and the products of every two facts (a certificate of degree two)"""
+        from linarith import linarith as _lin
+        return _lin(self, extra, nonlinear=True)
 
     def induction_on(self, lemma, var, names=()):
         """induction by a library principle  lemma : forall P z, (premise) -> P z  on a hypothesis `var` whose type is opaque to `induct` (a quotient). The motive is read off the goal by abstracting `var`;

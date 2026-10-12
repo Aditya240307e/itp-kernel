@@ -748,10 +748,197 @@ def int_order3(w):
         def _(p): p.exists(N0); p.ring()
 
 
-if __name__ == '__main__':
-    import time, bin_lib
-    t0 = time.time(); w = bin_lib.build_bin_defs()
+def int_order4(w):
+    """the strict order with sums and products, discreteness, the integral domain (no zero divisors) and cancellation of a non-zero factor, and the comparison of casts of naturals"""
+    PROP = w.PROP; Eq = w.Eq
+    N, Pos, Z = w['N'], w['Pos'], w['Z']; N0 = w['N0']; Npos = w['Npos']
+    zadd, zmul, zneg, zzero, zone, zof, zsub = w['Z.add'], w['Z.mul'], w['Z.neg'], w['Z.zero'], w['Z.one'], w['Z.of_N'], w['Z.sub']
+    nadd, nmul, nsucc = w['N.add'], w['N.mul'], w['N.succ']; nle, nlt = w['N.le'], w['N.lt']; zle, zlt = w['Z.le'], w['Z.lt']; F = w['False']
+
+    with w.nota.using(Z):
+        @thm(w, 'Z.le_of_eq', [Z, Z, lambda x, y: Eq(x, y)], lambda x, y, h: zle(x, y))
+        def _(p): p.intro('x', 'y', 'h'); p.rw('h'); p.apply('Z.le_refl')
+
+        # ---- sums
+        @thm(w, 'Z.lt_add_one', [Z], lambda x: zlt(x, x + zone))
+        def _(p): p.intro('x'); p.apply('Z.le_refl')
+
+        @thm(w, 'Z.add_lt_add_right', [Z, Z, Z, lambda x, y, z: zlt(x, y)], lambda x, y, z, h: zlt(x + z, y + z))
+        def _(p): p.intro('x', 'y', 'z', 'h'); p.cases('h', names=['k', 'hk']); p.exists('k'); p.rw('hk', rev=True); p.ring()
+
+        @thm(w, 'Z.add_lt_add_left', [Z, Z, Z, lambda x, y, z: zlt(x, y)], lambda x, y, z, h: zlt(z + x, z + y))
+        def _(p): p.intro('x', 'y', 'z', 'h'); p.rw('Z.add_comm', 'z', 'x'); p.rw('Z.add_comm', 'z', 'y'); p.apply('Z.add_lt_add_right'); p.exact('h')
+
+        @thm(w, 'Z.add_lt_add', [Z, Z, Z, Z, lambda x, y, u, v: zlt(x, y), lambda x, y, u, v, h: zlt(u, v)], lambda x, y, u, v, h1, h2: zlt(x + u, y + v))
+        def _(p):
+            p.intro('x', 'y', 'u', 'v', 'h1', 'h2'); p.apply('Z.lt_trans', (zadd, 'x', 'u'), (zadd, 'y', 'u'), (zadd, 'y', 'v'))
+            p.apply('Z.add_lt_add_right'); p.exact('h1')
+            p.apply('Z.add_lt_add_left'); p.exact('h2')
+
+        @thm(w, 'Z.add_lt_add_of_lt_of_le', [Z, Z, Z, Z, lambda x, y, u, v: zlt(x, y), lambda x, y, u, v, h: zle(u, v)], lambda x, y, u, v, h1, h2: zlt(x + u, y + v))
+        def _(p):
+            p.intro('x', 'y', 'u', 'v', 'h1', 'h2'); p.apply('Z.lt_of_lt_of_le', (zadd, 'x', 'u'), (zadd, 'y', 'u'), (zadd, 'y', 'v'))
+            p.apply('Z.add_lt_add_right'); p.exact('h1')
+            p.apply('Z.add_le_add_left'); p.exact('h2')
+
+        @thm(w, 'Z.add_lt_add_of_le_of_lt', [Z, Z, Z, Z, lambda x, y, u, v: zle(x, y), lambda x, y, u, v, h: zlt(u, v)], lambda x, y, u, v, h1, h2: zlt(x + u, y + v))
+        def _(p):
+            p.intro('x', 'y', 'u', 'v', 'h1', 'h2'); p.apply('Z.lt_of_le_of_lt', (zadd, 'x', 'u'), (zadd, 'y', 'u'), (zadd, 'y', 'v'))
+            p.apply('Z.add_le_add_right'); p.exact('h1')
+            p.apply('Z.add_lt_add_left'); p.exact('h2')
+
+        # ---- signs and negation
+        @thm(w, 'Z.pos_of_neg', [Z, lambda x: zlt(x, zzero)], lambda x, h: zlt(zzero, zneg(x)))
+        def _(p):
+            p.intro('x', 'h'); p.cases('h', names=['k', 'hk']); p.exists('k')
+            calc_scope(p, ['x', 'k'], lambda x, k: ((zzero + zone) + zof(k), ('ring', zneg(x) + ((x + zone) + zof(k))), (lambda q: q.rw('hk'), zneg(x) + zzero), ('ring', zneg(x))))
+
+        @thm(w, 'Z.neg_of_pos', [Z, lambda x: zlt(zzero, x)], lambda x, h: zlt(zneg(x), zzero))
+        def _(p): p.intro('x', 'h'); p.cases('h', names=['k', 'hk']); p.exists('k'); p.rw('hk', rev=True); p.ring()
+
+        @thm(w, 'Z.neg_lt_neg', [Z, Z, lambda x, y: zlt(x, y)], lambda x, y, h: zlt(zneg(y), zneg(x)))
+        def _(p): p.intro('x', 'y', 'h'); p.cases('h', names=['k', 'hk']); p.exists('k'); p.rw('hk', rev=True); p.ring()
+
+        @thm(w, 'Z.sub_pos_of_lt', [Z, Z, lambda x, y: zlt(x, y)], lambda x, y, h: zlt(zzero, y - x))
+        def _(p): p.intro('x', 'y', 'h'); p.cases('h', names=['k', 'hk']); p.exists('k'); p.rw('hk', rev=True); p.ring()
+
+        @thm(w, 'Z.lt_of_sub_pos', [Z, Z, lambda x, y: zlt(zzero, y - x)], lambda x, y, h: zlt(x, y))
+        def _(p):
+            p.intro('x', 'y', 'h'); p.cases('h', names=['k', 'hk']); p.exists('k')
+            calc_scope(p, ['x', 'y', 'k'], lambda x, y, k: ((x + zone) + zof(k), ('ring', x + ((zzero + zone) + zof(k))), (lambda q: q.rw('hk'), x + (y - x)), ('ring', y)))
+
+        # ---- discreteness and the order from the equality
+        @thm(w, 'Z.le_of_lt_add_one', [Z, Z, lambda x, y: zlt(x, y + zone)], lambda x, y, h: zle(x, y))
+        def _(p):
+            p.intro('x', 'y', 'h'); p.cases('h', names=['k', 'hk']); p.exists('k')
+            p.apply('Z.add_right_cancel', (zadd, 'x', (zof, 'k')), 'y', zone)
+            calc_scope(p, ['x', 'y', 'k'], lambda x, y, k: ((x + zof(k)) + zone, ('ring', (x + zone) + zof(k)), ('hk', y + zone)))
+
+        @thm(w, 'Z.lt_of_le_of_ne', [Z, Z, lambda x, y: zle(x, y), lambda x, y, h: ~Eq(x, y)], lambda x, y, h, hne: zlt(x, y))
+        def _(p):
+            p.intro('x', 'y', 'h', 'hne'); p.obtain(['h2', 'h2'], ('Z.lt_or_eq_of_le', 'x', 'y', 'h'))
+            p.exact('h2')
+            p.apply('false_elim'); p.apply('hne'); p.exact('h2')
+
+        # ---- products
+        @thm(w, 'Z.mul_pos', [Z, Z, lambda x, y: zlt(zzero, x), lambda x, y, h: zlt(zzero, y)], lambda x, y, hx, hy: zlt(zzero, x * y))
+        def _(p):
+            p.intro('x', 'y', 'hx', 'hy'); p.cases('hx', names=['a', 'ha']); p.cases('hy', names=['b', 'hb'])
+            p.exists((nadd, (nadd, 'a', 'b'), (nmul, 'a', 'b')))
+            p.rw('Z.of_N_add'); p.rw('Z.of_N_add'); p.rw('Z.of_N_mul'); p.rw('ha', rev=True); p.rw('hb', rev=True); p.ring()
+
+        @thm(w, 'Z.mul_lt_mul_of_pos_left', [Z, Z, Z, lambda x, y, z: zlt(x, y), lambda x, y, z, h: zlt(zzero, z)], lambda x, y, z, h, hz: zlt(z * x, z * y))
+        def _(p):
+            p.intro('x', 'y', 'z', 'h', 'hz'); p.cases('h', names=['k', 'hk']); p.cases('hz', names=['a', 'ha'])
+            p.exists((nadd, (nadd, 'a', 'k'), (nmul, 'a', 'k')))
+            p.rw('Z.of_N_add'); p.rw('Z.of_N_add'); p.rw('Z.of_N_mul'); p.rw('hk', rev=True); p.rw('ha', rev=True); p.ring()
+
+        @thm(w, 'Z.mul_lt_mul_of_pos_right', [Z, Z, Z, lambda x, y, z: zlt(x, y), lambda x, y, z, h: zlt(zzero, z)], lambda x, y, z, h, hz: zlt(x * z, y * z))
+        def _(p):
+            p.intro('x', 'y', 'z', 'h', 'hz'); p.rw('Z.mul_comm', 'x', 'z'); p.rw('Z.mul_comm', 'y', 'z'); p.apply('Z.mul_lt_mul_of_pos_left'); p.exact('h'); p.exact('hz')
+
+        @thm(w, 'Z.mul_pos_ne_zero', [Z, Z, lambda x, y: zlt(zzero, x), lambda x, y, h: zlt(zzero, y), lambda x, y, h, h2: Eq(x * y, zzero)], lambda x, y, hx, hy, h: F)
+        def _(p):
+            p.intro('x', 'y', 'hx', 'hy', 'h')
+            with p.focus(): x, y = p.h('x'), p.h('y'); st = zlt(zzero, x * y)
+            p.have('hp', st, lambda q: q.exact(lambda r: w['Z.mul_pos'](r.h('x'), r.h('y'), r.h('hx'), r.h('hy'))))
+            p.rw_at('hp', 'h'); p.apply('Z.lt_irrefl', zzero); p.exact('hp')
+
+        @thm(w, 'Z.mul_eq_zero', [Z, Z, lambda x, y: Eq(x * y, zzero)], lambda x, y, h: Eq(x, zzero) | Eq(y, zzero))
+        def _(p):
+            p.intro('x', 'y', 'h')
+
+            def product_zero(p, shape):
+                """close a goal `False` from a product of two positive numbers that is zero: shape is 'nn' (-x and -y), 'np' (-x and y), 'pn' (x and -y) or 'pp' (x and y); the hypotheses hx, hy tell the signs"""
+                a = {'nn': (zneg, 'x'), 'np': (zneg, 'x'), 'pn': 'x', 'pp': 'x'}[shape]; b = {'nn': (zneg, 'y'), 'np': 'y', 'pn': (zneg, 'y'), 'pp': 'y'}[shape]
+                if shape != 'pp':
+                    with p.focus():
+                        x, y = p.h('x'), p.h('y')
+                        A = zneg(x) if shape in ('nn', 'np') else x; B = zneg(y) if shape in ('nn', 'pn') else y
+                        st = Eq(A * B, zzero); mid = (x * y) if shape == 'nn' else zneg(x * y)
+                    steps = lambda r: calc_scope(r, ['x', 'y'], lambda x, y: (A * B, ('ring', mid), (lambda q: q.rw('h'), zzero if shape == 'nn' else zneg(zzero))) + (() if shape == 'nn' else (('ring', zzero),)))
+                    p.have('e', st, steps)
+                p.apply('false_elim'); p.apply('Z.mul_pos_ne_zero', a, b)
+                if shape in ('nn', 'np'): p.apply('Z.pos_of_neg'); p.exact('hx')
+                else: p.exact('hx')
+                if shape in ('nn', 'pn'): p.apply('Z.pos_of_neg'); p.exact('hy')
+                else: p.exact('hy')
+                p.exact('h' if shape == 'pp' else 'e')
+
+            p.obtain(['hx', 'hx'], ('Z.lt_trichotomy', 'x', zzero))
+            # x < 0
+            p.obtain(['hy', 'hy'], ('Z.lt_trichotomy', 'y', zzero))
+            product_zero(p, 'nn')
+            p.cases('hy', names=['hy', 'hy'])
+            p.right(); p.exact('hy')
+            product_zero(p, 'np')
+            # x = 0 or 0 < x
+            p.cases('hx', names=['hx', 'hx'])
+            p.left(); p.exact('hx')
+            p.obtain(['hy', 'hy'], ('Z.lt_trichotomy', 'y', zzero))
+            product_zero(p, 'pn')
+            p.cases('hy', names=['hy', 'hy'])
+            p.right(); p.exact('hy')
+            product_zero(p, 'pp')
+
+        @thm(w, 'Z.mul_left_cancel', [Z, Z, Z, lambda x, y, z: ~Eq(x, zzero), lambda x, y, z, h: Eq(x * y, x * z)], lambda x, y, z, hx, h: Eq(y, z))
+        def _(p):
+            p.intro('x', 'y', 'z', 'hx', 'h')
+            with p.focus(): x, y, z = p.h('x'), p.h('y'), p.h('z'); st = Eq(x * (y - z), zzero)
+            p.have('e', st, lambda q: calc_scope(q, ['x', 'y', 'z'], lambda x, y, z: (x * (y - z), ('ring', x * y - x * z), (lambda r: r.rw('h'), x * z - x * z), ('ring', zzero))))
+            p.obtain(['h1', 'h1'], ('Z.mul_eq_zero', 'x', (zsub, 'y', 'z'), 'e'))
+            p.apply('false_elim'); p.apply('hx'); p.exact('h1')
+            calc_scope(p, ['y', 'z'], lambda y, z: (y, ('ring', (y - z) + z), (lambda q: q.rw('h1'), zzero + z), ('ring', z)))
+
+        @thm(w, 'Z.mul_right_cancel', [Z, Z, Z, lambda x, y, z: ~Eq(z, zzero), lambda x, y, z, h: Eq(x * z, y * z)], lambda x, y, z, hz, h: Eq(x, y))
+        def _(p):
+            p.intro('x', 'y', 'z', 'hz', 'h'); p.apply('Z.mul_left_cancel', 'z'); p.exact('hz')
+            p.rw('Z.mul_comm', 'z', 'x'); p.rw('Z.mul_comm', 'z', 'y'); p.exact('h')
+
+    # ---- the naturals inside the integers: casts compare as the naturals do
+    with w.nota.using(Z):
+        @thm(w, 'Z.of_N_le', [N, N, lambda a, b: nle(a, b)], lambda a, b, h: zle(zof(a), zof(b)))
+        def _(p): p.intro('a', 'b', 'h'); p.cases('h', names=['k', 'hk']); p.exists('k'); p.rw('Z.of_N_add', rev=True); p.rw('hk')
+
+        @thm(w, 'Z.le_of_of_N_le', [N, N, lambda a, b: zle(zof(a), zof(b))], lambda a, b, h: nle(a, b))
+        def _(p):
+            p.intro('a', 'b', 'h'); p.cases('h', names=['k', 'hk']); p.exists('k')
+            p.apply('Z.of_N_inj'); p.rw('Z.of_N_add'); p.exact('hk')
+
+        @thm(w, 'Z.of_N_lt', [N, N, lambda a, b: nlt(a, b)], lambda a, b, h: zlt(zof(a), zof(b)))
+        def _(p):
+            p.intro('a', 'b', 'h'); p.cases('h', names=['k', 'hk']); p.exists('k')
+            p.rw('hk', rev=True)          # the two sides are now the same integer: the kernel sees it by computing
+
+        @thm(w, 'Z.lt_of_of_N_lt', [N, N, lambda a, b: zlt(zof(a), zof(b))], lambda a, b, h: nlt(a, b))
+        def _(p):
+            p.intro('a', 'b', 'h'); p.cases('h', names=['k', 'hk']); p.exists('k')
+            p.apply('Z.of_N_inj'); p.rw('Z.of_N_add'); p.rw('Z.of_N_succ'); p.exact('hk')
+
+        # a negative numeral is not non-negative: the last step of every certificate that two sums of non-negative terms cannot add up to  -k  (k >= 1)
+        @thm(w, 'Z.not_nonneg_neg', [Pos, lambda q: zle(zzero, zneg(zof(Npos(q))))], lambda q, h: F)
+        def _(p):
+            p.intro('q', 'h'); p.cases('h', names=['k', 'hk'])
+            p.rw_at('hk', 'Z.zero_add'); rw_all_at(p, 'hk', ['Z.of_N_def', 'Z.neg_mk'])
+            with p.focus(): q, k = p.h('q'), p.h('k'); st = Eq(nadd(k, Npos(q)), nadd(N0, N0))
+            p.have('e', st, lambda r: r.exact(lambda s: w['Z.mk_inj'](s.h('k'), N0, N0, Npos(s.h('q')), s.h('hk'))))
+            p.obtain(['e1', 'e2'], ('N.add_eq_zero', 'k', (Npos, 'q'), 'e'))
+            p.cases('e2')
+
+
+STAGES = ('bool_lib', 'int_core', 'int_ops', 'int_pow', 'int_nat', 'int_ring', 'int_order', 'int_order2', 'int_order3', 'int_order4')
+
+
+def build_int(w=None, stages=STAGES):
+    """the world of the integers: the binary naturals (bin_lib), the quotient library (quot_lib), then every stage of this module in order -- a world is returned that has Z with its ring laws, `ring`'s lemmas and the order"""
+    import bin_lib
+    if w is None: w = bin_lib.build_bin_defs()
     quot_lib.declare_quotients(w); quot_lib.declare_prod(w); quot_lib.quot_lift2(w)
-    bool_lib(w); int_core(w); int_ops(w); int_pow(w); int_nat(w); int_ring(w); int_order(w); int_order2(w); int_order3(w)
-    print('int world so far: %d globals in %.2f s' % (w.k.num_globals(), time.time() - t0))
+    for name in stages: globals()[name](w)
+    return w
+
+
+if __name__ == '__main__':
+    import time
+    t0 = time.time(); w = build_int()
     print('%d globals in %.2f s' % (w.k.num_globals(), time.time() - t0))

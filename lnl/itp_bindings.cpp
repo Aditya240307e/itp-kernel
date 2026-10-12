@@ -141,8 +141,8 @@ struct KernelWrapper {
     }
     uint32_t loose_range_of(itp::NodeId t) { auto g = activate(); require_node(t, "loose_range_of"); return itp::loose_range(t); }
     // "verify_memo" is a debugging switch, not a language option: every hit of the typing memo is re-derived from scratch and compared, and the extraction fast path is compared with evaluate-and-quote.
-    void set_option(const std::string& name, bool value) { auto g = activate(); if (name == "parameters") itp::ctx().param_mode = value; else if (name == "prop_elim") itp::ctx().set_prop_mode(value); else if (name == "verify_memo") itp::ctx().verify_memo = value; else throw ITPError("unknown option: " + name); }
-    bool get_option(const std::string& name) { auto g = activate(); if (name == "parameters") return itp::ctx().param_mode; if (name == "prop_elim") return itp::ctx().prop_mode; if (name == "verify_memo") return itp::ctx().verify_memo; throw ITPError("unknown option: " + name); }
+    void set_option(const std::string& name, bool value) { auto g = activate(); if (name == "parameters") itp::ctx().param_mode = value; else if (name == "prop_elim") itp::ctx().set_prop_mode(value); else if (name == "verify_memo") itp::ctx().verify_memo = value; else if (name == "syn_conv") itp::ctx().syn_conv = value; else throw ITPError("unknown option: " + name); }
+    bool get_option(const std::string& name) { auto g = activate(); if (name == "parameters") return itp::ctx().param_mode; if (name == "prop_elim") return itp::ctx().prop_mode; if (name == "verify_memo") return itp::ctx().verify_memo; if (name == "syn_conv") return itp::ctx().syn_conv; throw ITPError("unknown option: " + name); }
     /// Audit of the per-node facts (loose range, context-variable range, size, metavariable flag) below a term: "" when the stored values agree with a from-scratch recomputation.
     std::string check_node_info(itp::NodeId t) { auto g = activate(); require_node(t, "check_node_info"); return itp::check_node_info(t); }
     /// (loose, fvars, size, mentions a metavariable) of a node, as stored
@@ -153,6 +153,31 @@ struct KernelWrapper {
     std::tuple<uint64_t, uint64_t, uint64_t> memo_stats() { auto g = activate(); return {itp::ctx().memo_hits, itp::ctx().memo_misses, static_cast<uint64_t>(itp::ctx().infer_cache.size())}; }
     /// (linear-time extractions, extractions that had to evaluate and quote) of proof terms since the context was made
     std::pair<uint64_t, uint64_t> extract_stats() { auto g = activate(); return {itp::ctx().extract_fast, itp::ctx().extract_slow}; }
+    /// (pairs the quick conversion check looked at, pairs it settled) since the context was made
+    std::pair<uint64_t, uint64_t> syn_stats() { auto g = activate(); return {itp::ctx().syn_tries, itp::ctx().syn_yes}; }
+    /// how many sub-comparisons of two values were answered from the table of pairs already found convertible, since the context was made
+    uint64_t conv_memo_hits() { auto g = activate(); return itp::ctx().conv_memo_hits; }
+    /// entries of the table of sub-pairs found convertible (it lives for one comparison, so this is 0 between calls)
+    /// the same for the unifier's walk over values
+    uint64_t unify_memo_hits() { auto g = activate(); return itp::ctx().unify_memo_hits; }
+    uint64_t quote_memo_hits() { auto g = activate(); return itp::ctx().quote_memo_hits; }
+    uint64_t quote_memo_size() { auto g = activate(); return itp::quote_memo().table.size(); }
+    std::pair<uint64_t, uint64_t> memo_verify_stats() { auto g = activate(); return {itp::ctx().memo_verified, itp::ctx().memo_verify_skipped}; }
+    /// The bucket counts of the tables that live for one comparison (conversion: values, constructors; unifier: values, constructors; quotation) and of the typing memo, then the most buckets any table had when it was released.
+    /// A table that is only cleared keeps its buckets, and clearing writes every one of them: between calls none may hold more than a few (test S33 part I).
+    std::tuple<uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, uint64_t> memo_table_buckets() {
+        auto g = activate(); auto& c = itp::conv_memo(); auto& u = itp::unify_memo();
+        return {c.neutrals.bucket_count(), c.ctors.bucket_count(), u.neutrals.bucket_count(), u.ctors.bucket_count(), itp::quote_memo().table.bucket_count(), itp::ctx().infer_cache.bucket_count(), itp::largest_released_table()};
+    }
+    uint64_t unify_memo_size() { auto g = activate(); auto& m = itp::unify_memo(); return m.neutrals.size() + m.ctors.size(); }
+    uint64_t conv_memo_size() { auto g = activate(); auto& m = itp::conv_memo(); return m.neutrals.size() + m.ctors.size(); }
+    /// The limits of one quick conversion check: (steps in all, nesting depth, unfolding rounds). A test hook: the defaults (4000, 256, 32) are what the kernel ships with.
+    void set_syn_limits(int budget, int depth, int rounds) {
+        auto g = activate();
+        if (budget < 1 || budget > 10000000 || depth < 1 || depth > 100000 || rounds < 1 || rounds > 10000) throw ITPError("set_syn_limits: the limits must be within 1..10000000 steps, 1..100000 levels, 1..10000 rounds");
+        itp::ctx().syn_budget = budget; itp::ctx().syn_depth = depth; itp::ctx().syn_rounds = rounds;
+    }
+    std::tuple<int, int, int> get_syn_limits() { auto g = activate(); return {itp::ctx().syn_budget, itp::ctx().syn_depth, itp::ctx().syn_rounds}; }
     std::vector<int> param_slots(uint32_t family_gid) { auto g = activate(); require_global(family_gid, "param_slots"); std::vector<int> out; for (bool b : itp::family_param_slots(family_gid)) out.push_back(b ? 1 : 0); return out; }
     itp::DiscriminationTree index_library() { auto g = activate(); return itp::index_library(); }
     std::vector<itp::NodeId> apply_candidates(ProofStateHandle& psh, const itp::DiscriminationTree& lib, std::optional<uint32_t> target_meta_id) {
@@ -438,6 +463,17 @@ NB_MODULE(itp_env_lnl, m) {
         .def("get_option", &KernelWrapper::get_option, "name"_a)
         .def("memo_stats", &KernelWrapper::memo_stats)
         .def("extract_stats", &KernelWrapper::extract_stats)
+        .def("syn_stats", &KernelWrapper::syn_stats)
+        .def("conv_memo_hits", &KernelWrapper::conv_memo_hits)
+        .def("conv_memo_size", &KernelWrapper::conv_memo_size)
+        .def("unify_memo_hits", &KernelWrapper::unify_memo_hits)
+        .def("quote_memo_hits", &KernelWrapper::quote_memo_hits)
+        .def("quote_memo_size", &KernelWrapper::quote_memo_size)
+        .def("memo_verify_stats", &KernelWrapper::memo_verify_stats)
+        .def("memo_table_buckets", &KernelWrapper::memo_table_buckets)
+        .def("unify_memo_size", &KernelWrapper::unify_memo_size)
+        .def("set_syn_limits", &KernelWrapper::set_syn_limits, "budget"_a, "depth"_a, "rounds"_a)
+        .def("get_syn_limits", &KernelWrapper::get_syn_limits)
         .def("replace_fvars", &KernelWrapper::replace_fvars, "term"_a, "replacements"_a)
         .def("resolve_metas", &KernelWrapper::resolve_metas, "term"_a)
         .def("check_node_info", &KernelWrapper::check_node_info, "term"_a)

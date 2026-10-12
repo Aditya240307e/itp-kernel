@@ -63,6 +63,7 @@ struct ThreadGuardState {
     int64_t fuel = INT64_MAX;       // steps left in the current call; negative once the budget is spent
     int64_t fuel_start = INT64_MAX; // the budget this call started with (so that used = start - fuel)
     int64_t fuel_peak = 0;          // the most steps any call has used since the last reset_fuel_peak() (statistics: how big is a legitimate call?)
+    int64_t verify_spent = 0;       // steps the re-derivations of the option verify_memo have used in the current call (they are charged to nobody, but bounded: see kMemoVerifyTotal)
 };
 inline ThreadGuardState& thread_guard_state() { static thread_local ThreadGuardState s; return s; }
 inline char*& stack_floor_slot() { return thread_guard_state().stack_floor; }
@@ -90,6 +91,7 @@ inline void reset_fuel(int64_t limit) {
     ThreadGuardState& g = thread_guard_state();
     if (g.fuel_start - g.fuel > g.fuel_peak) g.fuel_peak = g.fuel_start - g.fuel;
     g.fuel_start = g.fuel = limit > 0 ? limit : INT64_MAX;
+    g.verify_spent = 0;
 }
 /// Steps spent so far in the current (or last) call.
 inline int64_t fuel_used() { const ThreadGuardState& g = thread_guard_state(); return g.fuel_start - g.fuel; }
@@ -1016,6 +1018,9 @@ struct MetaEntry {
 struct MetaContext {
     std::vector<MetaEntry> entries;
     std::vector<uint32_t> solve_trail; // ids solved since the last checkpoint
+    /// Counts the events that TAKE BACK something a result may have been computed from: a solution undone or an entry discarded (rewind). A solution recorded later only adds to what is known: a pair
+    /// found equal without committing to anything stays equal. A result is valid until the next such event (see UnifyMemo).
+    uint64_t undo_epoch = 0;
 
     uint32_t fresh(NodeId type, uint32_t scope_depth) {
         entries.push_back(MetaEntry{type, std::nullopt, scope_depth});
@@ -1042,6 +1047,7 @@ struct MetaContext {
 
     Mark checkpoint() const { return Mark{solve_trail.size(), entries.size()}; }
     void rewind(Mark mark) {
+        if (solve_trail.size() > mark.solve_trail_size || entries.size() > mark.entries_size) ++undo_epoch;
         while (solve_trail.size() > mark.solve_trail_size) {
             uint32_t id = solve_trail.back();
             if (id < mark.entries_size) entries.at(id).solution = std::nullopt;
@@ -1084,6 +1090,17 @@ struct InfoAcc {
     }
     NodeInfo done() const { return NodeInfo{loose, fvars, static_cast<uint32_t>(std::min<uint64_t>(size, NodeInfo::kSizeMax)) | (meta ? NodeInfo::kMetaBit : 0u)}; }
 };
+
+/// Empties a hash table at the end of a comparison. `clear()` writes EVERY bucket, full or empty, and never gives the buckets back: after one big comparison (a table of a few hundred thousand entries, which the option
+/// verify_memo makes common) every later outermost comparison, however small, paid for the size of the biggest table ever built -- the `ring` gates ran twenty times slower with the self-check on. An empty table is left
+/// alone, a big one is swapped for a fresh (bucketless) one, a small one is cleared.
+inline std::size_t& largest_released_table() { static thread_local std::size_t n = 0; return n; }       // statistics (a test hook): the most buckets a table had when it was released
+template <class Map> inline void release_table(Map& m) {
+    if (m.empty()) return;
+    if (m.bucket_count() > largest_released_table()) largest_released_table() = m.bucket_count();
+    if (m.bucket_count() > 256) { Map fresh; m.swap(fresh); }
+    else m.clear();
+}
 
 struct ExecutionContext {
     NodePool<Var>      vars;
@@ -1139,9 +1156,16 @@ struct ExecutionContext {
     int64_t fuel_limit = 0;                          // the work budget of one call into the kernel (see FuelExhausted); <= 0: unlimited. The Python module applies it at the start of every call.
     uint64_t memo_hits = 0, memo_misses = 0;         // statistics
     uint64_t extract_fast = 0, extract_slow = 0;     // proof extractions that took the linear-time path / had to evaluate and quote (see extract_proof_term)
+    uint64_t syn_tries = 0, syn_yes = 0;             // statistics of the quick conversion check (SynConv): pairs it looked at / pairs it settled
+    uint64_t unify_memo_hits = 0;                    // statistics: the same for the unifier's walk (see UnifyMemo)
+    uint64_t memo_verified = 0, memo_verify_skipped = 0;   // option verify_memo: answers from a table or from the quick check that were decided again and agreed / that could not be (the re-derivation spent its steps)
+    uint64_t conv_memo_hits = 0;                     // statistics: sub-comparisons of two values answered from the table of pairs already found convertible (see ConvMemo)
+    uint64_t quote_memo_hits = 0;                    // statistics: sub-values written back as syntax from the table (see QuoteMemo)
+    int syn_budget = 4000, syn_depth = 256, syn_rounds = 32;   // limits of one quick check: steps in all, nesting of comparisons, unfoldings of one pair in a row (set_syn_limits changes them for tests)
     uint64_t term_cache_epoch() const { return globals.body_epoch * 4 + (param_mode ? 2 : 0) + (prop_mode ? 1 : 0); }
-    void clear_term_caches() { infer_cache.clear(); infer_cache_epoch = ~uint64_t(0); }
+    void clear_term_caches() { release_table(infer_cache); infer_cache_epoch = ~uint64_t(0); }
     bool param_mode = false; // option "parameters": distinguish a family's PARAMETERS from its indices (family_param_slots); off = the reference's behaviour
+    bool syn_conv = true;    // option "syn_conv": unify tries a quick check on syntax (SynConv) before evaluating; it only ever answers yes, so it changes how fast, never what is accepted
     bool prop_mode = false;  // option "prop_elim": level 0 is Prop. An inductive family that lives in Type0 and is not a SYNTACTIC SUBSINGLETON (it may be eliminated into any sort only if it has no constructor, or one whose every
                              // field is a proof or occurs in the result indices) can only be eliminated into Type0. Large fields are then allowed in such families. Required before classical axioms (Berardi, Reynolds).
     std::unordered_set<uint32_t> prop_elim_only;   // the families (global ids) subject to that restriction; filled by finish_inductive in prop_mode
@@ -1789,6 +1813,8 @@ public:
     bool empty() const { return !b_; }
     const T& operator[](std::size_t i) const { return items(b_)[i]; }
     const T& back() const { return items(b_)[b_->n - 1]; }
+    /// the identity of the shared block (equal for copies of one sequence, null for the empty one): an immutable block is never written, so two sequences with one identity have one content
+    const void* identity() const noexcept { return b_; }
     const T* begin() const { return b_ ? items(b_) : nullptr; }
     const T* end() const { return b_ ? items(b_) + b_->n : nullptr; }
     SharedSeq appended(T x) const {
@@ -2103,6 +2129,11 @@ struct FoldSolutionsScope {
     FoldSolutionsScope& operator=(const FoldSolutionsScope&) = delete;
 };
 
+/// The state of the thread-local evaluation switches (NoDeltaScope, GuardedUnfoldScope, FoldSolutionsScope) as a number: they decide how `eval` unfolds and so what `quote(eval(..))` returns inside infer.
+inline uint32_t eval_mode_word() {
+    return (no_delta_flag() ? 1u : 0u) | (guarded_unfold_flag() ? 2u : 0u) | (guarded_compute_flag() ? 4u : 0u) | (fold_solutions_flag() ? 8u : 0u);
+}
+
 inline Value eval(NodeId term, const Env& env) {
     ITP_STACK_CHECK();
     switch (term.tag) {
@@ -2412,6 +2443,159 @@ inline NodeId resolve_metas_impl(NodeId term, DagMemo& memo) {
 }
 inline NodeId resolve_metas(NodeId term) { DagMemo memo; return resolve_metas_impl(term, memo); }
 
+/// Conversion over SHARED structure. The values a comparison walks are DAGs: the stuck `match` that `add n m` leaves behind keeps the scrutinee `n` (itself the stuck value one level down) in its captured
+/// environment, so the value `f^k x` of k nested definitions holds the value `f^(k-1) x` twice -- once as the prefix of its spine and once inside the last frame. Comparing two such values frame by frame
+/// compares the level below twice at every level: 2^k steps for k nested definitions (measured: 4000 steps at k = 12, 134 million at k = 25), where each distinct pair of sub-values needs deciding once.
+///
+/// While a comparison runs, the pairs of sub-values it has found convertible are remembered, keyed by the identity of the shared blocks they consist of (a SharedSeq is immutable once shared, so one
+/// identity is one content), the head, the depth the comparison runs at (it names the fresh variables) and the evaluation switches. The table holds a reference to each block, so an address cannot be
+/// reused for another sequence while the table lives. It lives for ONE comparison: the outermost `conv_value` creates it and its end empties it. Only successes are remembered (a failure ends the whole
+/// comparison on the way up), and only for comparisons that took real work (a hit saves less than a lookup costs on a tiny one). The answer is a function of the two values alone -- conv_value never
+/// solves a metavariable -- so a remembered yes stays a yes for the rest of the comparison.
+struct ConvMemo {
+    struct Key {
+        const void* a; const void* b; uint32_t x, y, depth, mode;
+        bool operator==(const Key&) const = default;
+    };
+    struct KeyHash {
+        std::size_t operator()(const Key& k) const noexcept {
+            uint64_t h = reinterpret_cast<uintptr_t>(k.a) * 0x9E3779B97F4A7C15ull; h ^= (reinterpret_cast<uintptr_t>(k.b) + 0x7F4A7C15ull) * 0xC2B2AE3D27D4EB4Full; h ^= h >> 31;
+            h ^= ((uint64_t(k.x) << 32 | k.y) + 0x165667B1ull) * 0x94D049BB133111EBull; h ^= (uint64_t(k.depth) << 8 | k.mode) * 0xD6E8FEB86659FD93ull;
+            return static_cast<std::size_t>(h ^ (h >> 29));
+        }
+    };
+    struct HeldSpines { SharedSeq<EliminatorFrame> a, b; int64_t work = 0; };        // the two blocks (a reference keeps their addresses from being reused) and the steps the comparison took
+    struct HeldArgs { SharedSeq<Value> a, b; int64_t work = 0; };
+    std::unordered_map<Key, HeldSpines, KeyHash> neutrals;
+    std::unordered_map<Key, HeldArgs, KeyHash> ctors;
+    uint32_t nesting = 0;
+    uint32_t bypass = 0;        // > 0: the table is neither read nor written (a re-derivation under verify_memo, see memo_redo)
+};
+inline ConvMemo& conv_memo() { static thread_local ConvMemo m; return m; }
+struct ConvSession {
+    ConvSession() { ++conv_memo().nesting; }
+    ~ConvSession() { ConvMemo& m = conv_memo(); if (--m.nesting == 0) { release_table(m.neutrals); release_table(m.ctors); } }
+    ConvSession(const ConvSession&) = delete;
+    ConvSession& operator=(const ConvSession&) = delete;
+};
+/// steps (see ITP_STACK_CHECK) a comparison of two sub-values must have taken to be worth remembering (with verify_memo on everything is remembered, so that every repeated pair gets verified)
+inline constexpr int64_t kConvMemoMinWork = 24;
+inline int64_t memo_min_work() { return ctx().verify_memo ? 0 : kConvMemoMinWork; }
+
+/// The same for the unifier's walk over two values (`unify_structural`), which may solve metavariables and defer constraints. A yes found WITHOUT deferring a constraint stays a yes for as long as no solution is
+/// taken back: solutions only ever add to what is known (the pair was equal with the metavariables left alone, or with the solutions in force when it was found, and those stay in force), and a deferred
+/// constraint is a promise the comparison made to the caller, which a replay would not repeat -- so an entry is made only for a comparison that deferred nothing. When a rewind takes a solution back or
+/// discards a metavariable (MetaContext::undo_epoch) the whole table is dropped: an entry may rest on that solution, and the id of a discarded metavariable is handed out again. The key also names the
+/// elaboration context (its uid: the types of the context variables decide the proof-irrelevance fallback). Like ConvMemo's it lives for one outermost comparison and holds a reference to every block it names.
+struct UnifyMemo {
+    struct Key {
+        const void* a; const void* b; uint32_t x, y, depth, mode; uint64_t uid;
+        bool operator==(const Key&) const = default;
+    };
+    struct KeyHash {
+        std::size_t operator()(const Key& k) const noexcept {
+            uint64_t h = reinterpret_cast<uintptr_t>(k.a) * 0x9E3779B97F4A7C15ull; h ^= (reinterpret_cast<uintptr_t>(k.b) + 0x7F4A7C15ull) * 0xC2B2AE3D27D4EB4Full; h ^= h >> 31;
+            h ^= ((uint64_t(k.x) << 32 | k.y) + 0x165667B1ull) * 0x94D049BB133111EBull; h ^= (uint64_t(k.depth) << 8 | k.mode) * 0xD6E8FEB86659FD93ull; h ^= (k.uid + 0x2545F4914F6CDD1Dull) * 0x9E3779B97F4A7C15ull;
+            return static_cast<std::size_t>(h ^ (h >> 29));
+        }
+    };
+    std::unordered_map<Key, ConvMemo::HeldSpines, KeyHash> neutrals;
+    std::unordered_map<Key, ConvMemo::HeldArgs, KeyHash> ctors;
+    uint64_t epoch = 0;         // the MetaContext::undo_epoch the entries were made in
+    uint32_t nesting = 0;
+    uint32_t bypass = 0;        // > 0: the table is neither read nor written (a re-derivation under verify_memo, see memo_redo)
+    /// when a solution has been taken back since the entries were made, everything remembered is dropped
+    void sync(uint64_t undo_epoch) { if (epoch != undo_epoch) { release_table(neutrals); release_table(ctors); epoch = undo_epoch; } }
+};
+inline UnifyMemo& unify_memo() { static thread_local UnifyMemo m; return m; }
+struct UnifySession {
+    UnifySession() { ++unify_memo().nesting; }
+    ~UnifySession() { UnifyMemo& m = unify_memo(); if (--m.nesting == 0) { release_table(m.neutrals); release_table(m.ctors); } }
+    UnifySession(const UnifySession&) = delete;
+    UnifySession& operator=(const UnifySession&) = delete;
+};
+
+/// Quoting over SHARED structure. Writing a value back as syntax visits every path to a sub-value: the stuck value of k nested definitions is reached through every frame above it, and a function applied to one
+/// value twice (`hh n n`) reaches it twice, so a value that is a small DAG is a tree of 2^k nodes to walk (the syntax it produces is a small DAG too: terms are hash-consed). While one quotation runs, the syntax
+/// found for a stuck value or a constructor value that took real work is remembered, keyed by the identity of the shared block it consists of, the head, the context size, the number of binders opened and the
+/// evaluation switches; the result is a function of exactly these (and of the metavariable solutions, which do not change during a quotation). It lives for ONE outermost quotation, like the other tables.
+/// The failing branch of the unifier and of conversion falls back to quoting both sides, so a refused comparison of such values cost 2^k before.
+struct QuoteMemo {
+    struct Key {
+        const void* block; uint32_t kind, x, y, n0, depth, mode;
+        bool operator==(const Key&) const = default;
+    };
+    struct KeyHash {
+        std::size_t operator()(const Key& k) const noexcept {
+            uint64_t h = reinterpret_cast<uintptr_t>(k.block) * 0x9E3779B97F4A7C15ull; h ^= h >> 31;
+            h ^= ((uint64_t(k.kind) << 32 | k.x) + 0x165667B1ull) * 0x94D049BB133111EBull; h ^= ((uint64_t(k.y) << 32 | k.n0) + 0x7F4A7C15ull) * 0xC2B2AE3D27D4EB4Full;
+            h ^= (uint64_t(k.depth) << 32 | k.mode) * 0xD6E8FEB86659FD93ull;
+            return static_cast<std::size_t>(h ^ (h >> 29));
+        }
+    };
+    struct Held { SharedSeq<EliminatorFrame> spine; SharedSeq<Value> args; NodeId result; int64_t work = 0; };    // the block (a reference keeps its address from being reused), the syntax found, the steps it took
+    std::unordered_map<Key, Held, KeyHash> table;
+    uint32_t nesting = 0;
+    uint32_t bypass = 0;        // > 0: the table is neither read nor written (a re-derivation under verify_memo, see memo_redo)
+};
+inline QuoteMemo& quote_memo() { static thread_local QuoteMemo m; return m; }
+struct QuoteSession {
+    QuoteSession() { ++quote_memo().nesting; }
+    ~QuoteSession() { QuoteMemo& m = quote_memo(); if (--m.nesting == 0) release_table(m.table); }
+    QuoteSession(const QuoteSession&) = delete;
+    QuoteSession& operator=(const QuoteSession&) = delete;
+};
+
+/// The option `verify_memo` (debugging; the second pass of the gates runs with it): every comparison answered from a table -- ConvMemo, UnifyMemo, QuoteMemo -- or settled by the quick check (SynConv) is decided AGAIN the
+/// slow way: all tables bypassed (the typing memo too), the quick check off, and at most kMemoVerifyFuel steps, which are charged to nobody (the statistics are put back too). An answer that differs means a key or
+/// a guard is wrong, and throws. A re-derivation that spends its steps proves nothing and is counted as skipped. It can only make the kernel throw more, never accept more.
+inline constexpr int64_t kMemoVerifyFuel = 20000;          // the most one re-derivation may spend
+inline constexpr int64_t kMemoVerifyTotal = 2000000;        // the most the re-derivations of one call into the kernel may spend in all, whatever the call itself did
+inline constexpr int64_t kMemoVerifyBase = 20000;           // ... and in all it may spend this much plus twice the steps the call itself has spent so far (so that the self-check costs about three times the work, not a multiple of it)
+inline constexpr int64_t kMemoVerifyMaxWork = 1000;         // an entry that took more than this was found by a long comparison: its re-derivation (no sharing) is hopeless, so it is not attempted
+struct MemoRedoScope {
+    ExecutionContext& x; ThreadGuardState& g;
+    int64_t fuel_saved, granted; bool syn_saved; uint64_t tries, yes, conv_hits, unify_hits, quote_hits, memo_hits, memo_misses;
+    MemoRedoScope() : x(ctx()), g(thread_guard_state()), fuel_saved(g.fuel), granted(0), syn_saved(x.syn_conv), tries(x.syn_tries), yes(x.syn_yes), conv_hits(x.conv_memo_hits), unify_hits(x.unify_memo_hits), quote_hits(x.quote_memo_hits), memo_hits(x.memo_hits), memo_misses(x.memo_misses) {
+        const int64_t allowed = std::min<int64_t>(kMemoVerifyTotal, kMemoVerifyBase + 2 * (g.fuel_start - g.fuel));
+        granted = std::max<int64_t>(0, std::min<int64_t>({fuel_saved, kMemoVerifyFuel, allowed - g.verify_spent}));
+        g.fuel = granted; x.syn_conv = false;
+        ++conv_memo().bypass; ++unify_memo().bypass; ++quote_memo().bypass; ++x.memo_off;
+    }
+    ~MemoRedoScope() {
+        --conv_memo().bypass; --unify_memo().bypass; --quote_memo().bypass; --x.memo_off;
+        g.verify_spent += std::min<int64_t>(granted, granted - g.fuel); g.fuel = fuel_saved; x.syn_conv = syn_saved;
+        x.syn_tries = tries; x.syn_yes = yes; x.conv_memo_hits = conv_hits; x.unify_memo_hits = unify_hits; x.quote_memo_hits = quote_hits; x.memo_hits = memo_hits; x.memo_misses = memo_misses;
+    }
+    MemoRedoScope(const MemoRedoScope&) = delete;
+    MemoRedoScope& operator=(const MemoRedoScope&) = delete;
+};
+/// Whether a table hit on an entry that took `entry_work` steps is to be re-derived (verify_memo on, and the comparison small enough to be worth trying).
+inline bool memo_should_verify(int64_t entry_work) {
+    if (!ctx().verify_memo) return false;
+    if (entry_work > kMemoVerifyMaxWork) { ++ctx().memo_verify_skipped; return false; }
+    return true;
+}
+/// Runs `redo` under a MemoRedoScope; the result, or nothing when the re-derivation spent its steps.
+template <class F> inline auto memo_redo(F&& redo) -> std::optional<decltype(redo())> {
+    std::optional<decltype(redo())> out;
+    {
+        MemoRedoScope scope;
+        if (scope.granted > 0) { try { out = redo(); } catch (const FuelExhausted&) {} catch (const StackExhausted&) {} }
+    }
+    ++(out ? ctx().memo_verified : ctx().memo_verify_skipped);
+    return out;
+}
+/// A pair the unifier took from its table must come out equal again WITHOUT committing to anything: no solution recorded, no constraint deferred, nothing taken back. (A re-derivation that was cut short
+/// is held to the second part too: a correct answer leaves no trace, so whatever it left is an error.)
+template <class F, class State> inline void verify_unify_hit(F&& compare, State& es) {          // (State is ElabState, defined further down)
+    MetaContext& mc = ctx().meta_ctx;
+    const std::size_t pending0 = es.pending.size(), trail0 = mc.solve_trail.size(); const uint64_t undo0 = mc.undo_epoch;
+    auto again = memo_redo([&] { return static_cast<bool>(compare()); });
+    if ((again && !*again) || es.pending.size() != pending0 || mc.solve_trail.size() != trail0 || mc.undo_epoch != undo0)
+        throw std::logic_error("itp: a pair remembered as equal by the unifier is not equal when decided again, or deciding it again changed the metavariables (a bug in the unifier's table)");
+}
+
 inline NodeId quote_at(const Value& v, uint32_t n0, uint32_t depth);
 
 /// Re-embeds syntax captured with `env` (a stuck match's branches, a Fix, ...) at output depth `depth`: every variable that
@@ -2447,6 +2631,7 @@ inline NodeId requote(NodeId term, const Env& env, uint32_t n0, uint32_t depth, 
 /// quotation -> bound Var by index).
 inline NodeId quote_at(const Value& v, uint32_t n0, uint32_t depth) {
     ITP_STACK_CHECK();
+    QuoteSession session;                 // the outermost call owns the table of sub-values already written back (see QuoteMemo)
     return inspect_value(v,
         [&](const VType& t) -> NodeId { return mk_type(t.universe_level); },
         [&](const Closure& clo) -> NodeId {
@@ -2462,36 +2647,68 @@ inline NodeId quote_at(const Value& v, uint32_t n0, uint32_t depth) {
         [&](const VCtor& vc) -> NodeId {
             const auto& family_ctors = ctx().globals.ctors_of(vc.ind_type_global_id);
             if (vc.ctor_idx >= family_ctors.size()) throw std::logic_error("itp: quote() found a VCtor with no matching declared constructor");
-            NodeId acc = mk_const(family_ctors[vc.ctor_idx]);
-            for (const Value& arg : vc.args) acc = mk_app(acc, quote_at(arg, n0, depth));
-            return acc;
+            auto compute = [&]() -> NodeId {
+                NodeId acc = mk_const(family_ctors[vc.ctor_idx]);
+                for (const Value& arg : vc.args) acc = mk_app(acc, quote_at(arg, n0, depth));
+                return acc;
+            };
+            if (vc.args.size() < 2) return compute();                  // one field: a path, which cannot meet itself (no sharing to exploit)
+            const QuoteMemo::Key key{vc.args.identity(), 1, vc.ind_type_global_id, vc.ctor_idx, n0, depth, eval_mode_word()};
+            QuoteMemo& memo = quote_memo();
+            if (!memo.bypass) {
+                if (auto it = memo.table.find(key); it != memo.table.end()) {
+                    const NodeId found = it->second.result;
+                    if (memo_should_verify(it->second.work)) { if (auto again = memo_redo(compute); again && !(*again == found)) throw std::logic_error("itp: the syntax remembered for a constructor value differs from a fresh quotation (a bug in the quotation table)"); }
+                    ++ctx().quote_memo_hits; return found;
+                }
+            }
+            const int64_t work0 = thread_guard_state().fuel;
+            const NodeId result = compute();
+            if (!memo.bypass && work0 - thread_guard_state().fuel >= memo_min_work()) memo.table.try_emplace(key, QuoteMemo::Held{{}, vc.args, result, work0 - thread_guard_state().fuel});
+            return result;
         },
         [&](const VFix& vf) -> NodeId { return requote(vf.fix_id, vf.env, n0, depth); },
         [&](const VNeutral& n) -> NodeId {
-            NodeId acc;
-            switch (n.head.kind) {
-                case NeutralHead::Kind::LocalVar: {
-                    const uint32_t label = n.head.id;
-                    if (label < n0) acc = mk_fvar(label);
-                    else if (label < depth) acc = mk_bvar(depth - 1 - label);
-                    else throw std::logic_error("itp: quote() found a neutral variable deeper than the quotation depth");
-                    break;
+            auto compute = [&]() -> NodeId {
+                NodeId acc;
+                switch (n.head.kind) {
+                    case NeutralHead::Kind::LocalVar: {
+                        const uint32_t label = n.head.id;
+                        if (label < n0) acc = mk_fvar(label);
+                        else if (label < depth) acc = mk_bvar(depth - 1 - label);
+                        else throw std::logic_error("itp: quote() found a neutral variable deeper than the quotation depth");
+                        break;
+                    }
+                    case NeutralHead::Kind::GlobalConst: acc = mk_const(n.head.id); break;
+                    case NeutralHead::Kind::Meta:        acc = mk_meta(n.head.id); break;
                 }
-                case NeutralHead::Kind::GlobalConst: acc = mk_const(n.head.id); break;
-                case NeutralHead::Kind::Meta:        acc = mk_meta(n.head.id); break;
-            }
-            for (const EliminatorFrame& frame : n.spine) {
-                if (auto* af = std::get_if<ApplyFrame>(&frame)) {
-                    acc = mk_app(acc, quote_at(af->arg, n0, depth));
-                } else {
-                    const auto* mf = &std::get<MatchFrame>(frame);
-                    std::vector<NodeId> branches_q; branches_q.reserve(mf->branches.size());
-                    for (NodeId b : mf->branches) branches_q.push_back(requote(b, mf->captured_env, n0, depth));
-                    NodeId motive_q = quote_at(eval(mf->motive_id, mf->captured_env), n0, depth);
-                    acc = mk_match(acc, motive_q, std::move(branches_q));
+                for (const EliminatorFrame& frame : n.spine) {
+                    if (auto* af = std::get_if<ApplyFrame>(&frame)) {
+                        acc = mk_app(acc, quote_at(af->arg, n0, depth));
+                    } else {
+                        const auto* mf = &std::get<MatchFrame>(frame);
+                        std::vector<NodeId> branches_q; branches_q.reserve(mf->branches.size());
+                        for (NodeId b : mf->branches) branches_q.push_back(requote(b, mf->captured_env, n0, depth));
+                        NodeId motive_q = quote_at(eval(mf->motive_id, mf->captured_env), n0, depth);
+                        acc = mk_match(acc, motive_q, std::move(branches_q));
+                    }
+                }
+                return acc;
+            };
+            if (n.spine.empty()) return compute();
+            const QuoteMemo::Key key{n.spine.identity(), 0, uint32_t(n.head.kind), n.head.id, n0, depth, eval_mode_word()};
+            QuoteMemo& memo = quote_memo();
+            if (!memo.bypass) {
+                if (auto it = memo.table.find(key); it != memo.table.end()) {
+                    const NodeId found = it->second.result;
+                    if (memo_should_verify(it->second.work)) { if (auto again = memo_redo(compute); again && !(*again == found)) throw std::logic_error("itp: the syntax remembered for a stuck value differs from a fresh quotation (a bug in the quotation table)"); }
+                    ++ctx().quote_memo_hits; return found;
                 }
             }
-            return acc;
+            const int64_t work0 = thread_guard_state().fuel;
+            const NodeId result = compute();
+            if (!memo.bypass && work0 - thread_guard_state().fuel >= memo_min_work()) memo.table.try_emplace(key, QuoteMemo::Held{n.spine, {}, result, work0 - thread_guard_state().fuel});
+            return result;
         });
 }
 /// Quote a value living in a context of size `depth`.
@@ -2646,6 +2863,7 @@ inline bool branches_convertible(NodeId ba, const Env& env_a, NodeId bb, const E
 /// apply() will throw rather than silently returning an incorrect result.
 inline bool conv_value(const Value& a, const Value& b, uint32_t depth) {
     ITP_STACK_CHECK();
+    ConvSession session;                  // the outermost call owns the table of sub-pairs found convertible (see ConvMemo)
     return inspect_value(a, b,
         [&](const VType& ta, const VType& tb) -> bool {
             return ta.universe_level == tb.universe_level;
@@ -2662,9 +2880,28 @@ inline bool conv_value(const Value& a, const Value& b, uint32_t depth) {
         [&](const VCtor& ca, const VCtor& cb) -> bool {
             if (ca.ind_type_global_id != cb.ind_type_global_id || ca.ctor_idx != cb.ctor_idx) return false;
             if (ca.args.size() != cb.args.size()) return false;
-            for (std::size_t i = 0; i < ca.args.size(); ++i) {
-                if (!conv_value(ca.args[i], cb.args[i], depth)) return false;
+            if (ca.args.size() < 2) {                                  // one field: a path, which cannot meet itself (no sharing to exploit)
+                for (std::size_t i = 0; i < ca.args.size(); ++i) {
+                    if (!conv_value(ca.args[i], cb.args[i], depth)) return false;
+                }
+                return true;
             }
+            const ConvMemo::Key key{ca.args.identity(), cb.args.identity(), ca.ind_type_global_id, ca.ctor_idx, depth, eval_mode_word()};
+            auto args_convertible = [&]() -> bool {
+                for (std::size_t i = 0; i < ca.args.size(); ++i) {
+                    if (!conv_value(ca.args[i], cb.args[i], depth)) return false;
+                }
+                return true;
+            };
+            if (!conv_memo().bypass) {
+                if (auto it = conv_memo().ctors.find(key); it != conv_memo().ctors.end()) {
+                    if (memo_should_verify(it->second.work)) { if (auto again = memo_redo(args_convertible); again && !*again) throw std::logic_error("itp: a pair of constructor values remembered as convertible is not convertible when decided again (a bug in the conversion table)"); }
+                    ++ctx().conv_memo_hits; return true;
+                }
+            }
+            const int64_t work0 = thread_guard_state().fuel;
+            if (!args_convertible()) return false;
+            if (!conv_memo().bypass && work0 - thread_guard_state().fuel >= memo_min_work()) conv_memo().ctors.try_emplace(key, ConvMemo::HeldArgs{ca.args, cb.args, work0 - thread_guard_state().fuel});
             return true;
         },
         [&](const VFix& fa, const VFix& fb) -> bool {
@@ -2689,6 +2926,13 @@ inline bool conv_value(const Value& a, const Value& b, uint32_t depth) {
         [&](const VNeutral& na, const VNeutral& nb) -> bool {
             if (na.head != nb.head) return false;
             if (na.spine.size() != nb.spine.size()) return false;
+            const ConvMemo::Key memo_key{na.spine.identity(), nb.spine.identity(), uint32_t(na.head.kind), na.head.id, depth, eval_mode_word()};
+            auto compare = [&]() -> bool {
+            const int64_t work0 = thread_guard_state().fuel;
+            auto settled = [&](bool r) {            // remember a yes that took real work
+                if (r && !na.spine.empty() && !conv_memo().bypass && work0 - thread_guard_state().fuel >= memo_min_work()) conv_memo().neutrals.try_emplace(memo_key, ConvMemo::HeldSpines{na.spine, nb.spine, work0 - thread_guard_state().fuel});
+                return r;
+            };
             bool spine_ok = true;
             for (std::size_t i = 0; i < na.spine.size(); ++i) {
                 bool ok = std::visit(match_on{
@@ -2831,7 +3075,7 @@ inline bool conv_value(const Value& a, const Value& b, uint32_t depth) {
                 }, na.spine[i], nb.spine[i]);
                 if (!ok) { spine_ok = false; break; }
             }
-            if (spine_ok) return true;
+            if (spine_ok) return settled(true);
             // The frame-by-frame structural walk found a mismatch somewhere on the spine -- this
             // does NOT necessarily mean na and nb are actually different. See the MatchFrame case's
             // own captured_env comment above for the full derivation (confirmed directly, not
@@ -2874,7 +3118,15 @@ inline bool conv_value(const Value& a, const Value& b, uint32_t depth) {
             // once per VNeutral-vs-VNeutral call, after the cheap structural path has already been
             // tried and failed -- not nested recursively the way branches_convertible's own fallback
             // was.
-            return quote(Value{na}, depth) == quote(Value{nb}, depth);
+            return settled(quote(Value{na}, depth) == quote(Value{nb}, depth));
+            };                                       // compare
+            if (!na.spine.empty() && !conv_memo().bypass) {
+                if (auto it = conv_memo().neutrals.find(memo_key); it != conv_memo().neutrals.end()) {
+                    if (memo_should_verify(it->second.work)) { if (auto again = memo_redo(compare); again && !*again) throw std::logic_error("itp: a pair of stuck values remembered as convertible is not convertible when decided again (a bug in the conversion table)"); }
+                    ++ctx().conv_memo_hits; return true;
+                }
+            }
+            return compare();
         },
         // Eta-expansion for functions: a closure and a stuck neutral of
         // (by the precondition above) function type are convertible if
@@ -3430,6 +3682,7 @@ inline ElabResult proof_irrelevance_fallback(const Value& a_in, const Value& b_i
 
 inline ElabResult unify_structural(const Value& a_in, const Value& b_in, ElabCtx& ec, ElabState& es) {
     ITP_STACK_CHECK();
+    UnifySession session;                 // the outermost call owns the table of sub-pairs found equal (see UnifyMemo)
     Value a = resolve_solved_meta_head(a_in);
     Value b = resolve_solved_meta_head(b_in);
     auto is_meta_headed = [](const Value& v) {
@@ -3478,10 +3731,22 @@ inline ElabResult unify_structural(const Value& a_in, const Value& b_in, ElabCtx
             if (ca.ind_type_global_id != cb.ind_type_global_id || ca.ctor_idx != cb.ctor_idx)
                 return mismatch("different constructors");
             if (ca.args.size() != cb.args.size()) return mismatch("constructor arity mismatch");
-            for (std::size_t i = 0; i < ca.args.size(); ++i) {
-                if (ElabResult r = unify_values(ca.args[i], cb.args[i], ec, es); !r) return r;
+            const bool memoable = ca.args.size() >= 2 && (ec.size() == 0 || ec.uid != 0);          // one field: a path, which cannot meet itself
+            const UnifyMemo::Key memo_key{ca.args.identity(), cb.args.identity(), ca.ind_type_global_id, ca.ctor_idx, ec.size(), eval_mode_word(), ec.uid};
+            auto compare = [&]() -> ElabResult {
+                const std::size_t pending0 = es.pending.size(); const int64_t work0 = thread_guard_state().fuel;
+                for (std::size_t i = 0; i < ca.args.size(); ++i) {
+                    if (ElabResult r = unify_values(ca.args[i], cb.args[i], ec, es); !r) return r;
+                }
+                // remember a yes that took real work and deferred nothing
+                if (memoable && !unify_memo().bypass && es.pending.size() == pending0 && work0 - thread_guard_state().fuel >= memo_min_work()) unify_memo().ctors.try_emplace(memo_key, ConvMemo::HeldArgs{ca.args, cb.args, work0 - thread_guard_state().fuel});
+                return {};
+            };
+            if (memoable && !unify_memo().bypass) {
+                unify_memo().sync(ctx().meta_ctx.undo_epoch);
+                if (auto it = unify_memo().ctors.find(memo_key); it != unify_memo().ctors.end()) { if (memo_should_verify(it->second.work)) verify_unify_hit(compare, es); ++ctx().unify_memo_hits; return {}; }
             }
-            return {};
+            return compare();
         },
         [&](const VFix& fa, const VFix& fb) -> ElabResult {
             // Hard syntactic equality, same documented completeness gap
@@ -3504,6 +3769,15 @@ inline ElabResult unify_structural(const Value& a_in, const Value& b_in, ElabCtx
                 return mismatch("different variable/constant heads");
             }
             if (na.spine.size() != nb.spine.size()) return mismatch("spine length mismatch");
+            const bool memoable = !na.spine.empty() && (ec.size() == 0 || ec.uid != 0);
+            const UnifyMemo::Key memo_key{na.spine.identity(), nb.spine.identity(), uint32_t(na.head.kind), na.head.id, ec.size(), eval_mode_word(), ec.uid};
+            auto compare = [&]() -> ElabResult {
+            const std::size_t pending0 = es.pending.size(); const int64_t work0 = thread_guard_state().fuel;
+            auto settled = [&]() -> ElabResult {      // remember a yes that took real work and deferred nothing
+                if (memoable && !unify_memo().bypass && es.pending.size() == pending0 && work0 - thread_guard_state().fuel >= memo_min_work())
+                    unify_memo().neutrals.try_emplace(memo_key, ConvMemo::HeldSpines{na.spine, nb.spine, work0 - thread_guard_state().fuel});
+                return {};
+            };
             bool spine_ok = true;
             for (std::size_t i = 0; i < na.spine.size(); ++i) {
                 ElabResult ok = std::visit(match_on{
@@ -3577,7 +3851,7 @@ inline ElabResult unify_structural(const Value& a_in, const Value& b_in, ElabCtx
                 }, na.spine[i], nb.spine[i]);
                 if (!ok) { spine_ok = false; break; }
             }
-            if (spine_ok) return {};
+            if (spine_ok) return settled();
             // See conv_value's own, mirrored VNeutral case for the full derivation of why this
             // fallback exists and why it takes this specific, non-mutually-recursive shape (quoting
             // each full side once and comparing the resulting NodeId, rather than falling back to
@@ -3586,8 +3860,14 @@ inline ElabResult unify_structural(const Value& a_in, const Value& b_in, ElabCtx
             // session's own direct A/B test, which reproduced a genuine segfault at a simulation
             // budget of 50 during perfectly ordinary UniformPolicy search, well before any
             // pathologically deep term was plausible.
-            if (quote(Value{na}, ec.size()) == quote(Value{nb}, ec.size())) return {};
+            if (quote(Value{na}, ec.size()) == quote(Value{nb}, ec.size())) return settled();
             return mismatch("spine comparison differs even after full normalization");
+            };                                       // compare
+            if (memoable && !unify_memo().bypass) {
+                unify_memo().sync(ctx().meta_ctx.undo_epoch);
+                if (auto it = unify_memo().neutrals.find(memo_key); it != unify_memo().neutrals.end()) { if (memo_should_verify(it->second.work)) verify_unify_hit(compare, es); ++ctx().unify_memo_hits; return {}; }
+            }
+            return compare();
         },
         [&](const Closure& ca, const VNeutral& nb) -> ElabResult {
             Value fresh = fresh_neutral(ec.size());
@@ -3637,9 +3917,113 @@ inline ElabResult unify_values(const Value& a, const Value& b, ElabCtx& ec, Elab
     return proof_irrelevance_fallback(a, b, ec, es, std::move(r), meta_mark, pending_mark);
 }
 
+// ---------------------------------------------------------------------------
+// Quick conversion check on syntax: a fast path in front of the evaluator
+// ---------------------------------------------------------------------------
+//
+// `unify` decides definitional equality by evaluating both sides (every definition unfolded, so a statement about open polynomial terms is exponentially larger
+// than it was written) and comparing the values. Most of the pairs a checker meets are equal up to the unfolding of a definition or two -- `Z.lt x y` against
+// `Z.le (x + 1) y`, `Z.sqr a` against `Z.mul a a` -- and evaluating them costs thousands of steps to compare what a few syntactic steps show. SynConv decides such
+// pairs on the syntax: identical nodes are equal (terms are hash-consed); applications of one head to pairwise equal arguments are equal; binders with equal
+// domains and bodies are equal; and when that does not settle it, the head definition of one side is unfolded (delta) or a lambda head is applied (beta), and the
+// comparison is repeated.
+//
+// It ONLY EVER ANSWERS YES. Every yes is derived by congruence, delta or beta, which are rules of the conversion the evaluator decides; "I do not know" (anything
+// else, including an exhausted budget) sends the pair to the evaluator as before. So it cannot change what is accepted, only how fast. It is off (a) when either
+// side mentions a metavariable, because deciding such a pair may have to solve it, and (b) inside the tactic layer's evaluation scopes (NoDeltaScope,
+// GuardedUnfoldScope, FoldSolutionsScope), which compare WITHOUT unfolding definitions on purpose. The option `syn_conv` switches it off for testing
+// (the gate runs the same pairs both ways).
+inline std::optional<NodeId> unfold_head_folded(NodeId t);        // (defined below)
+
+struct SynConv {
+    int budget = ctx().syn_budget;
+    struct Key { uint64_t a, b; bool operator==(const Key&) const = default; };
+    struct KeyHash { std::size_t operator()(const Key& k) const noexcept { uint64_t h = (k.a + 0x9E3779B97F4A7C15ull) * 0xBF58476D1CE4E5B9ull; h ^= (k.b + 0x94D049BB133111EBull) * 0xD6E8FEB86659FD93ull; return static_cast<std::size_t>(h ^ (h >> 29)); } };
+    std::unordered_map<Key, bool, KeyHash> memo;
+
+    static NodeId spine(NodeId t, std::vector<NodeId>& args) {
+        NodeId head = t;
+        while (head.tag == NodeType::APP) { args.push_back(ctx().apps[head.index].arg_id); head = ctx().apps[head.index].fn_id; }
+        std::reverse(args.begin(), args.end());
+        return head;
+    }
+    /// the definition a head constant names, when it can be unfolded on syntax (the same test as unfold_head_folded); nullptr otherwise
+    static const GlobalDef* unfoldable(NodeId head, uint32_t& gid) {
+        if (head.tag != NodeType::CONST) return nullptr;
+        gid = ctx().consts[head.index].global_id;
+        const GlobalDef& def = ctx().globals[gid];
+        return (!def.value || def.recursive_info || def.ctor_info) ? nullptr : &def;
+    }
+    /// one beta step at the head of `t` (a lambda applied to at least one argument)
+    static std::optional<NodeId> beta_head(NodeId t) {
+        std::vector<NodeId> xs; NodeId h = spine(t, xs);
+        if (h.tag != NodeType::LAMBDA || xs.empty()) return std::nullopt;
+        NodeId r = instantiate1(ctx().lambdas[h.index].body_id, xs[0]);
+        for (std::size_t i = 1; i < xs.size(); ++i) r = mk_app(r, xs[i]);
+        return r;
+    }
+
+    bool eq(NodeId a, NodeId b, uint32_t depth) {
+        ITP_STACK_CHECK();
+        if (a == b) return true;
+        if (--budget < 0 || depth > static_cast<uint32_t>(ctx().syn_depth)) return false;
+        const Key key{DagMemo::node_key(a), DagMemo::node_key(b)};
+        if (auto it = memo.find(key); it != memo.end()) return it->second;
+        const bool r = eq_uncached(a, b, depth);
+        memo.emplace(key, r);
+        return r;
+    }
+    bool eq_uncached(NodeId a, NodeId b, uint32_t depth) {
+        for (int round = 0; round < ctx().syn_rounds; ++round) {
+            if (a == b) return true;
+            if (--budget < 0) return false;
+            if (node_info(a).has_meta() || node_info(b).has_meta()) return false;
+            if (a.tag == NodeType::PI && b.tag == NodeType::PI) {
+                const Pi pa = ctx().pis[a.index], pb = ctx().pis[b.index];
+                return eq(pa.dom_id, pb.dom_id, depth + 1) && eq(pa.cod_id, pb.cod_id, depth + 1);
+            }
+            if (a.tag == NodeType::LAMBDA && b.tag == NodeType::LAMBDA) {
+                const Lambda la = ctx().lambdas[a.index], lb = ctx().lambdas[b.index];
+                return eq(la.type_id, lb.type_id, depth + 1) && eq(la.body_id, lb.body_id, depth + 1);
+            }
+            std::vector<NodeId> xs, ys;
+            const NodeId ha = spine(a, xs), hb = spine(b, ys);
+            if (ha == hb && xs.size() == ys.size() && (ha.tag == NodeType::CONST || ha.tag == NodeType::VAR) && !xs.empty()) {
+                bool all = true;
+                for (std::size_t i = 0; i < xs.size() && all; ++i) all = eq(xs[i], ys[i], depth + 1);
+                if (all) return true;
+            }
+            // reduce: a lambda head is applied; otherwise the definition that was declared LATER is unfolded (it can mention the earlier one, never the reverse), both when it is the same one
+            if (auto na = beta_head(a)) { a = *na; continue; }
+            if (auto nb = beta_head(b)) { b = *nb; continue; }
+            uint32_t ga = 0, gb = 0;
+            const bool ua = unfoldable(ha, ga) != nullptr, ub = unfoldable(hb, gb) != nullptr;
+            if (!ua && !ub) return false;
+            bool unfold_a = ua, unfold_b = ub;
+            if (ua && ub && ga != gb) { unfold_a = ga > gb; unfold_b = !unfold_a; }
+            if (unfold_a) { auto n = unfold_head_folded(a); if (!n) return false; a = *n; }
+            if (unfold_b) { auto n = unfold_head_folded(b); if (!n) return false; b = *n; }
+        }
+        return false;
+    }
+};
+
+inline bool plain_eval_mode() { return !no_delta_flag() && !guarded_unfold_flag() && !fold_solutions_flag(); }
+
 inline ElabResult unify(NodeId a_id, NodeId b_id, ElabCtx& ec, ElabState& es) {
     ITP_STACK_CHECK();
     if (a_id == b_id) return {};          // the same term (terms are hash-consed): convertible, and nothing to solve -- no need to evaluate either side
+    if (ctx().syn_conv && plain_eval_mode()) {
+        SynConv quick; ++ctx().syn_tries;
+        if (quick.eq(a_id, b_id, 0)) {
+            ++ctx().syn_yes;
+            if (ctx().verify_memo) {              // option verify_memo: the evaluator alone must agree (see memo_redo)
+                if (auto again = memo_redo([&] { return static_cast<bool>(unify_values(eval(a_id, ec.values), eval(b_id, ec.values), ec, es)); }); again && !*again)
+                    throw std::logic_error("itp: the quick conversion check accepted a pair the evaluator rejects (an unsound quick check)");
+            }
+            return {};
+        }
+    }
     return unify_values(eval(a_id, ec.values), eval(b_id, ec.values), ec, es);
 }
 
@@ -5550,6 +5934,8 @@ inline NodeId motive_result(NodeId motive, const std::vector<NodeId>& indices, N
     return loose_range(cur) == 0 ? cur : mk_app(apply_all(motive, indices), scrutinee);
 }
 
+inline std::optional<NodeId> expose_pi_folded(NodeId t);       // (defined below)
+
 /// The typing rules. Everything below reaches `infer` (the memoising wrapper defined after this function) for its subterms.
 inline TypeResult infer_uncached(NodeId t, ElabCtx& ec, ElabState& es) {
     ITP_STACK_CHECK();
@@ -5585,10 +5971,13 @@ inline TypeResult infer_uncached(NodeId t, ElabCtx& ec, ElabState& es) {
                     // the chain is not syntactically a Pi (a definition that unfolds to one, a solved metavariable): substitute what was consumed, then evaluate to expose the Pi
                     NodeId current = done_rev.empty() ? chain : instantiate(chain, done_rev);
                     done_rev.clear();
-                    Value cv = eval(current, ec.values);
-                    if (!std::get_if<VPi>(&cv))
-                        return err(TypeErrorKind::NotAFunction, apply_all(head, std::vector<NodeId>(args.begin(), args.begin() + static_cast<std::ptrdiff_t>(i))), "applying a term that is not a function");
-                    chain = quote(cv, ec.size());       // the Pi, as a node
+                    if (auto pi = expose_pi_folded(current)) chain = *pi;       // the definitions at the head unfolded on syntax: the domain and the codomain stay as written
+                    else {
+                        Value cv = eval(current, ec.values);
+                        if (!std::get_if<VPi>(&cv))
+                            return err(TypeErrorKind::NotAFunction, apply_all(head, std::vector<NodeId>(args.begin(), args.begin() + static_cast<std::ptrdiff_t>(i))), "applying a term that is not a function");
+                        chain = quote(cv, ec.size());       // the Pi, as a node
+                    }
                 }
                 Pi p = ctx().pis[chain.index];
                 NodeId dom = done_rev.empty() ? p.dom_id : instantiate(p.dom_id, done_rev);
@@ -5668,10 +6057,6 @@ inline TypeResult infer_uncached(NodeId t, ElabCtx& ec, ElabState& es) {
 /// A compound term whose size (as a tree) is below this is typed again every time rather than remembered.
 inline constexpr uint32_t kInferMemoMinSize = 16;
 
-/// The state of the thread-local evaluation switches (NoDeltaScope, GuardedUnfoldScope, FoldSolutionsScope) as a number: they decide how `eval` unfolds and so what `quote(eval(..))` returns inside infer.
-inline uint32_t eval_mode_word() {
-    return (no_delta_flag() ? 1u : 0u) | (guarded_unfold_flag() ? 2u : 0u) | (guarded_compute_flag() ? 4u : 0u) | (fold_solutions_flag() ? 8u : 0u);
-}
 
 /// `infer`, remembering the type found for a compound term. A proof the `ring` tactic produces shares almost everything (each normal form is an argument of dozens of lemma applications), so typing it occurrence
 /// by occurrence costs the size of the TREE; typing each distinct (term, context) once costs the size of the DAG.
@@ -5692,22 +6077,21 @@ inline TypeResult infer(NodeId t, ElabCtx& ec, ElabState& es) {
     if (const NodeInfo ni = node_info(t); ni.size() < kInferMemoMinSize || ni.has_meta()) return infer_uncached(t, ec, es);
     if (x.memo_off != 0 || !ec.memoisable() || !es.pending.empty()) return infer_uncached(t, ec, es);
     const uint64_t epoch = x.term_cache_epoch();
-    if (x.infer_cache_epoch != epoch) { x.infer_cache.clear(); x.infer_cache_epoch = epoch; }
+    if (x.infer_cache_epoch != epoch) { release_table(x.infer_cache); x.infer_cache_epoch = epoch; }
     const ExecutionContext::InferKey key{DagMemo::node_key(t), ec.size() == 0 ? uint64_t(0) : ec.uid, eval_mode_word()};
     if (auto it = x.infer_cache.find(key); it != x.infer_cache.end()) {
         const NodeId cached = it->second;
         ++x.memo_hits;
-        if (x.verify_memo) {
-            ExecutionContext::MemoOff off(x);
-            TypeResult again = infer_uncached(t, ec, es);
-            if (!again || !(*again == cached)) throw std::logic_error("itp: the typing memo returned a type that differs from a fresh inference (a bug in the memo key or its guards)");
+        if (x.verify_memo) {          // decided again with every table bypassed and a step limit (see memo_redo); a type that cannot be re-derived within it is not checked
+            auto again = memo_redo([&] { return infer_uncached(t, ec, es); });
+            if (again && (!*again || !(**again == cached))) throw std::logic_error("itp: the typing memo returned a type that differs from a fresh inference (a bug in the memo key or its guards)");
         }
         return cached;
     }
     ++x.memo_misses;
     TypeResult r = infer_uncached(t, ec, es);
     if (r && es.pending.empty() && x.term_cache_epoch() == epoch && x.infer_cache_epoch == epoch && x.memo_off == 0) {
-        if (x.infer_cache.size() >= ExecutionContext::kMaxInferCache) x.infer_cache.clear();
+        if (x.infer_cache.size() >= ExecutionContext::kMaxInferCache) release_table(x.infer_cache);
         x.infer_cache.emplace(key, *r);
     }
     return r;
@@ -5724,12 +6108,15 @@ inline ElabResult check_lambda(NodeId t, NodeId expected_ty, ElabCtx& ec, ElabSt
     while (body.tag == NodeType::LAMBDA) {
         if (chain.tag != NodeType::PI) {
             NodeId current = chain_rev.empty() ? chain : instantiate(chain, chain_rev);        // the rest of the expected type, in the context opened so far
-            Value cv = eval(current, cur_ec.values);
-            if (!std::get_if<VPi>(&cv)) {
-                if (j == 0) return std::unexpected(TypeError{TypeErrorKind::Mismatch, t, expected_ty, "checking a lambda against a non-function expected type"});
-                break;
+            if (auto pi = expose_pi_folded(current)) { chain = *pi; chain_rev.clear(); }   // `Not P` is `P -> False`: unfolded on syntax, so the domain stays `P` as written (evaluating and quoting it would write out every definition inside P)
+            else {
+                Value cv = eval(current, cur_ec.values);
+                if (!std::get_if<VPi>(&cv)) {
+                    if (j == 0) return std::unexpected(TypeError{TypeErrorKind::Mismatch, t, expected_ty, "checking a lambda against a non-function expected type"});
+                    break;
+                }
+                chain = quote(cv, n + j); chain_rev.clear();
             }
-            chain = quote(cv, n + j); chain_rev.clear();
         }
         Pi p = ctx().pis[chain.index];
         Lambda l = ctx().lambdas[body.index];
@@ -5856,9 +6243,9 @@ inline NodeId extract_proof_term(uint32_t root_meta_id) {
     const NodeId root = mk_meta(root_meta_id);
     const NodeId resolved = resolve_metas(root);
     if (!detail::needs_normalising(resolved)) {
-        if (ctx().verify_memo) {
-            const NodeId slow = quote(eval(root, {}), 0);
-            if (!(slow == resolved)) throw std::logic_error("itp: extract_proof_term fast path differs from evaluating and quoting the solution");
+        if (ctx().verify_memo) {          // evaluating and quoting costs the size of the TREE (and its memory): within the step limit of memo_redo, or not at all
+            auto slow = memo_redo([&] { return quote(eval(root, {}), 0); });
+            if (slow && !(*slow == resolved)) throw std::logic_error("itp: extract_proof_term fast path differs from evaluating and quoting the solution");
         }
         ++ctx().extract_fast;
         return resolved;

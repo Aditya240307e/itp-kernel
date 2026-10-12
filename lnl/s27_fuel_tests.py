@@ -263,6 +263,15 @@ def part_D(w):
         p.ps.change(w._n(target))
     sweep(w, 'change', rewrite_state, change_op)
 
+    # an apply that DEFERS constraints (`?f ?x =?= Succ a` is not a pattern): an interruption after the first deferral must take the deferred constraint back (mutant FU11)
+    def defer_state():
+        p = Proof(w, w.forall_([Nat, Nat, lambda a, c: Eq(a, c)], lambda a, c, h: Eq(S(a), S(c))), 'sweep_defer'); p.intro('a', 'c', 'h'); return p
+    defer_op = lambda p: p.ps.apply(w['f_equal'].n, None, True)
+    p = defer_state(); defer_op(p)
+    expect(p.ps.num_pending() >= 1 and p.ps.num_goals() >= 2, 'D setup: apply f_equal to Succ a = Succ c leaves deferred constraints behind (%d pending, %d goals)' % (p.ps.num_pending(), p.ps.num_goals()))
+    need_defer = sweep(w, 'apply (deferring constraints)', defer_state, defer_op)
+    expect(need_defer > 100, 'D that apply spends a few hundred steps (%d)' % need_defer)
+
     # the proof can be carried on and is accepted after all those interruptions: interrupt the apply at a few budgets, then do it for real
     p = trans_state(); before = snapshot(p)
     for limit in (1, 7, 40, need - 1):

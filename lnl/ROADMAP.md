@@ -1,13 +1,16 @@
 # Roadmap: from this kernel to IMO-level and undergraduate mathematics (a judgment, not a measurement)
 
-## Where we are (measured, 2026-10-11)
+## Where we are (measured, 2026-10-12)
 A small, heavily tested trusted core and tactic layer: dependent types, inductive families with parameters and indices, structural recursion, a Prop/Type world with definitional proof irrelevance and restricted elimination,
 the four classical axioms, quotients (five kernel constants and one reduction rule; `funext` is a theorem), tactics (intro, apply, rewrite, cases, induct with equation generalisation, strong induction by bounded
-predicates, generated injectivity lemmas; in the authoring layer exact/rw/rw_at/have/obtain/calc/induction_on/ring), an independent checker, differential gates against the frozen reference, zero-tolerance random
-oracles, soundness canaries, and a deterministic work budget (a wrong action fails after a bounded number of steps instead of hanging). 32 gates, 601 mutants defined.
+predicates, generated injectivity lemmas; in the authoring layer exact/rw/rw_at/have/obtain/calc/induction_on/ring/linarith/nlinarith), an independent checker, differential gates against the frozen reference, zero-tolerance random
+oracles, soundness canaries, and a deterministic work budget (a wrong action fails after a bounded number of steps instead of hanging). 36 gates, 766 mutants defined; the whole suite is also run a second time with
+`ITP_VERIFY_MEMO=1`, which re-decides every answer a sharing table or the quick conversion check gave.
 Libraries, all built by tactic scripts and re-checked by the kernel (they use NO axioms; the four classical ones are an optional layer, S15): unary Nat (about 125 lemmas), the binary naturals `N` (Coq-style `Pos`/`N`, with the bridge to Nat and
-the induction principle as a theorem), the integers `Z` as a quotient of `N x N` (ring laws, order, trichotomy, discreteness; 408 globals, about 11 s to build), and a kernel-checked `ring` for `Nat`, `N` and `Z`.
-Not yet: the rest of the integer facts (sign cases, integral domain), `linarith`/`nlinarith`, Q and R, number theory, the gym environment on this kernel.
+the induction principle as a theorem), the integers `Z` as a quotient of `N x N` (ring laws, order, strict order, trichotomy, discreteness, integral domain, casts from N; 434 globals, about 25 s to build), a kernel-checked `ring` for `Nat`, `N` and `Z`,
+and `linarith` / `nlinarith` over `Z` (exact simplex search, certificate checked by the kernel).
+Not yet: Q and R, number theory (divisibility, gcd, primes, modular arithmetic), `omega`/`positivity`/`norm_num`, sums over finite ranges, the gym environment on this kernel. Checking a big `ring`/`linarith` proof cost 0.1-0.5 s (finding F36); after the conversion work of 2026-10-12 (quick check on syntax, three sharing tables, Pi exposure) the final check of the large `nlinarith` proof is 88 thousand
+steps instead of 1.98 million and the library build is 16% faster. Conversion of exponentially shared values is polynomial (F37, F38).
 
 ## What is missing, with rough effort (expert person-months; treat as +-2x)
 | Area | What | Effort |
@@ -39,9 +42,9 @@ lemmas; the RL surface (probing, library index) is on the hybrid kernel, the gym
 | 3. Gym environment on the hybrid kernel | observation/action surface, search and model code, curriculum Peano -> algebra -> number theory; can overlap with block 2 | ~1 week |
 | 4. Competition bench | formalise ~100 olympiad problems, write reference proofs to find library/automation gaps; (miniF2F-style AMC/AIME first, then early IMO P1, then shortlist A1-A3 / N1-N3) | 1-3 months |
 
-Progress against block 1 (2026-10-11): done -- binary N with its bridge, Z (quotient; ring laws, order, trichotomy, discreteness, `eq_dec`), `ring` over Nat, N and Z, the typing memo that made big `ring` proofs 10-15x
-faster, the work budget. Next in block 1: `Z.sign_cases`, `Z.mul_eq_zero`, `Z.mul_pos` and the strict-order lemmas, a generic ordered-ring layer (one template instantiated for Z, Q, R), then `linarith`/`nlinarith`
-(an exact rational simplex whose certificate is checked by `ring` plus the order lemmas), Q as a quotient, R as the axiomatic ordered field validated on Q. Blocks 2-4 have not been started.
+Progress against block 1 (2026-10-11): done -- binary N with its bridge, Z (quotient; ring laws, order, strict order, trichotomy, discreteness, integral domain, `eq_dec`, casts from N), `ring` over Nat, N and Z, `linarith` and
+`nlinarith` over Z as kernel-checked certificates (gate S31), the typing memo that made big `ring` proofs 10-15x faster, the work budget. Next in block 1: a generic ordered-ring layer (one template instantiated for Z, Q, R),
+Q as a quotient, R as the axiomatic ordered field validated on Q, `ring`/`linarith` instances for them, then `omega`-lite for N/Z, `positivity`, `norm_num`. Blocks 2-4 have not been started.
 
 Scope: algebra and number theory only. About half of all IMO problems are geometry or combinatorics; geometry through coordinates/complex numbers (polynomial arithmetic + Groebner-style certificates) is possible for some
 problems and is a separate project, combinatorics needs finite structures and is long-term. An autonomous learned agent that solves real IMO problems is a research outcome, not an engineering milestone; realistic first targets
@@ -57,6 +60,20 @@ Decisions: R is axiomatised as a single ordered-field structure instance (audit 
 5. Decide: build the library ourselves, or invest in Lean-kernel compatibility and import Mathlib.
 
 ## Status log (kernel features, newest first)
+- **Conversion that scales** (gates S32, S33; findings F36-F39; mutants FX1-4, SC1-26, CM1-13, UM1-23, QM1-15). Four steps, each measured. (1) A Pi hidden behind a definition (`Not P`, `AllLe a`) is exposed on syntax, so the
+  evaluator is not asked to normalise an expected type just to see a binder. (2) `SynConv`: a quick check on syntax in front of the evaluator that can only answer YES (identical nodes, congruence, binders, delta of the later-declared
+  head, beta; budget 4000 steps; off with metavariables and inside the tactic scopes). (3) Sharing tables: values built from nested definitions share structure (`plus2 (plus2 (.. x))` holds the level below twice), and a
+  frame-by-frame comparison is exponential in the depth (4.3 billion steps at depth 30); `ConvMemo`, `UnifyMemo` and `QuoteMemo` remember the pairs found equal and the syntax of stuck values, keyed by the identity of the
+  shared blocks, and a table entry never outlives an undo of a metavariable solution (`MetaContext::undo_epoch`). Depth 100 now costs 24 thousand steps (conversion) / 744 thousand (unifier, still cubic: each stuck match opens its own
+  table); a refused comparison of depth 100 costs 27 thousand. (4) `verify_memo` / `ITP_VERIFY_MEMO=1` re-decides every table hit and every quick-check yes with the tables bypassed and throws on a mismatch, so a table can
+  make the kernel faster but not different: the gates run in both modes. Open: one table per unifier call instead of per stuck match (cubic to quadratic), closure comparison without quoting the domain, canonical syntax for stuck
+  matches (F28 root cause), a memo on `eval` for DAG-shaped terms.
+- **`linarith` / `nlinarith` over Z** (gate S31, `linarith.py`, mutants LA1-LA53 except LA38). Hypotheses and the negated goal become facts `0 <= p_i` (a proof-free polynomial reader shares the atoms of `ring`); an exact integer-preserving
+  simplex (Edmonds fraction-free, Bland's rule; SciPy HiGHS only guesses a support for very large systems and its answer is always re-solved exactly) finds `sum m_i p_i = -k`, k > 0. The certificate is `Z.mul_nonneg`/`Z.add_nonneg`, a
+  `ring` proof of `S = -k`, and `Z.not_nonneg_neg`; the whole proof is one `exact`, so a failed search leaves the proof state untouched. Untrusted search, kernel-checked result: a wrong certificate (injected by a mutant) is reported as an
+  internal error, never accepted. `nlinarith` adds squares of the squared subterms and all pairwise products of facts (cap 600) and takes hint terms. Like Mathlib, `a^2 + b^2 >= 2ab` needs the hint `sq_nonneg (a - b)`.
+- **Integer order library and robustness** (gate S30, S22 section L; mutants Z*, TL1-TL2). `Z.le x y := exists k:N, x + of_N k = y`; strict order, `mul_pos`, `mul_eq_zero`, cancellation, casts. A tactic that is called with no goal
+  raised a raw C++ `IndexError`; every goal-indexed tactic now checks the goal first (finding F35).
 - **`apply` on Pi goals** (gate S29, finding F32, mutants AR1-AR13). A goal that is an implication, a negation (`Not P` is `P -> False`) or a universal statement is met by a lemma that concludes such a Pi: the lemma's binders
   are peeled only as far as they exceed the goal's (a binder hidden behind a definition counts as one), and if that does not unify every binder is peeled, as before. It is the tactic layer's mode (`simp`) only: without it `apply`
   is the reference's, which the lockstep gates S3-S5 compare (the first full run after the change broke exactly those four gates, which is how the boundary was found).

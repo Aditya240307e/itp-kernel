@@ -383,7 +383,7 @@ S2-style random typed terms. Mutant inventory: 59 defined (M1-M37, M39-M60), 58 
 
 
 ---
-# Gate index (2026-10-11): 32 gates, 601 mutants defined
+# Gate index (2026-10-12): 36 gates, 766 mutants defined
 
 `python3 run_gates.py` runs every gate (the list is `GATE_CMDS` in mutate.py, the one place to add a gate); `python3 mutate.py --check` verifies every mutant's anchor; `python3 mutate.py PREFIX...` runs the mutants
 whose names start with a prefix (each is built in isolation and must make some gate fail). Each gate's docstring says what it pins down and why.
@@ -400,11 +400,19 @@ whose names start with a prefix (each is built in isolation and must make some g
 | `s18_deep_tests.py`, `s19_boundary_tests.py`, `s20_reservation_tests.py`, `s21_view_tests.py` | terms of any depth, the Python API boundary, well-founded global environment, reading terms back |
 | `s22_simp_tests.py` | display normal form, `change`, `apply` with folded premises (which reading of the lemma meets the goal) |
 | `s23_ring_tests.py`, `s24_bin_tests.py`, `s25_nring_tests.py` | Nat library and `ring`; binary naturals and their bridge; `ring` over N and the shared lemma template |
+| `s30_zlib_tests.py` | the integers: 117 statements of the Z library (ring laws, order, strict order, integral domain, casts; each declared by tactics and re-checked by the kernel and the independent checker), `ring` over Z, `const_exp` |
+| `s31_linarith_tests.py` | `linarith` / `nlinarith` over Z: the polynomial reader against an oracle, the exact simplex against Fourier-Motzkin and SciPy, certificates (non-negative integers, gcd normalised, exact sum), planted contradictions and consequences, refusals leave the state unchanged, a wrong certificate is caught, 36 corrupted proofs judged identically by the kernel and the independent checker |
 | `s26_memo_tests.py` | node facts, shared-term traversals, typing memo, linear proof extraction |
+| `s32_synconv_tests.py` | the quick conversion check on syntax (`SynConv`): it only ever answers YES, so every yes is cross-checked against the evaluator (3,088 checks on generated pairs: unfold order, argument counts, lambdas and Pis, budget and depth limits, metavariables and the tactic scopes switch it off); counts of looks and settled pairs |
+| `s33_convmemo_tests.py` | the three sharing tables (`ConvMemo` for values, `UnifyMemo` for the unifier, `QuoteMemo` for refused comparisons): exponentially shared terms are decided in polynomial work, both answers, with metavariables and rewinds (a table entry never outlives an undo), 258 checks; also run with `ITP_VERIFY_MEMO=1` |
 | `s27_fuel_tests.py` | the work budget and all-or-nothing tactics |
 | `s28_headunfold_tests.py` | definitions at the head of a goal or hypothesis are unfolded on syntax |
 | `s29_apply_pi_goal_tests.py` | `apply` on implication / negation / universal goals (arity rule) |
 | `oracle_gate.py` | the self-consistency oracle (random scripts, zero tolerance) |
+
+Two passes of the whole suite are expected to be green. The ordinary one (`python3 run_gates.py -j 2`, about 150 s on two cores) and the self-checking one (`ITP_VERIFY_MEMO=1 python3 run_gates.py -j 2`): with that
+option the kernel re-decides every sharing-table hit and every quick-conversion yes with all tables bypassed (at most 20,000 steps per re-decision and, in all, 20,000 plus twice the steps the call itself has spent, uncharged to the proof) and throws on any disagreement. It replaces the
+earlier compile-time shadow build. `memo_verify_stats()` reports (verified, skipped); entries whose original decision cost more than 1,000 steps are skipped, not trusted blindly: they are covered by the ordinary gates.
 
 Libraries: `lnl_base.py` (logic, equality, Nat), `nat_lib.py`, `bin_lib.py` (Pos / N), `quot_lib.py` (quotients, `funext`, Prod, `Quot.lift2`), `int_lib.py` (Z), `ring.py` + `ring_lib.py` (the `ring` tactic and its lemma
 template), `tactics.py` and `author.py` (the authoring layer). `repros/` holds small scripts that reproduce findings F28-F30.

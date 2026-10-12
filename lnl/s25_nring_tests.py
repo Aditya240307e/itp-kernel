@@ -65,7 +65,7 @@ def instances(w):
 def ring_spec(w, I):
     """the statements of the 21 lemmas of the ring template, written out with explicit operations (not the library's template, not the notation)"""
     T, ET, Z, one = I['T'], I['ET'], I['Z'], I['one']
-    ez, eo = Z, one                                  # the exponents are of the same kind
+    ez, eo = I.get('ez', Z), I.get('eo', one)       # the exponents are of the same kind as the numbers (for a ring of integers they are naturals: the instance says so)
     add, mul, pw, eadd, succ = I['add'], I['mul'], I['pow'], I['eadd'], I['succ']
     Eq = w.Eq; F = w.forall_
     S = {}

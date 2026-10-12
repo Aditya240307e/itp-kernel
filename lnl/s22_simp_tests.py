@@ -768,6 +768,31 @@ def main():
         expect(w.simp(khh(S(m))) == S(khh(m)), 'K7b `hh (S m)` computes one layer: %s' % w.show(w.simp(khh(S(m)))))
         expect(w.simp(khh(Z)) == S(Z), 'K7c `hh 0` computes: %s' % w.show(w.simp(khh(Z))))
 
+    # L: a finished proof has no goal: every tactic that needs one says so as an author error -- never a C++ exception from the kernel's goal table (`rw`, `focus` and `h` used to reach it)
+    def finished():
+        pf = Proof(w, w.forall_([Nat], lambda n: w.Eq(n, n)), 'l_done'); pf.intro('n'); pf.refl(); return pf
+    ladd0 = w['add_zero']
+    no_goal_calls = {
+        'intro': lambda p: p.intro('x'), 'apply': lambda p: p.apply('add_zero'), 'exact': lambda p: p.exact('add_zero'), 'refl': lambda p: p.refl(), 'cases': lambda p: p.cases('n'),
+        'induct': lambda p: p.induct('n'), 'rw': lambda p: p.rw('add_zero'), 'rw_at': lambda p: p.rw_at('n', 'add_zero'), 'rewrite': lambda p: p.rewrite('add_zero'),
+        'have': lambda p: p.have('e', w.Eq(Z, Z)), 'obtain': lambda p: p.obtain(['a', 'b'], 'add_zero'), 'exists': lambda p: p.exists('n'), 'ring': lambda p: p.ring(),
+        'calc': lambda p: p.calc(Z), 'assumption': lambda p: p.assumption(), 'norm': lambda p: p.norm(), 'h': lambda p: p.h('n'), 'focus': lambda p: p.focus().__enter__(),
+        'goal': lambda p: p.goal(), 'left': lambda p: p.left(), 'right': lambda p: p.right(), 'split': lambda p: p.split(), 'exfalso': lambda p: p.exfalso(), 'induction_on': lambda p: p.induction_on('nat_ind', 'n'),
+    }
+    expect(finished().done, 'L0 the probe proof is finished')
+    for label, call in no_goal_calls.items():
+        try: call(finished()); got = 'no error'
+        except AuthorError: got = 'AuthorError'
+        except Exception as e: got = '%s: %s' % (type(e).__name__, str(e).splitlines()[0][:70])
+        expect(got == 'AuthorError', 'L1 %s on a finished proof is an author error (got %s)' % (label, got))
+    pf = Proof(w, w.forall_([Nat, Nat], lambda a, b: w.Eq(add(a, b), add(b, a))), 'l_two'); pf.intro('a', 'b')
+    for label, call in (('h', lambda: pf.h('a', 1)), ('focus', lambda: pf.focus(1).__enter__()), ('goal', lambda: pf.goal(1)), ('h negative', lambda: pf.h('a', -1))):
+        try: call(); got = 'no error'
+        except AuthorError: got = 'AuthorError'
+        except Exception as e: got = '%s: %s' % (type(e).__name__, str(e).splitlines()[0][:70])
+        expect(got == 'AuthorError', 'L2 %s of a goal that does not exist is an author error (got %s)' % (label, got))
+    expect(pf.h('a') is not None and not pf.done, 'L3 the open goal is still usable after the refused calls')
+
     # nothing leaks out of the folded mode into later work
     with Ctx(w, 'm', 'n') as (m, n):
         expect(w.view(w.normalize(add(m, n)))[0] == 'match', 'D1 after the folded-mode calls, normalisation is full delta again')

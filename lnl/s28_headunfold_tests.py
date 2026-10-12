@@ -12,7 +12,9 @@ goal -- depends on it:
   B. `cases` on a hypothesis whose head is a definition of a definition (two steps of unfolding); one headed by a definition that returns a function (surplus arguments); one headed by the family itself;
   C. `apply` of a lemma whose conclusion is about the family to a goal headed by a definition: the new goal mentions `two`; the same through two definitions and through a definition with fewer lambdas than
      arguments;
-  D. every proof is finished and admitted by the kernel.
+  D. a RECURSIVE function at the head is not unfolded on syntax (it computes only on a constructor, which is the guarded scope's business): `cases` on `h : RP k`, where `RP n := (two <= n) and (match n ...)` and `k` is
+     a variable, reads the hypothesis with every definition unfolded, so the field is `Succ (Succ Zero) <= k` and not `two <= k` (this pins the exclusion in `unfold_head_folded`: mutant U4);
+  E. every proof is finished and admitted by the kernel.
 """
 import os, sys
 
@@ -40,6 +42,8 @@ def build():
     w.define('Lt', w.forall_([Nat, Nat], lambda n, m: PROP), w.fun([Nat, Nat], lambda n, m: Le(S(n), m)))                 # Lt n m := Le (S n) m
     w.define('Lt2', w.forall_([Nat, Nat], lambda n, m: PROP), w.fun([Nat, Nat], lambda n, m: w['Lt'](n, m)))             # a definition of a definition
     w.define('LtHalf', w.arrow(Nat, w.arrow(Nat, PROP)), w.fun([Nat], lambda n: Le(S(n))))                               # one lambda, and the body is a function: LtHalf n m has an argument more than the lambdas
+    two = w['two']                                                                                                        # a recursive predicate whose body is NOT a match at the top:  RP n := (two <= n) and (match n with ...)
+    w.recursive('RP', w.arrow(Nat, PROP), lambda R: w.lam(Nat, lambda n: w['And'](Le(two, n), w.match(n, lambda _: PROP, [w['True'], lambda m: R(m)]))))
     return w
 
 
@@ -85,9 +89,21 @@ def part_C(w):
         finish_ok(w, p, name)
 
 
+def part_D(w):
+    Nat, Le, S, two = w['Nat'], w['Le'], w['Succ'], w['two']
+    RP = w['RP']
+    p = Proof(w, w.forall_([Nat, lambda k: RP(k)], lambda k, h: Le(two, k)), 'hu_rec_cases')
+    p.intro('k', 'h'); p.cases('h', names=['h1', 'h2'])
+    t = str(p)
+    line = next((l for l in t.split('\n') if l.startswith('h1 : ')), '')
+    expect(line == 'h1 : Succ (Succ Zero) <= k', 'D: the field of a recursive predicate is read with every definition unfolded (not unfolded on syntax):\n%s' % t)
+    p.exact('h1')
+    finish_ok(w, p, 'hu_rec_cases')
+
+
 def main():
     w = build()
-    part_AB(w); part_C(w)
+    part_AB(w); part_C(w); part_D(w)
     print('%d checks' % CHECKS[0])
     if FAIL:
         print('S28 HEAD UNFOLDING GATE: FAIL (%d)' % len(FAIL))
