@@ -383,7 +383,7 @@ S2-style random typed terms. Mutant inventory: 59 defined (M1-M37, M39-M60), 58 
 
 
 ---
-# Gate index (2026-10-12): 36 gates, 766 mutants defined
+# Gate index (2026-10-12): 38 gates, 835 mutants defined
 
 `python3 run_gates.py` runs every gate (the list is `GATE_CMDS` in mutate.py, the one place to add a gate); `python3 mutate.py --check` verifies every mutant's anchor; `python3 mutate.py PREFIX...` runs the mutants
 whose names start with a prefix (each is built in isolation and must make some gate fail). Each gate's docstring says what it pins down and why.
@@ -402,6 +402,8 @@ whose names start with a prefix (each is built in isolation and must make some g
 | `s23_ring_tests.py`, `s24_bin_tests.py`, `s25_nring_tests.py` | Nat library and `ring`; binary naturals and their bridge; `ring` over N and the shared lemma template |
 | `s30_zlib_tests.py` | the integers: 117 statements of the Z library (ring laws, order, strict order, integral domain, casts; each declared by tactics and re-checked by the kernel and the independent checker), `ring` over Z, `const_exp` |
 | `s31_linarith_tests.py` | `linarith` / `nlinarith` over Z: the polynomial reader against an oracle, the exact simplex against Fourier-Motzkin and SciPy, certificates (non-negative integers, gcd normalised, exact sum), planted contradictions and consequences, refusals leave the state unchanged, a wrong certificate is caught, 36 corrupted proofs judged identically by the kernel and the independent checker |
+| `s34_nt_tests.py` | the number-theory library over Z (46 theorems: divisibility, division with remainder, Bezout, gcd, coprimality, primes, Euclid, prime divisors) and the three olympiad problems: statements audited (definitions, the single axiom `em` and exactly which theorems use it), numerals against Python integers, a randomised oracle for `linear_combination` over Nat, N and Z (45 statements per type, accepted exactly when the independent polynomial oracle says so), `ring` / `linarith` after the display normal form, `interval_cases`, `by_contra`, negative controls (nearby statements refuted), the independent checker re-checks 57 globals and agrees on corrupted proofs |
+| `s35_matchcheck_tests.py` | how a `match` is checked: the family of the scrutinee's type read on syntax (cost in kernel steps, the 32-unfolding bound by raw matches, the fallback by evaluation), the motive applied by beta on syntax (dependent hypotheses, the order of indices and scrutinee, a global motive), refusals (a scrutinee whose type is not an inductive family: function types, definitions that unfold to one, an axiom, a stuck recursive type, with one branch and with none), and the independent checker's verdict on all 62 terms |
 | `s26_memo_tests.py` | node facts, shared-term traversals, typing memo, linear proof extraction |
 | `s32_synconv_tests.py` | the quick conversion check on syntax (`SynConv`): it only ever answers YES, so every yes is cross-checked against the evaluator (3,088 checks on generated pairs: unfold order, argument counts, lambdas and Pis, budget and depth limits, metavariables and the tactic scopes switch it off); counts of looks and settled pairs |
 | `s33_convmemo_tests.py` | the three sharing tables (`ConvMemo` for values, `UnifyMemo` for the unifier, `QuoteMemo` for refused comparisons): exponentially shared terms are decided in polynomial work, both answers, with metavariables and rewinds (a table entry never outlives an undo), 258 checks; also run with `ITP_VERIFY_MEMO=1` |

@@ -536,8 +536,10 @@ def main():
         expect(m is not None and 'not an equation' in m, 'C  linear_combination: a hypothesis that is not an equation is refused (%s)' % (m or '')[:60])
         m = err_of(F([Z_, Z_, lambda a, b: Eq(a, b)], lambda a, b, h: zle(a, b)), lambda p: (p.intro('a', 'b', 'h'), p.linear_combination((1, 'h'))))
         expect(m is not None and 'not an equation' in m, 'C  linear_combination: a goal that is not an equation is refused (%s)' % (m or '')[:60])
-        m = err_of(st_rev, lambda p: (p.intro('a', 'b', 'h'), p.linear_combination((True, 'h'))))
-        expect(m is not None, 'C  linear_combination: a Python bool is not a coefficient')
+        st_same = F([Z_, Z_, lambda a, b: Eq(a, b)], lambda a, b, h: Eq(a, b))
+        expect(nm.run(st_same, lambda p: (p.intro('a', 'b', 'h'), p.linear_combination((1, 'h')))), 'C  linear_combination: a = b from h : a = b with the coefficient 1')
+        m = err_of(st_same, lambda p: (p.intro('a', 'b', 'h'), p.linear_combination((True, 'h'))))
+        expect(m is not None, 'C  linear_combination: a Python bool is not a coefficient (True would be the numeral 1, which proves this statement)')
         m = err_of(st_rev, lambda p: (p.intro('a', 'b', 'h'), p.linear_combination((1, 'nope'))))
         expect(m is not None, 'C  linear_combination: an unknown hypothesis is refused')
         # a proof term as the hypothesis, and a coefficient that is a term
@@ -602,6 +604,10 @@ def main():
         expect(m is not None and 'too many' in m, 'C  interval_cases: a thousand cases are refused')
         m = err_of(st_ic, lambda p: (p.intro('d', 'h1', 'h2'), p.interval_cases('d', 2.0, 5)))
         expect(m is not None and 'Python ints' in m, 'C  interval_cases: bounds must be ints')
+        m = err_of(st_ic, lambda p: (p.intro('d', 'h1', 'h2'), p.interval_cases('d', True, 5)))
+        expect(m is not None and 'Python ints' in m, 'C  interval_cases: a bool is not a bound')
+        m = err_of(st_ic, lambda p: (p.intro('d', 'h1', 'h2'), p.interval_cases('d', 2, False)))
+        expect(m is not None and 'Python ints' in m, 'C  interval_cases: a bool is not a bound (the upper one)')
         st_n = F([Nn], lambda n: Eq(n, n))
         m = err_of(st_n, lambda p: (p.intro('n'), p.interval_cases('n', 0, 3)))
         expect(m is not None and 'not an integer' in m, 'C  interval_cases: a variable that is not an integer is refused (%s)' % (m or '')[:50])
@@ -609,6 +615,34 @@ def main():
     P0 = w.PROP
     st_bc = F([P0, lambda P: ~~P], lambda P, h: P)
     expect(nm.run(st_bc, lambda p: (p.intro('P', 'h'), p.by_contra('hn'), p.exact(('h', 'hn')))), 'C  by_contra: assume the negation of the goal and refute it')
+    import lnl_base
+    wb = lnl_base.build_base()
+    prb = Proof(wb, wb.forall_([wb.PROP], lambda P: P), 'tmp_bc'); prb.intro('P')
+    try: prb.by_contra(); m = None
+    except AuthorError as e: m = str(e)
+    expect(m is not None and 'no classical logic' in m, 'C  by_contra: a world without the lemma by_contra says so (%s)' % (m or '')[:60])
+    # linear_combination: the failures are reported by name, the step is recorded, and the order of the cancellation lemma's variables is read off its statement
+    with w.nota.using(Z_):
+        m = err_of(st_rev, lambda p: (p.intro('a', 'b', 'h'), p.linear_combination((1, 'h'))))
+        expect(m is not None and 'does not close the goal' in m, 'C  linear_combination: a combination that does not close the goal is reported as such (%s)' % (m or '')[:60])
+        ZZ_ = w.arrow(Z_, Z_)
+        m = err_of(F([ZZ_], lambda f: Eq(f, f)), lambda p: (p.intro('f'), p.linear_combination((1, 'f'))))
+        expect(m is not None and 'no ring structure' in m, 'C  linear_combination: an equation between functions has no ring structure (%s)' % (m or '')[:60])
+        prt = Proof(w, st_rev, 'tmp_trace'); prt.intro('a', 'b', 'h'); prt.linear_combination((-1, 'h'))
+        expect(prt.done and prt.trace[-1] == ('linear_combination',), 'C  linear_combination: the step is the last entry of the trace')
+        import lincomb as LCm
+        pr0 = Proof(w, st_rev, 'tmp_order')
+        for ty, want in ((F([Z_, Z_, Z_, lambda a, b, c: Eq(a + c, b + c)], lambda a, b, c, h: Eq(a, b)), (0, 1, 2)),
+                         (F([Z_, Z_, Z_, lambda a, b, c: Eq(a + b, c + b)], lambda a, b, c, h: Eq(a, c)), (0, 2, 1)),
+                         (F([Z_, Z_, Z_, lambda a, b, c: Eq(c + a, c + b)], lambda a, b, c, h: Eq(b, a)), (1, 0, 2))):
+            got = LCm._cancel_order(pr0, ty, 'fake')
+            expect(got == want, 'C  _cancel_order reads the positions of the two sides and of the common summand off the lemma: %s, wanted %s' % (got, want))
+        for ty, why in ((F([Z_, Z_, Z_, lambda a, b, c: Eq(a + c, b + c)], lambda a, b, c, h: Eq(a, a)), 'the same variable on both sides'),
+                        (F([Z_, Z_, Z_, lambda a, b, c: Eq(a + c, b + c)], lambda a, b, c, h: Eq(a + b, c)), 'a side that is not one of the variables'),
+                        (F([Z_, Z_, lambda a, b: Eq(a, b)], lambda a, b, h: Eq(a, b)), 'a hypothesis where a third variable is expected')):
+            try: LCm._cancel_order(pr0, ty, 'fake'); raised = False
+            except AuthorError as e: raised = 'expected shape' in str(e)
+            expect(raised, 'C  _cancel_order refuses a lemma with %s' % why)
     # unfold_head: one syntactic delta step
     a3, a6 = nm.zint(3), nm.zint(6)
     u = k.unfold_head(nm.dvd(a3, a6).n)
@@ -643,17 +677,15 @@ def main():
                     p.right(); c = {'f(n) = 2n - 3': -3, 'f(n) = 2n': 0, 'f(n) = 2n + 5': 5}[label]
                     p.exists(lit(c) if c >= 0 else -lit(-c)); p.intro('n'); p.norm(); p.ring()
             expect(nm.run(sol(f), in_sol), 'D  IMO 2019 P1: %s is in the claimed solution set' % label)
-        # the statement of the theorem, specialised to a solution and to a non-solution, agrees with the two checks above
+        # the two directions of the theorem, applied to a function whose equation and solution form were each proved directly above: the library's proof of the other one is then accepted
         f2 = w.lam(Zt, lambda n: 2 * n + 1)
-        expect(nm.run(sol(f2), lambda p: (p.right(), p.exists(lit(1)), p.intro('n'), p.norm(), p.ring())), 'D  f(n) = 2n + 1 is in the solution set')
-        expect(nm.run(cond(f2), lambda p: p.exact(('imo2019_p1_bwd', f2, p.t(f2) if False else nm.run and None))) if False else True, 'D  (placeholder)')
+        pr_sol = Proof(w, sol(f2), 'sol'); pr_sol.right(); pr_sol.exists(lit(1)); pr_sol.intro('n'); pr_sol.norm(); pr_sol.ring()
+        pr_cond = Proof(w, cond(f2), 'cond'); pr_cond.intro('a', 'b'); pr_cond.norm(); pr_cond.ring()
+        expect(pr_sol.done and pr_cond.done, 'D  f(n) = 2n + 1: both the equation and the solution form are proved directly')
+        expect(nm.run(cond(f2), lambda p: p.exact(('imo2019_p1_bwd', f2, pr_sol.term()))), 'D  imo2019_p1_bwd turns the proof that f(n) = 2n + 1 is of the solution form into the functional equation')
+        expect(nm.run(sol(f2), lambda p: p.exact(('imo2019_p1_fwd', f2, pr_cond.term()))), 'D  imo2019_p1_fwd turns the proof of the functional equation for f(n) = 2n + 1 into the solution form')
+        expect(nm.refused(~cond(f2), lambda p: p.exact(('imo2019_p1_bwd', f2, pr_sol.term()))), 'D  ... and the same theorem does not refute the equation for it')
         # -- sqrt 2 irrational: p^2 = 2 q^2.  With the 2 replaced by a square the equation HAS solutions (refuted: the statement would be false), without q /= 0 it has (0, 0)
-        def refute_irrational(coef, witness):
-            stmt = ~F([Zt, Zt, lambda p, q: ~Eq(q, Z0)], lambda p, q, h: ~Eq(p * p, coef * (q * q)))
-            def s(p):
-                p.intro('H'); p.have('hne', ~Eq(lit(1), Z0), lambda q: (q.intro('e'), q.linarith()))
-                p.have('hq', ('H', lit(witness), lit(1), 'hne')); p.exact(('hq', p.t(lambda q: w['refl'](Zt, lit(witness) * lit(witness)))) if False else lambda q: None)
-            return stmt, s
         for coef, witness in ((4, 2), (1, 1), (9, 3)):
             stmt = ~F([Zt, Zt, lambda p, q: ~Eq(q, Z0)], lambda p, q, h: ~Eq(p * p, coef * (q * q)))
             def s(p, coef=coef, witness=witness):
@@ -683,7 +715,7 @@ def main():
     expect(not bad, 'D  IMO 1959 P1: the theorem, specialised to n = 0..12, proves coprimality of (21n+4, 14n+3) -- as Python says: %s' % bad[:3])
     expect(nm.run(~nm.gcdr(z(25), z(20), z(1)), nm.refute_is_gcd_script(25, 20, 1)), 'D  IMO 1959 P1: (21n+4, 14n+6) at n = 1 is (25, 20), whose gcd is 5, not 1')
     def imo59_script(p):
-        p.intro('n', 'h'); p.apply('Z.is_gcd_one_of_coprime'); p.exists(-w.nota.lit(2) if False else nm.zneg(z(2))); p.exists(z(3)); p.ring()
+        p.intro('n', 'h'); p.apply('Z.is_gcd_one_of_coprime'); p.exists(nm.zneg(z(2))); p.exists(z(3)); p.ring()
     with w.nota.using(Zt):
         st_true = F([Zt, lambda n: zle(Z0, n)], lambda n, h: nm.gcdr(21 * n + 4, 14 * n + 3, nm.Z1))
         st_pert = F([Zt, lambda n: zle(Z0, n)], lambda n, h: nm.gcdr(21 * n + 4, 14 * n + 6, nm.Z1))

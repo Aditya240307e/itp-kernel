@@ -4,12 +4,14 @@
 A small, heavily tested trusted core and tactic layer: dependent types, inductive families with parameters and indices, structural recursion, a Prop/Type world with definitional proof irrelevance and restricted elimination,
 the four classical axioms, quotients (five kernel constants and one reduction rule; `funext` is a theorem), tactics (intro, apply, rewrite, cases, induct with equation generalisation, strong induction by bounded
 predicates, generated injectivity lemmas; in the authoring layer exact/rw/rw_at/have/obtain/calc/induction_on/ring/linarith/nlinarith), an independent checker, differential gates against the frozen reference, zero-tolerance random
-oracles, soundness canaries, and a deterministic work budget (a wrong action fails after a bounded number of steps instead of hanging). 36 gates, 766 mutants defined; the whole suite is also run a second time with
+oracles, soundness canaries, and a deterministic work budget (a wrong action fails after a bounded number of steps instead of hanging). 38 gates, 835 mutants defined; the whole suite is also run a second time with
 `ITP_VERIFY_MEMO=1`, which re-decides every answer a sharing table or the quick conversion check gave.
 Libraries, all built by tactic scripts and re-checked by the kernel (they use NO axioms; the four classical ones are an optional layer, S15): unary Nat (about 125 lemmas), the binary naturals `N` (Coq-style `Pos`/`N`, with the bridge to Nat and
 the induction principle as a theorem), the integers `Z` as a quotient of `N x N` (ring laws, order, strict order, trichotomy, discreteness, integral domain, casts from N; 434 globals, about 25 s to build), a kernel-checked `ring` for `Nat`, `N` and `Z`,
-and `linarith` / `nlinarith` over `Z` (exact simplex search, certificate checked by the kernel).
-Not yet: Q and R, number theory (divisibility, gcd, primes, modular arithmetic), `omega`/`positivity`/`norm_num`, sums over finite ranges, the gym environment on this kernel. Checking a big `ring`/`linarith` proof cost 0.1-0.5 s (finding F36); after the conversion work of 2026-10-12 (quick check on syntax, three sharing tables, Pi exposure) the final check of the large `nlinarith` proof is 88 thousand
+`linarith` / `nlinarith` over `Z` (exact simplex search, certificate checked by the kernel), `linear_combination`, `interval_cases` and `by_contra`; a number-theory library over Z (divisibility, division with
+remainder, Bezout, gcd, coprimality, primes, Euclid's lemma, every integer > 1 has a prime divisor; 46 theorems, one classical axiom `em`) and three olympiad statements proved (IMO 1959 P1 `gcd(21n+4, 14n+3) = 1`, IMO 2019 P1
+`f(2a) + 2f(b) = f(f(a+b))` iff `f(n) = 2n + c`, the irrationality of sqrt 2).
+Not yet: Q and R, modular arithmetic (`modeq`, squares mod 4 / 8), `omega`/`positivity`/`norm_num`, sums over finite ranges, the gym environment on this kernel. Checking a big `ring`/`linarith` proof cost 0.1-0.5 s (finding F36); after the conversion work of 2026-10-12 (quick check on syntax, three sharing tables, Pi exposure) the final check of the large `nlinarith` proof is 88 thousand
 steps instead of 1.98 million and the library build is 16% faster. Conversion of exponentially shared values is polynomial (F37, F38).
 
 ## What is missing, with rough effort (expert person-months; treat as +-2x)
@@ -60,6 +62,17 @@ Decisions: R is axiomatised as a single ordered-field structure instance (audit 
 5. Decide: build the library ourselves, or invest in Lean-kernel compatibility and import Mathlib.
 
 ## Status log (kernel features, newest first)
+- **Number theory over Z, `linear_combination`, olympiad problems** (gate S34, `nt_lib.py`, `imo_lib.py`, `lincomb.py`; findings F44; mutants LC / RQ / LS / EP / NP / IV / BC). Divisibility `Z.dvd a b := exists k, b = a * k` with its algebra,
+  division with remainder (existence and uniqueness), Bezout, `Z.is_gcd`, `Z.coprime`, `Z.prime`, Euclid's lemma, every integer above 1 has a prime divisor (46 theorems; the one classical axiom `em` is used by four of them:
+  `by_contra`, `not_forall`, `not_imp`, `Z.exists_prime_dvd`). `linear_combination c1 h1 ... cn hn` closes an equation of a commutative ring that is the combination of the hypotheses (the proof is built from the ring's own
+  congruence lemmas and a `ring` identity, and the cancellation lemma whose argument order is read off its statement); `interval_cases` splits an integer between two bounds into one goal per value (the bounds are proved by
+  `linarith`); `by_contra`. IMO 1959 P1, IMO 2019 P1 (an iff) and the irrationality of sqrt 2 are proved, and the gate checks that each statement says what it should (negative controls: nearby statements are refuted, perturbed
+  scripts are refused). The gate's randomised oracle generates 45 polynomial identities per type and requires `linear_combination` to accept exactly those the independent polynomial oracle says hold; it found four robustness
+  bugs in the tactic layer in its first run (F44).
+- **A `match` is checked on syntax** (gate S35, findings F42, F43; mutants MS1-MS17, P2, P3, M88, M89). The family of a scrutinee's type is read by unfolding definitions at its head one step at a time (at most 32), the type of the
+  match and of its branches is the motive's body with the indices and the scrutinee substituted, and evaluation is only the fallback. Kernel steps are deterministic, so the gate pins the cost: `cases` on `h : Q big` (`big`
+  computes to 16384 successors) takes about 200 steps instead of 200,000, and a proof with a hypothesis that depends on the scrutinee 384 steps instead of 2,556,726. Raw-match tests cover the 32-unfolding bound, zero-branch
+  matches on an axiom or a stuck recursive type (refused), the order in which the motive receives the indices and the scrutinee (the induction principle of `Le` as a raw match), and a motive that is a global.
 - **Conversion that scales** (gates S32, S33; findings F36-F39; mutants FX1-4, SC1-26, CM1-13, UM1-23, QM1-15). Four steps, each measured. (1) A Pi hidden behind a definition (`Not P`, `AllLe a`) is exposed on syntax, so the
   evaluator is not asked to normalise an expected type just to see a binder. (2) `SynConv`: a quick check on syntax in front of the evaluator that can only answer YES (identical nodes, congruence, binders, delta of the later-declared
   head, beta; budget 4000 steps; off with metavariables and inside the tactic scopes). (3) Sharing tables: values built from nested definitions share structure (`plus2 (plus2 (.. x))` holds the level below twice), and a

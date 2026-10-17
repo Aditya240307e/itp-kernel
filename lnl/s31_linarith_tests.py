@@ -4,7 +4,7 @@ Nothing in the tactic is trusted: it searches for a certificate and hands the ke
 the tactic FAIL. What this gate pins down is that the search is right (it finds a certificate exactly when one exists), that the facts are read from the hypotheses with the right meaning, and that nothing
 unsound reaches the kernel:
 
-  A. the polynomial reader against Python polynomial arithmetic (random expressions with + - * neg ^, numerals in all spellings, `Z.sqr` as an atom): the monomials, the exponents, the signed coefficients;
+  A. the polynomial reader against Python polynomial arithmetic (random expressions with + - * neg ^, `Z.sqr`, numerals in all spellings, the application of a function variable as an atom): the monomials, the exponents, the signed coefficients;
   B. the search against an independent decision procedure: ~600 random systems of linear inequalities, a certificate exists exactly when exact Fourier-Motzkin elimination says the system has no rational solution;
      every certificate is checked in exact arithmetic (sum m_i P_i = -kappa); the SciPy-guided path and the exact simplex agree on larger systems; pruning changes no verdict;
   C. end to end, planted: systems built to be contradictory (a hidden non-negative combination of the hypotheses is a negative constant) are refuted in every presentation of the hypotheses (<=, <, =, ~<=, ~<,
@@ -181,18 +181,19 @@ def main():
 
     # ------------------------------------------------------------------------------------------------------------------ A. the reader
     natoms = 3
-    pv = Proof(w, F([Z, Z, Z], lambda a, b, c: Eq(a, a)), 'rd'); pv.intro('a', 'b', 'c'); n_read = 0
+    ZZ = w.arrow(Z, Z)
+    pv = Proof(w, F([ZZ, Z, Z, Z], lambda g, a, b, c: Eq(a, a)), 'rd'); pv.intro('g', 'a', 'b', 'c'); n_read = 0
     with pv.focus():
-        xs = [pv.h('a'), pv.h('b'), pv.h('c')]; sy = Syntax(w, rng); sqrs = [sy.sqr(x) for x in xs]
+        gv = pv.h('g'); xs = [pv.h('a'), pv.h('b'), pv.h('c')]; sy = Syntax(w, rng); gapps = [gv(x) for x in xs]
         for case in range(170):
             e = rand_expr(rng, natoms, 4, numeral=small_num)
             if terms_bound(e) > 300: continue
-            t = sy.build(e, xs); rg = R.Ring(w, inst); got = LA.Reader(rg).poly(t); want = zclean(zpoly(e, natoms)); mine = {}
+            t = sy.build(e, xs, gv); rg = R.Ring(w, inst); got = LA.Reader(rg).poly(t); want = zclean(zpoly(e, natoms)); mine = {}
             for mono, c in got.items():
                 v = [0] * (2 * natoms)
                 for idx, ex in mono:
                     atom = rg.atoms[idx]
-                    pos = xs.index(atom) if atom in xs else natoms + sqrs.index(atom)
+                    pos = xs.index(atom) if atom in xs else natoms + gapps.index(atom)
                     v[pos] += ex
                 mine[tuple(v)] = c
             expect(mine == want, 'A  the reader gets the polynomial of %s right' % (e,)); n_read += 1
@@ -207,7 +208,10 @@ def main():
         expect(rd.poly(zmul(inst.lit(-3), zneg(a))) == {((0, 1),): 3}, 'A  (-3) * (-a)')
         expect(rd.poly(zof(nl(7))) == {(): 7} and rd.poly(zneg(zof(nl(7)))) == {(): -7} and rd.poly(Z0) == {} and rd.poly(Z1) == {(): 1}, 'A  numerals')
         n_atom = zof(w['N0'])
-        expect(rd.poly(zsqr(a)) == {((rg.atom(zsqr(a)), 1),): 1} and rd.poly(zmul(zsqr(a), zsqr(a))) == {((rg.atom(zsqr(a)), 2),): 1}, 'A  Z.sqr is an atom')
+        ia = rg.atom(a)
+        expect(rd.poly(zsqr(a)) == {((ia, 2),): 1} and rd.poly(zmul(zsqr(a), zsqr(a))) == {((ia, 4),): 1} and rd.poly(zsqr(zadd(a, Z1))) == {((ia, 2),): 1, ((ia, 1),): 2, (): 1}, 'A  Z.sqr t is t * t')
+        ig = rg.atom(gv(a))
+        expect(rd.poly(gv(a)) == {((ig, 1),): 1} and rd.poly(zmul(gv(a), gv(a))) == {((ig, 2),): 1}, 'A  an application of a function variable is an atom')
         big = {(): 1}
         pb_test = LA.Problem(w)
         with pv.focus():

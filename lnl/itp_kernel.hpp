@@ -5893,6 +5893,29 @@ inline MotiveParts motive_binders(uint32_t tgid, uint32_t n, const std::vector<N
     return mp;
 }
 
+/// The type of `match s with ...` is `motive indices s`. A motive that is a lambda over the indices and the scrutinee has its body as the result, with those arguments substituted: BETA ON SYNTAX, no
+/// evaluation, so that the result is the expected type as it was written (a constant motive -- the usual case -- has exactly its body, and building the application would mention the scrutinee and make the
+/// evaluator evaluate it: typing a nest of matches, each one the scrutinee of the next, was quadratic). Evaluating the result and quoting it back (what `infer` did for every match that is not the
+/// body of a proof, i.e. every `cases` with a hypothesis that depends on the scrutinee) unfolds every definition inside the types of the reverted hypotheses: 2.5 million steps for a five line proof
+/// about `Q big`, where `big` is a definition that computes to 16384 successors. Nothing is lost: the result is only ever compared (unify, conv: both evaluate) or taken apart by `infer(App)`,
+/// which exposes a Pi by unfolding definitions on syntax first and evaluating only if that fails.
+/// nullopt when the motive is not a lambda over all of them (a constant, a variable, an application): the caller builds the application.
+inline std::optional<NodeId> motive_result_syntactic(NodeId motive, const std::vector<NodeId>& indices, NodeId scrutinee) {
+    NodeId cur = motive;
+    for (std::size_t i = 0; i <= indices.size(); ++i) {
+        if (cur.tag != NodeType::LAMBDA) return std::nullopt;
+        cur = ctx().lambdas[cur.index].body_id;
+    }
+    if (loose_range(cur) == 0) return cur;
+    std::vector<NodeId> vals_rev; vals_rev.push_back(scrutinee);               // `instantiate` takes the INNERMOST binder first: the scrutinee, then the indices from the last
+    for (auto it = indices.rbegin(); it != indices.rend(); ++it) vals_rev.push_back(*it);
+    return instantiate(cur, vals_rev);
+}
+inline NodeId motive_result(NodeId motive, const std::vector<NodeId>& indices, NodeId scrutinee) {
+    if (auto r = motive_result_syntactic(motive, indices, scrutinee)) return *r;
+    return mk_app(apply_all(motive, indices), scrutinee);
+}
+
 inline ElabResult check_match_branches(uint32_t type_global_id, NodeId motive, const std::vector<NodeId>& branches,
                                         const std::vector<NodeId>& concrete_indices, ElabCtx& ec, ElabState& es) {
     ITP_STACK_CHECK();
@@ -5915,23 +5938,11 @@ inline ElabResult check_match_branches(uint32_t type_global_id, NodeId motive, c
         std::vector<NodeId> arg_types = apply_ctor_index_forcing(inst.arg_types, forcing);
         NodeId ctor_app = forced_ctor_app(ctor_gids[ci], ec.size(), arity, inst, forcing);
         std::vector<NodeId> forced_result_indices = apply_ctor_index_forcing_to_result_indices(inst.result_indices, forcing);
-        NodeId branch_expected = mk_app(apply_all(motive, forced_result_indices), ctor_app);
+        NodeId branch_expected = motive_result(motive, forced_result_indices, ctor_app);          // beta on syntax: a branch that takes the reverted hypotheses as more binders is checked against a Pi as written
         branch_expected = close_pi_telescope(arg_types, branch_expected, ec.size());
         if (ElabResult r = check(branches[ci], branch_expected, ec, es); !r) return r;
     }
     return {};
-}
-
-/// The type of `match s with ...` is `motive indices s`. A motive that ignores all its binders (a constant motive -- the usual case) has exactly that type
-/// as its body, so use the body: building the application would mention the scrutinee and make the evaluator evaluate it, and typing a nest of matches
-/// (each one the scrutinee of the next) was quadratic.
-inline NodeId motive_result(NodeId motive, const std::vector<NodeId>& indices, NodeId scrutinee) {
-    NodeId cur = motive;
-    for (std::size_t i = 0; i <= indices.size(); ++i) {
-        if (cur.tag != NodeType::LAMBDA) return mk_app(apply_all(motive, indices), scrutinee);
-        cur = ctx().lambdas[cur.index].body_id;
-    }
-    return loose_range(cur) == 0 ? cur : mk_app(apply_all(motive, indices), scrutinee);
 }
 
 /// The inductive family that the type of a match scrutinee belongs to, with the family's arguments (parameters and indices, in order). The type is read on SYNTAX first: a definition at the head is unfolded one
@@ -6061,7 +6072,8 @@ inline TypeResult infer_uncached(NodeId t, ElabCtx& ec, ElabState& es) {
             std::vector<NodeId> concrete_indices = std::move(fam->args);
             if (ElabResult r = verify_motive_shape(m.motive_id, static_cast<uint32_t>(concrete_indices.size()), ec, es); !r) return std::unexpected(r.error());
             if (ElabResult r = check_match_branches(type_global_id, m.motive_id, *m.branches, concrete_indices, ec, es); !r) return std::unexpected(r.error());
-            return quote(eval(motive_result(m.motive_id, concrete_indices, m.scrutinee_id), ec.values), ec.size());
+            if (auto syn = motive_result_syntactic(m.motive_id, concrete_indices, m.scrutinee_id)) return *syn;
+            return quote(eval(motive_result(m.motive_id, concrete_indices, m.scrutinee_id), ec.values), ec.size());       // a motive that is not a lambda: the application, evaluated
         }
         case NodeType::FIX: {
             Fix f = ctx().fixes[t.index];
