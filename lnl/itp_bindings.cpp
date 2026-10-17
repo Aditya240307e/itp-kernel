@@ -1,11 +1,14 @@
 // Bindings for the hybrid-variable kernel (refactor spike S1): terms, NbE, declarations, a small typing fragment and the
 // diagnostics the differential harness needs. Tactics, unification and the full typing core are ported in S2-S4.
 #include <nanobind/nanobind.h>
+#include <nanobind/ndarray.h>
 #include <nanobind/stl/optional.h>
 #include <nanobind/stl/pair.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/tuple.h>
 #include <nanobind/stl/vector.h>
+#include <algorithm>
+#include <array>
 #include <cstdlib>
 #include <functional>
 #include <sys/resource.h>
@@ -69,6 +72,141 @@ inline void require_complete_globals(itp::NodeId t, const char* what) {
 }
 template <class R> void raise_if_error(const R& r) { if (!r) throw ITPError(r.error().message); }
 
+// ===========================================================================================================================================================================================
+// The observation of a goal: a term (or a whole goal) as a strictly binary DAG of numeric arrays, which is what a learner reads. Terms are hash-consed, so a shared subterm is ONE row.
+//   tags[i]      the kind of node i (an index into OBS_TAG_NAMES below)
+//   scalar[i]    FVAR: the context LEVEL; BVAR: the de Bruijn INDEX; CONST: the global id; TYPE: the universe level; META: its id; FIX: the decreasing argument; otherwise 0
+//   child_a/b[i] the children of node i (-1 when absent). A node with more than two children packs the rest into a right-folded chain of SYNTHETIC_CONS rows:
+//                LET (type, value, body): a = type, b = cons(value, body);  MATCH (scrutinee, motive, branches..): a = scrutinee, b = cons(motive, cons(b1, ... bk)) (just the motive when there is no branch)
+//   heights[i]   0 for a leaf, else 1 + the largest height of a child: every child is strictly lower, so a level-by-level encoding is valid
+//   roots        the rows of the hypothesis types, in order, then the row of the target LAST
+// The dump is LOSSLESS (it can be turned back into the term: import_dag), which is how a probe's survivors are carried across a rewind. It is built with an explicit stack: a unary numeral tens of
+// thousands deep is an ordinary goal here.
+// ===========================================================================================================================================================================================
+constexpr uint32_t kTagFVar = 0, kTagBVar = 1, kTagApp = 2, kTagLambda = 3, kTagPi = 4, kTagType = 5, kTagConst = 6, kTagMatch = 7, kTagMeta = 8, kTagTypeUniv = 9, kTagLet = 10, kTagFix = 11, kTagSyntheticCons = 12;
+constexpr const char* kObsTagNames[] = {"FVAR", "BVAR", "APP", "LAMBDA", "PI", "TYPE", "CONST", "MATCH", "META", "TYPE_UNIV", "LET", "FIX", "SYNTHETIC_CONS"};
+
+// Dense per-kind visited arrays indexed by NodeId.index (no hashing); reset by a generation stamp, not cleared. Held by the kernel wrapper so the backing arrays are reused between calls.
+struct DenseVisited {
+    std::array<std::vector<uint32_t>, 11> gen;
+    std::array<std::vector<int32_t>, 11> slot;
+    uint32_t current_gen = 0;
+    void reset() { ++current_gen; }
+    int32_t get(itp::NodeId id) {
+        auto t = static_cast<size_t>(id.tag);
+        if (gen[t].size() <= id.index) { gen[t].resize(id.index + 1, 0); slot[t].resize(id.index + 1, -1); }
+        if (gen[t][id.index] != current_gen) return -1;
+        return slot[t][id.index];
+    }
+    void set(itp::NodeId id, int32_t v) { auto t = static_cast<size_t>(id.tag); gen[t][id.index] = current_gen; slot[t][id.index] = v; }
+};
+
+// Heap-allocated, shared by all the returned arrays through one capsule: freed when the LAST array that views it is collected.
+struct DagDumpStorage {
+    std::vector<uint32_t> tags, scalar;
+    std::vector<int32_t> child_a, child_b;
+    std::vector<uint32_t> height;
+    std::vector<int32_t> roots;
+};
+
+inline int32_t push_synthetic_cons(DagDumpStorage& out, int32_t head, int32_t rest) {
+    int32_t my = static_cast<int32_t>(out.tags.size());
+    out.tags.push_back(kTagSyntheticCons); out.scalar.push_back(0); out.child_a.push_back(head); out.child_b.push_back(rest);
+    out.height.push_back(1 + std::max(out.height[head], out.height[rest]));
+    return my;
+}
+// items[0] is reached through one cons from the head, items.back() ends the chain directly; at least one item.
+inline int32_t build_cons_chain(DagDumpStorage& out, const std::vector<int32_t>& items) {
+    int32_t chain = items.back();
+    for (std::size_t i = items.size() - 1; i > 0; --i) chain = push_synthetic_cons(out, items[i - 1], chain);
+    return chain;
+}
+
+struct DagBuilder {
+    DagDumpStorage& out; DenseVisited& visited;
+    struct Frame { itp::NodeId node; int32_t idx; std::vector<itp::NodeId> kids; std::size_t next = 0; std::vector<int32_t> kid_idx; };
+    std::vector<Frame> st;
+    DagBuilder(DagDumpStorage& o, DenseVisited& v) : out(o), visited(v) {}
+    int32_t enter(itp::NodeId n) {
+        int32_t idx = static_cast<int32_t>(out.tags.size()); visited.set(n, idx);
+        out.tags.push_back(0); out.scalar.push_back(0); out.child_a.push_back(-1); out.child_b.push_back(-1); out.height.push_back(0);
+        Frame f; f.node = n; f.idx = idx;
+        itp::inspect(n,
+            [&](itp::Var v) { out.tags[idx] = v.bound ? kTagBVar : kTagFVar; out.scalar[idx] = v.n; },
+            [&](itp::App a) { out.tags[idx] = kTagApp; f.kids = {a.fn_id, a.arg_id}; },
+            [&](itp::Lambda l) { out.tags[idx] = kTagLambda; f.kids = {l.type_id, l.body_id}; },
+            [&](itp::Pi p) { out.tags[idx] = kTagPi; f.kids = {p.dom_id, p.cod_id}; },
+            [&](itp::Let l) { out.tags[idx] = kTagLet; f.kids = {l.type_id, l.value_id, l.body_id}; },
+            [&](itp::Type t) { out.tags[idx] = kTagType; out.scalar[idx] = t.universe_level; },
+            [&](itp::Const c) { out.tags[idx] = kTagConst; out.scalar[idx] = c.global_id; },
+            [&](itp::Meta m) { out.tags[idx] = kTagMeta; out.scalar[idx] = m.meta_id; },
+            [&](itp::Match m) { out.tags[idx] = kTagMatch; f.kids.push_back(m.scrutinee_id); f.kids.push_back(m.motive_id); for (auto b : *m.branches) f.kids.push_back(b); },
+            [&](itp::Fix fx) { out.tags[idx] = kTagFix; out.scalar[idx] = fx.decreasing_arg; f.kids = {fx.fn_type, fx.body}; },
+            [&](itp::TypeUniv t) { out.tags[idx] = kTagTypeUniv; out.scalar[idx] = t.param_index; });
+        st.push_back(std::move(f));
+        return idx;
+    }
+    void finish(Frame& f) {
+        const int32_t i = f.idx; const auto& k = f.kid_idx;
+        switch (out.tags[i]) {
+            case kTagApp: case kTagLambda: case kTagPi: case kTagFix: out.child_a[i] = k[0]; out.child_b[i] = k[1]; break;
+            case kTagLet: out.child_a[i] = k[0]; out.child_b[i] = build_cons_chain(out, {k[1], k[2]}); break;
+            case kTagMatch: { out.child_a[i] = k[0]; std::vector<int32_t> items(k.begin() + 1, k.end()); out.child_b[i] = build_cons_chain(out, items); break; }
+            default: break;
+        }
+        uint32_t h = 0;
+        if (out.child_a[i] >= 0) h = std::max(h, out.height[out.child_a[i]] + 1);
+        if (out.child_b[i] >= 0) h = std::max(h, out.height[out.child_b[i]] + 1);
+        out.height[i] = h;
+    }
+    int32_t build(itp::NodeId root) {
+        int32_t ex = visited.get(root); if (ex >= 0) return ex;
+        int32_t root_idx = enter(root);
+        while (!st.empty()) {
+            std::size_t fi = st.size() - 1;
+            if (st[fi].next < st[fi].kids.size()) {
+                itp::NodeId kid = st[fi].kids[st[fi].next++];
+                int32_t known = visited.get(kid);
+                if (known >= 0) { st[fi].kid_idx.push_back(known); continue; }
+                int32_t ki = enter(kid);               // may reallocate st: the frame is addressed by position
+                st[fi].kid_idx.push_back(ki);
+            } else { finish(st[fi]); st.pop_back(); }
+        }
+        return root_idx;
+    }
+};
+inline int32_t build_dag_dump(itp::NodeId root, DagDumpStorage& out, DenseVisited& visited) { return DagBuilder(out, visited).build(root); }
+
+/// The terms of a dump, rebuilt with the kernel's own constructors (so hash-consed together with whatever already exists): children first, by height. Metavariables and TypeUniv are refused.
+inline std::vector<itp::NodeId> import_dag(const DagDumpStorage& d) {
+    const std::size_t n = d.tags.size();
+    std::vector<itp::NodeId> built(n, itp::NodeId{itp::NodeType::VAR, 0});
+    std::vector<int32_t> order(n);
+    for (std::size_t i = 0; i < n; ++i) order[i] = static_cast<int32_t>(i);
+    std::stable_sort(order.begin(), order.end(), [&](int32_t a, int32_t b) { return d.height[a] < d.height[b]; });
+    auto chain_items = [&](int32_t head) { std::vector<int32_t> items; int32_t x = head; while (d.tags[x] == kTagSyntheticCons) { items.push_back(d.child_a[x]); x = d.child_b[x]; } items.push_back(x); return items; };
+    for (int32_t i : order) {
+        switch (d.tags[i]) {
+            case kTagFVar: built[i] = itp::mk_fvar(d.scalar[i]); break;
+            case kTagBVar: built[i] = itp::mk_bvar(d.scalar[i]); break;
+            case kTagApp: built[i] = itp::mk_app(built[d.child_a[i]], built[d.child_b[i]]); break;
+            case kTagLambda: built[i] = itp::mk_lambda(built[d.child_a[i]], built[d.child_b[i]]); break;
+            case kTagPi: built[i] = itp::mk_pi(built[d.child_a[i]], built[d.child_b[i]]); break;
+            case kTagType: built[i] = itp::mk_type(d.scalar[i]); break;
+            case kTagConst: built[i] = itp::mk_const(d.scalar[i]); break;
+            case kTagLet: { auto it = chain_items(d.child_b[i]); built[i] = itp::mk_let(built[d.child_a[i]], built[it[0]], built[it[1]]); break; }
+            case kTagMatch: {
+                auto it = chain_items(d.child_b[i]); std::vector<itp::NodeId> branches;
+                for (std::size_t j = 1; j < it.size(); ++j) branches.push_back(built[it[j]]);
+                built[i] = itp::mk_match(built[d.child_a[i]], built[it[0]], std::move(branches)); break; }
+            case kTagFix: built[i] = itp::mk_fix(built[d.child_a[i]], d.scalar[i], built[d.child_b[i]]); break;
+            case kTagSyntheticCons: break;
+            default: throw ITPError("import_dag: a metavariable or an unevaluated universe parameter cannot be imported");
+        }
+    }
+    return built;
+}
+
 // Wraps itp::ProofState; keeps a raw pointer to its Kernel (start_proof binds nb::keep_alive<0,1> so the kernel outlives it).
 struct ProofStateHandle {
     std::unique_ptr<itp::ProofState> ps = std::make_unique<itp::ProofState>();
@@ -86,7 +224,9 @@ struct ProofStateHandle {
     void rewrite_(itp::NodeId eq_term, itp::NodeId x, itp::NodeId y, uint32_t transport_gid, uint32_t symm_gid, std::optional<uint32_t> tm) {
         auto g = activate(); require_global(transport_gid, "rewrite transport lemma"); require_global(symm_gid, "rewrite symmetry lemma"); uint32_t sc = scope_of(tm); require_scoped(eq_term, sc, "rewrite eq_term"); require_scoped(x, sc, "rewrite x"); require_scoped(y, sc, "rewrite y"); raise_if_error(itp::rewrite_eq(*ps, eq_term, x, y, transport_gid, symm_gid, tm));
     }
+    void clear_(const std::vector<uint32_t>& levels, std::optional<uint32_t> tm) { auto g = activate(); raise_if_error(itp::clear_hyps(*ps, levels, tm)); }
     void change_(itp::NodeId new_target, std::optional<uint32_t> tm) { auto g = activate(); require_scoped(new_target, scope_of(tm), "change"); raise_if_error(itp::change_target(*ps, new_target, tm)); }
+    std::vector<uint32_t> last_reverted() const { return ps->last_reverted; }   // the hypotheses the latest cases / induct reverted (see ProofState::last_reverted)
     bool is_complete() { auto g = activate(); return itp::proof_complete(*ps); }
     // The current proof term. While goals are open it contains holes (metavariables); check_open and declare_checked refuse such a term, so an unfinished proof can never be admitted.
     itp::NodeId extract() { auto g = activate(); return itp::extract_proof_term(root_meta_id); }
@@ -119,6 +259,12 @@ struct KernelWrapper {
     // ---- S5: the search's probing protocol. A probe is: checkpoint, fork the goal, apply a tactic to the fork, read off, rewind. Rewind reverts the
     // ExecutionContext (node pools, metas, derived globals) but cannot see a ProofState, which is why a probe works on a FORK and discards it.
     itp::ExecutionContext::Checkpoint checkpoint() { auto g = activate(); return itp::ctx().checkpoint(); }
+    /// The number of nodes in each pool (variables, applications, lambdas, lets, pis, types, constants, matches, metavariables, universe parameters, fixes): what a probe must leave exactly as it found it
+    /// (plus, for a probe that succeeded, the nodes of the goals it kept).
+    std::vector<uint64_t> pool_sizes() {
+        auto g = activate(); auto cp = itp::ctx().sizes();
+        return {cp.vars_n, cp.apps_n, cp.lambdas_n, cp.lets_n, cp.pis_n, cp.types_n, cp.consts_n, cp.matches_n, cp.metas_n, cp.type_univs_n, cp.fixes_n};
+    }
     void rewind(const itp::ExecutionContext::Checkpoint& cp) { auto g = activate(); itp::ctx().rewind(cp); }
     ProofStateHandle fork_single_goal(ProofStateHandle& source, uint32_t target_meta_id) {
         auto g = activate();
@@ -392,6 +538,91 @@ struct KernelWrapper {
             [&](itp::Fix f) -> nb::object { return nb::make_tuple("fix", f.fn_type, f.decreasing_arg, f.body); },
             [&](itp::TypeUniv t) -> nb::object { return nb::make_tuple("tuniv", t.param_index); });
     }
+
+    // ---- the observation of goals and terms (see the comment above DagDumpStorage), and the end of a probe
+    DenseVisited dag_visited;       // persistent: its arrays are reused between calls
+    using Arr32 = nb::ndarray<nb::numpy, uint32_t, nb::ndim<1>>;
+    using ArrI32 = nb::ndarray<nb::numpy, int32_t, nb::ndim<1>>;
+    static nb::object pack_dump(DagDumpStorage* storage) {
+        nb::capsule owner(storage, [](void* p) noexcept { delete static_cast<DagDumpStorage*>(p); });
+        std::size_t n = storage->tags.size(), r = storage->roots.size();
+        return nb::make_tuple(Arr32(storage->tags.data(), {n}, owner), Arr32(storage->scalar.data(), {n}, owner), ArrI32(storage->child_a.data(), {n}, owner),
+                              ArrI32(storage->child_b.data(), {n}, owner), ArrI32(storage->roots.data(), {r}, owner), Arr32(storage->height.data(), {n}, owner));
+    }
+    /// The dump of a goal given as (target, hypothesis types): the hypotheses first, in order, then the target; `roots` names their rows. Needs no ProofState.
+    nb::object observe_goal(itp::NodeId target, const std::vector<itp::NodeId>& hyp_types) {
+        auto g = activate(); require_scoped_telescope(hyp_types, "hypothesis type"); require_scoped(target, hyp_types.size(), "target");
+        auto* storage = new DagDumpStorage(); dag_visited.reset(); DagBuilder b(*storage, dag_visited);
+        for (const auto& h : hyp_types) storage->roots.push_back(b.build(h));
+        storage->roots.push_back(b.build(target));
+        return pack_dump(storage);
+    }
+    /// The dump of ONE term (the roots array has the one entry 0).
+    nb::object observe_term(itp::NodeId term) {
+        auto g = activate(); require_node(term, "observe_term");
+        auto* storage = new DagDumpStorage(); dag_visited.reset(); DagBuilder b(*storage, dag_visited);
+        storage->roots.push_back(b.build(term));
+        return pack_dump(storage);
+    }
+    /// (tag, scalar) of the root of each term, as the first row of observe_term would report them, in ONE call: all an embedding of an atom (a lemma, a hypothesis) needs.
+    nb::object term_features(const std::vector<itp::NodeId>& nodes) {
+        auto g = activate();
+        auto* tags = new std::vector<uint32_t>(); auto* scalars = new std::vector<uint32_t>(); tags->reserve(nodes.size()); scalars->reserve(nodes.size());
+        for (const auto& n : nodes) {
+            require_node(n, "term_features");
+            uint32_t tg = 0, sc = 0;
+            itp::inspect(n,
+                [&](itp::Var v) { tg = v.bound ? kTagBVar : kTagFVar; sc = v.n; }, [&](itp::App) { tg = kTagApp; }, [&](itp::Lambda) { tg = kTagLambda; }, [&](itp::Pi) { tg = kTagPi; },
+                [&](itp::Let) { tg = kTagLet; }, [&](itp::Type t) { tg = kTagType; sc = t.universe_level; }, [&](itp::Const c) { tg = kTagConst; sc = c.global_id; },
+                [&](itp::Meta m) { tg = kTagMeta; sc = m.meta_id; }, [&](itp::Match) { tg = kTagMatch; }, [&](itp::Fix fx) { tg = kTagFix; sc = fx.decreasing_arg; },
+                [&](itp::TypeUniv t) { tg = kTagTypeUniv; sc = t.param_index; });
+            tags->push_back(tg); scalars->push_back(sc);
+        }
+        struct Owner { std::vector<uint32_t>* a; std::vector<uint32_t>* b; };
+        nb::capsule owner(new Owner{tags, scalars}, [](void* p) noexcept { auto* o = static_cast<Owner*>(p); delete o->a; delete o->b; delete o; });
+        std::size_t k = tags->size();
+        return nb::make_tuple(Arr32(tags->data(), {k}, owner), Arr32(scalars->data(), {k}, owner));
+    }
+    /// The library lemmas the index offers for a goal given as (target, number of hypotheses): the lookup of apply_candidates, without a ProofState.
+    std::vector<itp::NodeId> library_candidates(const itp::DiscriminationTree& lib, itp::NodeId target, uint32_t nhyps) {
+        auto g = activate(); require_scoped(target, nhyps, "target"); return lib.candidates_for(target, nhyps);
+    }
+    /// Ends a probe begun at checkpoint `cp` (taken BEFORE the probe's goal was made). Reads the goals the probe left, rewinds everything since `cp` -- the proof-term scaffolding, the metavariables, the
+    /// scratch goal -- and rebuilds the goals' types from a dump, so that the survivors are the only nodes the probe leaves behind. Returns a list of (target, hypothesis types, hypothesis names), or None
+    /// when a goal is ill-scoped or mentions a metavariable, or a unification constraint was left pending (a hole that another goal depends on: the goals are not independent, so the step is not offered). The probe must not be used afterwards.
+    nb::object finish_probe(const itp::ExecutionContext::Checkpoint& cp, ProofStateHandle& psh) {
+        auto g = activate();
+        itp::ctx().validate_checkpoint(cp);            // before anything is touched: a refused checkpoint leaves the probe as it was
+        auto& goals = psh.ps->goals;
+        bool ok = psh.ps->es.pending.empty();          // a constraint the unifier had to postpone ties the goals together (a metavariable it mentions is a goal of its own): they are not independent
+        for (const auto& goal : goals) {
+            if (!ok) break;
+            const uint32_t nh = static_cast<uint32_t>(goal.hyps.size());
+            if (!itp::detail::well_scoped(goal.target, nh) || itp::node_info(goal.target).has_meta()) { ok = false; break; }
+            for (uint32_t i = 0; i < nh && ok; ++i) if (!itp::detail::well_scoped(goal.hyps[i].type, i) || itp::node_info(goal.hyps[i].type).has_meta()) ok = false;
+            if (!ok) break;
+        }
+        DagDumpStorage dump; std::vector<std::vector<std::string>> names;
+        if (ok) {
+            dag_visited.reset(); DagBuilder b(dump, dag_visited);
+            for (const auto& goal : goals) {
+                std::vector<std::string> nm;
+                for (const auto& h : goal.hyps) { dump.roots.push_back(b.build(h.type)); nm.push_back(h.name); }
+                dump.roots.push_back(b.build(goal.target)); names.push_back(std::move(nm));
+            }
+        }
+        goals.clear();
+        itp::ctx().rewind(cp);
+        if (!ok) return nb::none();
+        std::vector<itp::NodeId> nodes = import_dag(dump);
+        nb::list children; std::size_t off = 0;
+        for (const auto& nm : names) {
+            std::vector<itp::NodeId> hyps; for (std::size_t i = 0; i < nm.size(); ++i) hyps.push_back(nodes[dump.roots[off + i]]);
+            itp::NodeId target = nodes[dump.roots[off + nm.size()]]; off += nm.size() + 1;
+            children.append(nb::make_tuple(nb::cast(target), nb::cast(hyps), nb::cast(nm)));
+        }
+        return std::move(children);
+    }
 };
 
 inline itp::ContextGuard ProofStateHandle::activate() { return kernel->activate(); }
@@ -438,6 +669,8 @@ NB_MODULE(itp_env_lnl, m) {
         .def("exact", &ProofStateHandle::exact_, "term"_a, "target_meta_id"_a = nb::none())
         .def("rewrite", &ProofStateHandle::rewrite_, "eq_term"_a, "x"_a, "y"_a, "transport_gid"_a, "symm_gid"_a, "target_meta_id"_a = nb::none())
         .def("change", &ProofStateHandle::change_, "new_target"_a, "target_meta_id"_a = nb::none())
+        .def("clear", &ProofStateHandle::clear_, "levels"_a, "target_meta_id"_a = nb::none())
+        .def("last_reverted", &ProofStateHandle::last_reverted)
         .def("is_complete", &ProofStateHandle::is_complete)
         .def("extract", &ProofStateHandle::extract)
         .def("num_goals", &ProofStateHandle::num_goals)
@@ -452,6 +685,7 @@ NB_MODULE(itp_env_lnl, m) {
         .def(nb::init<>())
         .def("start_proof", &KernelWrapper::start_proof, "goal_type"_a, nb::keep_alive<0, 1>())
         .def("checkpoint", &KernelWrapper::checkpoint)
+        .def("pool_sizes", &KernelWrapper::pool_sizes)
         .def("rewind", &KernelWrapper::rewind, "checkpoint"_a)
         .def("fork_single_goal", &KernelWrapper::fork_single_goal, "source"_a, "target_meta_id"_a, nb::keep_alive<0, 1>())
         .def("materialize_from_node", &KernelWrapper::materialize_from_node, "target"_a, "hyp_types"_a, "hyp_names"_a, nb::keep_alive<0, 1>())
@@ -529,5 +763,14 @@ NB_MODULE(itp_env_lnl, m) {
         .def("list_globals", &KernelWrapper::list_globals)
         .def("global_info", &KernelWrapper::global_info, "gid"_a)
         .def("dump_raw", &KernelWrapper::dump_raw, "term"_a)
-        .def("view", &KernelWrapper::view, "term"_a);
+        .def("view", &KernelWrapper::view, "term"_a)
+        .def("observe_goal", &KernelWrapper::observe_goal, "target"_a, "hyp_types"_a)
+        .def("observe_term", &KernelWrapper::observe_term, "term"_a)
+        .def("term_features", &KernelWrapper::term_features, "terms"_a)
+        .def("library_candidates", &KernelWrapper::library_candidates, "library"_a, "target"_a, "num_hyps"_a)
+        .def("finish_probe", &KernelWrapper::finish_probe, "checkpoint"_a, "probe"_a);
+    {
+        nb::list tag_names; for (const char* t : kObsTagNames) tag_names.append(t);
+        m.attr("OBS_TAG_NAMES") = nb::tuple(tag_names);
+    }
 }

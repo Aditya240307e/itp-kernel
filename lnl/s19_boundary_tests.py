@@ -245,6 +245,33 @@ def cases():
     add('close_telescope: unknown kind', 'reject', lambda w: w.k.close_telescope('bogus', [w.NAT], w.NAT, 0))
     add('lift: shifting a bound variable past the end of the index range', 'reject', lambda w: w.k.lift(w.b0, 2**32 - 1, 0))
     add('instantiate: more values than binders', 'accept', lambda w: w.k.instantiate(w.b0, [w.Z, w.Z, w.Z]))
+    # ---- checkpoints: rewind and finish_probe act on the whole context, so a checkpoint must be one of THIS context whose state still exists (a rewind cuts every node pool back to the sizes it recorded)
+    def cp_foreign(w): w2 = W(); w.k.rewind(w2.k.checkpoint())
+    add('rewind: a checkpoint of another kernel', 'reject', cp_foreign)
+    def cp_foreign_live(w): k = w.k; k.checkpoint(); w2 = W(); k.rewind(w2.k.checkpoint())      # both are the first checkpoint of their kernel: the same serial number, live in both
+    add('rewind: a checkpoint of another kernel whose serial number is also live here', 'reject', cp_foreign_live)
+    def cp_stale(w):
+        k = w.k; cp1 = k.checkpoint(); k.mk_app(w.S, k.mk_app(w.S, k.mk_app(w.S, w.one))); cp2 = k.checkpoint(); k.mk_lambda(w.NAT, k.mk_app(w.S, k.mk_app(w.S, k.mk_app(w.S, w.b0))))
+        k.rewind(cp1); k.rewind(cp2)
+    add('rewind: a checkpoint that a rewind to an earlier one has discarded', 'reject', cp_stale)
+    def cp_nested(w):
+        k = w.k; cp1 = k.checkpoint(); k.mk_app(w.S, k.mk_app(w.S, k.mk_app(w.S, w.one))); cp2 = k.checkpoint(); k.mk_app(w.S, k.mk_app(w.S, k.mk_app(w.S, k.mk_app(w.S, w.one))))
+        k.rewind(cp2); k.rewind(cp1)
+    add('rewind: nested checkpoints, innermost first', 'accept', cp_nested)
+    def cp_twice(w): k = w.k; cp = k.checkpoint(); k.mk_app(w.S, k.mk_app(w.S, k.mk_app(w.S, w.one))); k.rewind(cp); k.rewind(cp); k.rewind(cp)
+    add('rewind: the same checkpoint again and again', 'accept', cp_twice)
+    def cp_after_inner(w):
+        k = w.k; cp1 = k.checkpoint(); cp2 = k.checkpoint(); k.mk_app(w.S, k.mk_app(w.S, k.mk_app(w.S, w.one))); k.rewind(cp2); k.mk_app(w.S, k.mk_app(w.S, k.mk_app(w.S, w.one))); k.rewind(cp1); k.rewind(cp1)
+    add('rewind: the outer checkpoint is still good after the inner one was used', 'accept', cp_after_inner)
+    def fp_foreign(w): w2 = W(); w.k.finish_probe(w2.k.checkpoint(), w.k.start_proof(w.stmt))
+    add('finish_probe: a checkpoint of another kernel', 'reject', fp_foreign)
+    def fp_foreign_live(w): k = w.k; k.checkpoint(); w2 = W(); k.finish_probe(w2.k.checkpoint(), k.start_proof(w.stmt))
+    add('finish_probe: a checkpoint of another kernel whose serial number is also live here', 'reject', fp_foreign_live)
+    def fp_stale(w):
+        k = w.k; cp1 = k.checkpoint(); cp2 = k.checkpoint(); k.rewind(cp1); k.finish_probe(cp2, k.start_proof(w.stmt))
+    add('finish_probe: a checkpoint that a rewind to an earlier one has discarded', 'reject', fp_stale)
+    def fp_ok(w): k = w.k; cp = k.checkpoint(); k.finish_probe(cp, k.start_proof(w.stmt))
+    add('finish_probe: a checkpoint taken before the probe', 'accept', fp_ok)
     return C
 
 
@@ -289,7 +316,7 @@ def parse_params(doc):
 
 
 class Fuzz:
-    SKIP = {'checkpoint', 'rewind', 'set_option', 'declare_quot'}      # stale-node protocols are covered by the probe gates; options/quot would change the world for the whole run
+    SKIP = {'checkpoint', 'rewind', 'finish_probe', 'set_option', 'declare_quot'}      # stale-node protocols are covered by the probe gates (S5, S36) and by the cases of part A; options/quot would change the world for the whole run
     def __init__(self, seed):
         self.rng = random.Random(seed); self.w = W(); w = self.w; k = w.k; self.k = k
         self.nodes = [w.NAT, w.Z, w.S, w.ADD, w.EQ, w.REFL, w.T0, w.T1, w.one, w.stmt, w.refl_z, w.b0, w.b1, w.f0, w.f1, w.f2, w.f5, w.lam_b1,

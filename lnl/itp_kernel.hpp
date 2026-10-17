@@ -22,7 +22,9 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <expected>
 #include <functional>
@@ -1150,6 +1152,11 @@ struct ExecutionContext {
     static constexpr std::size_t kMaxInferCache = std::size_t(1) << 20;   // entries; the table is dropped when it fills up
     uint64_t infer_cache_epoch = ~uint64_t(0);
     uint64_t next_ctx_uid = 0;                       // elaboration contexts (ElabCtx) are numbered as they are extended; never reused, never reset
+    /// Checkpoints (see `checkpoint` / `rewind`): this context's identity, the number the next checkpoint gets, and the numbers of the checkpoints whose state still exists. A rewind discards every state made
+    /// after its checkpoint, and so every checkpoint made after it: rewinding to one of those, or to a checkpoint of another context, would cut the node pools at sizes that never belonged together.
+    uint64_t context_id = []{ static std::atomic<uint64_t> n{0}; return ++n; }();
+    uint64_t checkpoint_serial = 0;
+    std::vector<uint64_t> live_checkpoints;          // increasing
     bool verify_memo = false;                        // debugging: on every typing-memo hit, recompute the type and compare (see infer)
     uint32_t memo_off = 0;                           // > 0: the typing memo is neither read nor written (verification recomputes with it off)
     struct MemoOff { ExecutionContext& x; explicit MemoOff(ExecutionContext& e) : x(e) { ++x.memo_off; } ~MemoOff() { --x.memo_off; } MemoOff(const MemoOff&) = delete; MemoOff& operator=(const MemoOff&) = delete; };
@@ -1230,14 +1237,32 @@ struct ExecutionContext {
         MetaContext::Mark meta_mark;
         std::size_t globals_n; // safety check only; globals itself is never rewound
         uint64_t body_installs_n; // safety check only (see GlobalEnv::body_installs)
+        uint64_t owner = 0;    // the context that took it
+        uint64_t serial = 0;   // the order checkpoints were taken in (0: not a checkpoint, only the sizes of the pools)
     };
 
-    Checkpoint checkpoint() const {
+    /// The sizes of the pools now (not a checkpoint: it cannot be rewound to).
+    Checkpoint sizes() const {
         return Checkpoint{
             vars.size(), apps.size(), lambdas.size(), lets.size(), pis.size(), types.size(),
             consts.size(), matches.size(), metas.size(), type_univs.size(), fixes.size(),
             meta_ctx.checkpoint(), globals.defs.size(), globals.body_installs
         };
+    }
+
+    Checkpoint checkpoint() {
+        Checkpoint cp = sizes(); cp.owner = context_id; cp.serial = ++checkpoint_serial;
+        live_checkpoints.push_back(cp.serial);
+        return cp;
+    }
+
+    /// Throws unless `cp` was taken by this context and the state it describes still exists (no rewind to an earlier checkpoint has discarded it). Changes nothing.
+    void validate_checkpoint(const Checkpoint& cp) const {
+        if (cp.owner != context_id)       // (a Checkpoint made by sizes() has owner 0; context ids start at 1)
+            throw std::logic_error("ExecutionContext::rewind: this checkpoint was not taken by this context");
+        auto it = std::lower_bound(live_checkpoints.begin(), live_checkpoints.end(), cp.serial);
+        if (it == live_checkpoints.end() || *it != cp.serial)
+            throw std::logic_error("ExecutionContext::rewind: this checkpoint is stale -- a rewind to an earlier checkpoint has already discarded the state it describes");
     }
 
     // Derived globals are the ones the kernel itself synthesises on demand, deterministically and
@@ -1248,6 +1273,7 @@ struct ExecutionContext {
     }
 
     void rewind(const Checkpoint& cp) {
+        validate_checkpoint(cp);
         if (globals.body_installs != cp.body_installs_n)
             throw std::logic_error("ExecutionContext::rewind: a recursive function was finished since this checkpoint -- rewinding would silently orphan the nodes of its body. "
                                    "Do not call rewind() for an episode whose result is being kept.");
@@ -1276,6 +1302,7 @@ struct ExecutionContext {
             if (unit_type_gid && *unit_type_gid >= keep) { unit_type_gid.reset(); unit_ctor_gid.reset(); }
             if (empty_type_gid && *empty_type_gid >= keep) empty_type_gid.reset();
         }
+        live_checkpoints.erase(std::upper_bound(live_checkpoints.begin(), live_checkpoints.end(), cp.serial), live_checkpoints.end());      // the checkpoints taken after this one describe states that are gone
         param_cache.clear(); clear_term_caches();
         vars.rewind(cp.vars_n);
         apps.rewind(cp.apps_n);
@@ -2134,6 +2161,18 @@ inline uint32_t eval_mode_word() {
     return (no_delta_flag() ? 1u : 0u) | (guarded_unfold_flag() ? 2u : 0u) | (guarded_compute_flag() ? 4u : 0u) | (fold_solutions_flag() ? 8u : 0u);
 }
 
+/// The value of a `match` whose scrutinee is the constructor value `vc`, given the branch selected for its constructor and the environment `env` the match was evaluated in: the branch applied to the
+/// constructor's stored arguments (parameters, then fields) in turn. A branch is a lambda over them: they are bound directly instead of building a closure and applying it once per argument; one that is
+/// not a lambda for all of them (a constant of function type, say) is evaluated and applied to the rest.
+inline Value select_branch(const VCtor& vc, NodeId branch, const Env& env) {
+    const std::size_t nargs = vc.args.size();
+    Env e = env; std::size_t i = 0;
+    while (i < nargs && branch.tag == NodeType::LAMBDA) { e = e.extend(vc.args[i]); branch = ctx().lambdas[branch.index].body_id; ++i; }
+    Value result = eval(branch, e);
+    for (; i < nargs; ++i) result = apply(std::move(result), vc.args[i]);
+    return result;
+}
+
 inline Value eval(NodeId term, const Env& env) {
     ITP_STACK_CHECK();
     switch (term.tag) {
@@ -2183,16 +2222,8 @@ inline Value eval(NodeId term, const Env& env) {
             const Match& m = ctx().matches[term.index];
             Value scrutinee = eval(m.scrutinee_id, env);
             if (const VCtor* vc = std::get_if<VCtor>(&scrutinee)) {
-                // Evaluate the selected branch and apply it to the
-                // constructor's stored arguments in turn. A branch is a lambda over the constructor's fields: bind them
-                // directly instead of building a closure and applying it once per field.
-                NodeId branch = m.branches->at(vc->ctor_idx);
-                const std::size_t nargs = vc->args.size();
-                Env e = env; std::size_t i = 0;
-                while (i < nargs && branch.tag == NodeType::LAMBDA) { e = e.extend(vc->args[i]); branch = ctx().lambdas[branch.index].body_id; ++i; }
-                Value result = eval(branch, e);
-                for (; i < nargs; ++i) result = apply(std::move(result), vc->args[i]);
-                return result;
+                // Evaluate the selected branch and apply it to the constructor's stored arguments in turn.
+                return select_branch(*vc, m.branches->at(vc->ctor_idx), env);
             }
             if (const VNeutral* n = std::get_if<VNeutral>(&scrutinee)) {
                 // The scrutinee is stuck, so the match itself becomes
@@ -3434,15 +3465,12 @@ inline std::string print(NodeId id, const DiagnosticTable* diag);
 /// apply(). Returns v unchanged otherwise (not meta-headed, or meta-
 /// headed but still genuinely unsolved).
 ///
-/// A non-ApplyFrame spine entry (a MatchFrame -- a meta
-/// being matched on directly, before it was solved) is left
-/// unresolved rather than handled: no existing call site in this
-/// kernel ever mints a meta applied that way (apply()/cases()/
-/// induct() only ever apply a fresh meta to its own ambient context's
-/// local variables, always via ApplyFrame), so this is deliberately
-/// conservative rather than guessed at without a confirmed need --
-/// any later comparison against the stale, unresolved form simply
-/// fails as an ordinary mismatch, which is safe.
+/// A MatchFrame in the spine -- a meta that was matched on before it was solved, which is what evaluating a recursive function at an argument that is a metavariable
+/// produces (`?x + 1` is a `match` on `?x`) -- is re-eliminated too: the solution selects its branch when it is a constructor, and the match stays stuck on it
+/// otherwise. (An earlier version applied the ApplyFrames and silently DROPPED the match frames: `?x + 1`, with ?x solved to `a`, then resolved to `a` itself, and
+/// the unifier accepted `Succ ?x = ?x + 1` against the false `Succ a = a`. The kernel's final check rejected the proofs that came of it, but apply closed goals it should not have.)
+/// If the match cannot be eliminated (the solution is neither a constructor nor stuck -- an ill-typed solution, which F25 rejects later) the form is left
+/// unresolved: that is a pending constraint, and the constraint is decided afresh from syntax when it is drained.
 ///
 /// Exists because a Value is an immutable snapshot, taken at whatever
 /// moment eval() originally produced it -- if the SAME meta appears
@@ -3468,6 +3496,17 @@ inline std::string print(NodeId id, const DiagnosticTable* diag);
 /// resulting (unsound) term -- so the kernel's own final soundness
 /// boundary held, but the tactic layer's own notion of "solved" was
 /// genuinely, importantly wrong.
+/// A stuck `match` (a MatchFrame of a neutral's spine) given a value for its scrutinee: the branch of a constructor, applied to the constructor's fields (as `eval` does for a match node whose scrutinee
+/// is a constructor), or the same match stuck on the neutral. nullopt if the scrutinee is neither (an ill-typed value).
+inline std::optional<Value> eliminate_match_frame(Value scrutinee, const MatchFrame& mf) {
+    if (const VCtor* vc = std::get_if<VCtor>(&scrutinee)) {
+        if (vc->ctor_idx >= mf.branches.size()) return std::nullopt;
+        return select_branch(*vc, mf.branches[vc->ctor_idx], mf.captured_env);
+    }
+    if (const VNeutral* n = std::get_if<VNeutral>(&scrutinee)) return Value{VNeutral{n->head, n->spine.appended(EliminatorFrame{mf})}};
+    return std::nullopt;
+}
+
 inline Value resolve_solved_meta_head(Value v) {
     auto* n = std::get_if<VNeutral>(&v);
     if (!n || n->head.kind != NeutralHead::Kind::Meta) return v;
@@ -3477,6 +3516,10 @@ inline Value resolve_solved_meta_head(Value v) {
     for (const auto& frame : n->spine) {
         if (auto* af = std::get_if<ApplyFrame>(&frame)) {
             resolved = apply(std::move(resolved), af->arg);
+        } else {
+            auto next = eliminate_match_frame(std::move(resolved), std::get<MatchFrame>(frame));
+            if (!next) return v;                       // (cannot be eliminated: left as it was, a pending constraint for the unifier)
+            resolved = std::move(*next);
         }
     }
     return resolved;
@@ -3522,6 +3565,17 @@ inline void collect_fvars(NodeId t, std::unordered_set<uint32_t>& out) {
     ITP_STACK_CHECK();
     if (t.tag == NodeType::VAR) { Var v = ctx().vars[t.index]; if (!v.bound) out.insert(v.n); return; }
     any_child(t, [&](NodeId c) { collect_fvars(c, out); return false; });
+}
+/// The context variables a term mentions, each node visited once (shared sub-terms are not walked again; nodes that mention no context variable are skipped without a visit).
+inline void collect_fvars_dag(NodeId root, std::unordered_set<uint32_t>& out) {
+    std::unordered_set<uint64_t> seen; std::vector<NodeId> stack{root};
+    while (!stack.empty()) {
+        NodeId t = stack.back(); stack.pop_back();
+        if (node_info(t).fvars == 0) continue;
+        if (!seen.insert((static_cast<uint64_t>(static_cast<uint32_t>(t.tag)) << 32) | t.index).second) continue;
+        if (t.tag == NodeType::VAR) { Var v = ctx().vars[t.index]; if (!v.bound) out.insert(v.n); continue; }
+        any_child(t, [&](NodeId c) { stack.push_back(c); return false; });
+    }
 }
 inline bool occurs_meta(uint32_t meta_id, NodeId t) {
     ITP_STACK_CHECK();
@@ -4469,6 +4523,9 @@ struct ProofState {
                   // while solving one goal may only become solvable once a
                   // SIBLING goal's meta is resolved, so this cannot be
                   // scoped to a single Goal
+    // The levels of the hypotheses that the latest successful `cases` / `induct` reverted. Each new goal brings them back (after the constructor's fields), so the originals, and the variable that
+    // was split, are dead copies in the new goals' contexts: a caller that wants them gone (`clear_hyps`) reads this. Informational only; no tactic reads it.
+    std::vector<uint32_t> last_reverted;
 };
 
 /// Locates which entry of ps.goals a tactic should operate on: the goal
@@ -6577,6 +6634,46 @@ inline ElabResult change_target(ProofState& ps, NodeId new_target, std::optional
     return {};
 }
 
+/// Removes hypotheses from a goal (`clear`). `drop` lists their levels; the target and the hypotheses that stay must not mention any of them (this is checked, not assumed). The hypotheses that stay keep their
+/// order and are renumbered. The proof of the new goal is, term for term, the proof of the old one: the old goal's metavariable is solved by the new one applied to the hypotheses that stayed. What this is
+/// for: `cases` and `induct` leave the variable they split, and the hypotheses they reverted, behind as dead copies; a caller that wants a context without them (a search, where goals that differ only by dead
+/// hypotheses are the same goal) removes them here.
+inline ElabResult clear_hyps(ProofState& ps, const std::vector<uint32_t>& drop, std::optional<uint32_t> target_meta_id = std::nullopt) {
+    TacticTxn txn(ps);                                                 // all-or-nothing against exceptions (see TacticTxn)
+    auto idx_opt = find_goal_index(ps, target_meta_id);
+    if (!idx_opt) return no_goal_error("clear", target_meta_id);
+    Goal g = ps.goals[*idx_opt];
+    const uint32_t n = g.ec.size();
+    std::vector<char> dropped(n, 0);
+    for (uint32_t l : drop) {
+        if (l >= n) return std::unexpected(TypeError{TypeErrorKind::Other, g.target, std::nullopt, "clear: there is no hypothesis at level " + std::to_string(l)});
+        dropped[l] = 1;
+    }
+    auto mentions_dropped = [&](NodeId t) {
+        std::unordered_set<uint32_t> fv; detail::collect_fvars_dag(t, fv);
+        for (uint32_t l : fv) if (l < n && dropped[l]) return true;
+        return false;
+    };
+    if (mentions_dropped(g.target))
+        return std::unexpected(TypeError{TypeErrorKind::Other, g.target, std::nullopt, "clear: the goal mentions a hypothesis that is to be removed"});
+    std::unordered_map<uint32_t, NodeId> renumber; std::vector<uint32_t> kept; ElabCtx ec{}; std::vector<Hypothesis> hyps;
+    for (uint32_t l = 0; l < n; ++l) {
+        if (dropped[l]) continue;
+        if (mentions_dropped(g.hyps[l].type))
+            return std::unexpected(TypeError{TypeErrorKind::Other, g.hyps[l].type, std::nullopt, "clear: hypothesis " + g.hyps[l].name + " depends on a hypothesis that is to be removed"});
+        NodeId ty = replace_fvars(g.hyps[l].type, renumber);
+        ec = ec.extend(ty); hyps.push_back(Hypothesis{g.hyps[l].name, ty});
+        renumber[l] = mk_fvar(static_cast<uint32_t>(kept.size())); kept.push_back(l);
+    }
+    NodeId new_target = replace_fvars(g.target, renumber);
+    uint32_t new_meta = ctx().meta_ctx.fresh(close_pi_over_context(new_target, ec), ec.size());
+    NodeId applied = mk_meta(new_meta);
+    for (uint32_t l : kept) applied = mk_app(applied, mk_fvar(l));
+    ctx().meta_ctx.solve(g.meta_id, close_over_context(applied, g.ec));
+    ps.goals[*idx_opt] = Goal{new_meta, ec, std::move(hyps), new_target};
+    return {};
+}
+
 /// Rewrites occurrences of `x` in the goal by `y`, given eq_term : Eq A x y.  goal[x] <-- transport A (fun z => goal[z]) y x (symm eq) goal[y]
 inline ElabResult rewrite_eq(ProofState& ps, NodeId eq_term, NodeId x, NodeId y, uint32_t transport_gid, uint32_t symm_gid,
                               std::optional<uint32_t> target_meta_id = std::nullopt) {
@@ -6748,6 +6845,7 @@ inline ElabResult cases(ProofState& ps, uint32_t hyp_level, std::optional<uint32
     for (uint32_t j : generalizing) if (j < hyp_level) revert_from = std::min(revert_from, j);   // F6: explicitly generalised hypotheses (those after the scrutinee are reverted anyway)
     std::vector<uint32_t> reverted_js;
     for (uint32_t j = revert_from; j < g.hyps.size(); ++j) if (j != hyp_level) reverted_js.push_back(j);
+    ps.last_reverted = reverted_js;
     NodeId G = generalized_goal(g, subs, reverted_js);
     if (mp.doms.size() != arity + 1)
         return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, g.target, std::nullopt, "cases: index count mismatch between the hypothesis's type application and the inductive's own declared arity"});
@@ -6769,11 +6867,22 @@ inline ElabResult cases(ProofState& ps, uint32_t hyp_level, std::optional<uint32
         insts.push_back(std::move(inst)); forcings.push_back(std::move(forcing));
     }
     // refutation exploitation (only one constructor per call, and only when nothing is reverted)
-    std::optional<std::size_t> exploit_ci;
-    for (std::size_t ci = 0; ci < forcings.size(); ++ci) {
+    // The motive gets the premise  same_ctor (index) (concrete index)  about the WHOLE index of the slot, and the branch of a refuted constructor takes a premise  same_ctor (pattern value) (concrete value)  about the
+    // clashing pair. They are the same type only when the clash is at the TOP of the slot's index (`Succ Zero` against `Zero`, so that both premises are `Empty`). A clash below equal constructors
+    // (`Succ (Succ Zero)` against `Succ Zero`: the clash is `Succ Zero` against `Zero`, one level down) leaves the motive's premise `Unit`, and the branch, which would eliminate an `Empty` where the
+    // checker expects a `Unit`, makes the whole proof ill-typed. Such a refutation is not exploited: the branch stays an ordinary goal.
+    auto exploitable = [&](std::size_t ci) {
         const CtorIndexForcing& f = forcings[ci];
-        if (f.refuted && f.refuted_slot && f.refuted_pat_value && f.refuted_conc_value) { exploit_ci = ci; break; }
-    }
+        if (!(f.refuted && f.refuted_slot && f.refuted_pat_value && f.refuted_conc_value && f.refuted_family_gid)) return false;
+        const uint32_t slot = *f.refuted_slot;
+        const std::vector<NodeId> fri = apply_ctor_index_forcing_to_result_indices(insts[ci].result_indices, f);
+        if (slot >= fri.size() || slot >= concrete_indices.size()) return false;
+        auto ctor_head = [&](NodeId t) { std::optional<uint32_t> r; inspect(detail::decompose_app_spine(t).head, [&](Const c) { if (ctx().globals[c.global_id].ctor_info) r = c.global_id; }, [](auto) {}); return r; };
+        auto a = ctor_head(fri[slot]), b = ctor_head(concrete_indices[slot]);
+        return a && b && *a != *b && ctx().globals[*a].ctor_info->ind_type_global_id == ctx().globals[*b].ctor_info->ind_type_global_id;
+    };
+    std::optional<std::size_t> exploit_ci;
+    for (std::size_t ci = 0; ci < forcings.size(); ++ci) if (exploitable(ci)) { exploit_ci = ci; break; }
     // F22: the reference only exploits a refutation when nothing is reverted, so any dependent hypothesis silently disabled discrimination. In parameter mode (which already differs from the reference)
     // the exploit works with reverted hypotheses too: the same_ctor premise is the OUTERMOST layer of the extended motive, so the reverted binders simply sit one level further up in the branch lambdas.
     if (!reverted_js.empty() && !ctx().param_mode) exploit_ci.reset();
@@ -6792,7 +6901,7 @@ inline ElabResult cases(ProofState& ps, uint32_t hyp_level, std::optional<uint32
         if (ctx().param_mode)
             for (std::size_t cj = 0; cj < forcings.size(); ++cj) {
                 const CtorIndexForcing& f = forcings[cj];
-                if (f.refuted && f.refuted_pat_value && f.refuted_conc_value && f.refuted_slot == forcings[*exploit_ci].refuted_slot && f.refuted_family_gid == forcings[*exploit_ci].refuted_family_gid) is_exploited[cj] = true;
+                if (f.refuted && f.refuted_pat_value && f.refuted_conc_value && f.refuted_slot == forcings[*exploit_ci].refuted_slot && f.refuted_family_gid == forcings[*exploit_ci].refuted_family_gid && exploitable(cj)) is_exploited[cj] = true;
             }
     }
     std::vector<NodeId> branches; std::vector<Goal> new_goals;
@@ -6946,6 +7055,7 @@ inline ElabResult induct(ProofState& ps, uint32_t hyp_level, std::optional<uint3
     }
     std::vector<uint32_t> reverted_js;
     for (uint32_t j = 0; j < g.hyps.size(); ++j) if (needs_revert[j]) reverted_js.push_back(j);
+    ps.last_reverted = reverted_js;
     if (mp.doms.size() != arity + 1)
         return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, g.target, std::nullopt, "induct: index count mismatch between the hypothesis's type application and the inductive's own declared arity"});
     NodeId G;

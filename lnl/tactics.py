@@ -41,6 +41,18 @@ class Proof:
         self.trace = []                   # (tactic, arguments) in the order applied; arguments are handles / numbers
         self._sync_names()
 
+    @classmethod
+    def from_goal(cls, w, target, hyp_types, hyp_names, auto_norm=True):
+        """a proof state with ONE goal given as data (the target and the types and names of the hypotheses, kernel handles): what a search works on. There is no statement: such a state is for
+        trying tactics and reading the goals they leave, and `term()` of a finished one is a proof of the goal in its context, not of a closed statement."""
+        if w.ctx: raise AuthorError('a proof must be started at the top level')
+        self = cls.__new__(cls)
+        self.w = w; self.k = w.k; self.name = None; self.stmt = None; self.auto_norm = auto_norm
+        self.ps = w.k.materialize_from_node(target, list(hyp_types), list(hyp_names))
+        self._names = {}; self.trace = []
+        self._sync_names()
+        return self
+
     # ------------------------------------------------------------------------------------------------------------------ goals
     @property
     def n_goals(self): return self.ps.num_goals()
@@ -101,7 +113,10 @@ class Proof:
             if names[lvl] == name: return self.w.T(self.k.mk_fvar(lvl))
         raise AuthorError('no hypothesis called %r; the hypotheses are %s' % (name, names))
     def _level(self, name_or_term, i=0):
-        if isinstance(name_or_term, int): return name_or_term
+        if isinstance(name_or_term, int):
+            self._check_goal(i)
+            if not 0 <= name_or_term < self.ps.goal_num_hyps(i): raise AuthorError('no hypothesis at level %d; goal %d has %d hypotheses' % (name_or_term, i, self.ps.goal_num_hyps(i)))
+            return name_or_term
         t = self.h(name_or_term, i) if isinstance(name_or_term, str) else name_or_term
         v = self.k.view(t.n)
         if v[0] != 'fvar': raise AuthorError('expected a hypothesis, got %s' % self.w.show(t))
@@ -215,6 +230,14 @@ class Proof:
         self.trace.append(('induct', lvl, tuple(gen)))
         if self.auto_norm: self._norm_all()
         return self
+
+    def clear(self, levels, i=0):
+        """remove the hypotheses at these levels from goal i (the goal and the other hypotheses must not mention them): the proof of the new goal is the proof of the old one, with the hypotheses that stay. The
+        survivors keep their names and order and are renumbered."""
+        self._check_goal(i); levels = sorted(set(levels))
+        if not levels: return self
+        self._step('clear %s' % (levels,), lambda: self.ps.clear(levels, self.ps.goal_meta_id(i)), i=i)
+        self.trace.append(('clear', tuple(levels))); return self
 
     # ------------------------------------------------------------------------------------------------------------------ normalisation
     def norm(self, i=0):

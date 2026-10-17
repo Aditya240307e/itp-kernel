@@ -51,6 +51,21 @@ class Term:
     def __rshift__(self, o): return self.w.imp(self, o)          # a >> b : a -> b
 
 
+class NodeCache(dict):
+    """A dict for kernel node handles that are kept between calls (the handle of a constant, the numeral of a ring instance). While the world is PROBING -- between a checkpoint of the kernel and the
+    rewind that follows -- nothing is stored: the rewind reclaims every node made since the checkpoint, so a handle stored in the meantime would name a node that no longer exists, or, worse, a different
+    one that took its index. (Reading is always allowed: whatever was stored before the checkpoint is still there.) Every Python cache of kernel handles in the authoring layer must be one of these."""
+    __slots__ = ('w',)
+    def __init__(self, w): dict.__init__(self); self.w = w
+    def __setitem__(self, k, v):
+        if not self.w.probing: dict.__setitem__(self, k, v)
+    def setdefault(self, k, v=None):
+        if self.w.probing: return dict.get(self, k, v)
+        return dict.setdefault(self, k, v)
+    def update(self, *a, **kw):
+        if not self.w.probing: dict.update(self, *a, **kw)
+
+
 class Notation:
     """what the operators of Term mean in the current context; a library installs one for its numbers (nat_lib.NatNotation)"""
     def _no(self, what): raise AuthorError('no notation for %s is installed in this world' % what)
@@ -102,6 +117,7 @@ DEFAULT_FUEL = int(os.environ.get('ITP_FUEL', 2 * 10 ** 9))
 
 class World:
     def __init__(self, parameters=True, prop_elim=True, fuel=None):
+        self.probing = 0                    # > 0 while a probe is running (see NodeCache and gym_env.Engine.probe)
         self.k = E.Kernel()
         self.k.set_option('prop_elim', prop_elim)
         self.k.set_option('parameters', parameters)
@@ -112,7 +128,7 @@ class World:
         self.gname = {}                     # id -> name
         self.nota = Notation()
         self.infix = {}                     # global name -> (symbol, precedence) for the printer
-        self._const_cache = {}
+        self._const_cache = NodeCache(self)
         self.proofs = {}                    # theorem name -> the primitive steps of its proof (what a learner trains on)
         self.PROP = self.T(self.k.mk_type(0))      # propositions live in Type0, data in Type1 (the Prop/Type world)
         self.TYPE = self.T(self.k.mk_type(1))

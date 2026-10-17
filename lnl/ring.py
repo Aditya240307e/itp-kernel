@@ -25,7 +25,7 @@ evaluates to (the kernel's own computation, mirrored on Python integers) and pro
 """
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from author import AuthorError, Term
+from author import AuthorError, Term, NodeCache
 
 
 class Pf:
@@ -78,7 +78,7 @@ class SemiringNat(Semiring):
         self.ops = {w.gid['add']: 'add', w.gid['mul']: 'mul', w.gid['pow']: 'pow', w.gid['Succ']: 'succ'}
         self._zero_id, self._succ_id = w.gid['Zero'], w.gid['Succ']
         self.zero_add, self.add_zero = w['zero_add'], w['add_zero']
-        self.lit_cache = {}; self.num_cache = {}
+        self.lit_cache = NodeCache(w); self.num_cache = NodeCache(w)
         self.one = self.lit(1)
     def add(self, a, b): return self._add(a, b)
     def mul(self, a, b): return self._mul(a, b)
@@ -124,7 +124,7 @@ class SemiringN(Semiring):
         self._ids = (w.gid['N0'], w.gid['Npos'], w.gid['XH'], w.gid['XO'], w.gid['XI'])
         self.ops = {w.gid['N.add']: 'add', w.gid['N.mul']: 'mul', w.gid['N.pow']: 'pow', w.gid['N.succ']: 'succ'}
         self.zero_add, self.add_zero = w['N.zero_add'], w['N.add_zero']
-        self.lit_cache = {}; self.num_cache = {}
+        self.lit_cache = NodeCache(w); self.num_cache = NodeCache(w)
         self.one = self.lit(1)
     def add(self, a, b): return self._add(a, b)
     def mul(self, a, b): return self._mul(a, b)
@@ -188,7 +188,7 @@ class SemiringZ(Semiring):
         self.ops = {w.gid['Z.add']: 'add', w.gid['Z.mul']: 'mul', w.gid['Z.pow']: 'pow', w.gid['Z.neg']: 'neg', w.gid['Z.sub']: 'sub', w.gid['Z.sqr']: 'sqr'}      # (the display normal form turns `x ^ 2` into `Z.sqr x`)
         self.sqr_def = w['Z.sqr_def']
         self.zero_add, self.add_zero = w['Z.zero_add'], w['Z.add_zero']
-        self.lit_cache = {}; self.num_cache = {}
+        self.lit_cache = NodeCache(w); self.num_cache = NodeCache(w)
         self.one = self.lit(1); self.m1 = self.lit(-1)
     def add(self, a, b): return self._add(a, b)
     def mul(self, a, b): return self._mul(a, b)
@@ -260,7 +260,8 @@ INSTANCE_MAKERS = [_make_nat, _make_n, _make_z]
 
 def instance_for(w, A):
     """the number system of the type A (a Term) -- or None when `ring` knows none for it. Instances are kept per world: their numeral tables are worth keeping between calls."""
-    cache = w.__dict__.setdefault('_ring_instances', {})
+    cache = w.__dict__.get('_ring_instances')
+    if cache is None: cache = w.__dict__['_ring_instances'] = NodeCache(w)
     inst = cache.get(A.n)
     if inst is None:
         for make in INSTANCE_MAKERS:

@@ -4,14 +4,14 @@
 A small, heavily tested trusted core and tactic layer: dependent types, inductive families with parameters and indices, structural recursion, a Prop/Type world with definitional proof irrelevance and restricted elimination,
 the four classical axioms, quotients (five kernel constants and one reduction rule; `funext` is a theorem), tactics (intro, apply, rewrite, cases, induct with equation generalisation, strong induction by bounded
 predicates, generated injectivity lemmas; in the authoring layer exact/rw/rw_at/have/obtain/calc/induction_on/ring/linarith/nlinarith), an independent checker, differential gates against the frozen reference, zero-tolerance random
-oracles, soundness canaries, and a deterministic work budget (a wrong action fails after a bounded number of steps instead of hanging). 38 gates, 835 mutants defined; the whole suite is also run a second time with
+oracles, soundness canaries, and a deterministic work budget (a wrong action fails after a bounded number of steps instead of hanging). 39 gates, 933 mutants defined; the whole suite is also run a second time with
 `ITP_VERIFY_MEMO=1`, which re-decides every answer a sharing table or the quick conversion check gave.
 Libraries, all built by tactic scripts and re-checked by the kernel (they use NO axioms; the four classical ones are an optional layer, S15): unary Nat (about 125 lemmas), the binary naturals `N` (Coq-style `Pos`/`N`, with the bridge to Nat and
 the induction principle as a theorem), the integers `Z` as a quotient of `N x N` (ring laws, order, strict order, trichotomy, discreteness, integral domain, casts from N; 434 globals, about 25 s to build), a kernel-checked `ring` for `Nat`, `N` and `Z`,
 `linarith` / `nlinarith` over `Z` (exact simplex search, certificate checked by the kernel), `linear_combination`, `interval_cases` and `by_contra`; a number-theory library over Z (divisibility, division with
 remainder, Bezout, gcd, coprimality, primes, Euclid's lemma, every integer > 1 has a prime divisor; 46 theorems, one classical axiom `em`) and three olympiad statements proved (IMO 1959 P1 `gcd(21n+4, 14n+3) = 1`, IMO 2019 P1
 `f(2a) + 2f(b) = f(f(a+b))` iff `f(n) = 2n + c`, the irrationality of sqrt 2).
-Not yet: Q and R, modular arithmetic (`modeq`, squares mod 4 / 8), `omega`/`positivity`/`norm_num`, sums over finite ranges, the gym environment on this kernel. Checking a big `ring`/`linarith` proof cost 0.1-0.5 s (finding F36); after the conversion work of 2026-10-12 (quick check on syntax, three sharing tables, Pi exposure) the final check of the large `nlinarith` proof is 88 thousand
+Not yet: Q and R, modular arithmetic (`modeq`, squares mod 4 / 8), `omega`/`positivity`/`norm_num`, sums over finite ranges, actions with term arguments in the gym (instantiate, witness), a learned policy. Checking a big `ring`/`linarith` proof cost 0.1-0.5 s (finding F36); after the conversion work of 2026-10-12 (quick check on syntax, three sharing tables, Pi exposure) the final check of the large `nlinarith` proof is 88 thousand
 steps instead of 1.98 million and the library build is 16% faster. Conversion of exponentially shared values is polynomial (F37, F38).
 
 ## What is missing, with rough effort (expert person-months; treat as +-2x)
@@ -62,6 +62,14 @@ Decisions: R is axiomatised as a single ordered-field structure instance (audit 
 5. Decide: build the library ourselves, or invest in Lean-kernel compatibility and import Mathlib.
 
 ## Status log (kernel features, newest first)
+- **The learner's environment on the hybrid kernel, and falsification fuzzing** (gate S36, `gym_env.py`, `gym_search.py`, `gym_fuzz.py`; findings F45-F50; mutants CP / UF / CX / CL / LR / TL / GE / GS). Goals are DATA (a target and
+  the hypothesis types, kernel handles; two routes to the same goal give the same object), a menu lists the legal actions (intro, cases, induction, apply and rewrite with library lemmas and hypotheses, ring, linarith, nlinarith,
+  by_contra, interval_cases), and a PROBE tries an action atomically (checkpoint, one-goal proof state, action, read the goals, rewind). Nothing in the environment is trusted: a search returns a tree of actions, `commit` replays it
+  on a live proof and the kernel checks the term. The search is an AND-OR depth-first search with iterative deepening. Results: 72 of 100 natural-number lemmas without ring and 263 of 401 with the full world are re-proved by
+  search from the library that precedes them; the integer problems of S36 H too. `gym_fuzz.py` generates random true and false statements (naturals, integers), runs the search and reports REJECTED (a finished proof the kernel refuses),
+  UNSOUND (a proof of a false statement) or ERROR: it found the unifier bug F45 and (earlier) the `cases` bug F46; it also showed how a fuzz can be empty (F47: the first integer run proved 22 of 109 true statements because a
+  Python TypeError was counted as a refused action; strict engines and canaries now prevent that). The fixed fuzz: 0 problems in 6399 natural-number statements and in 150 integer ones (103 of the 109 true statements proved, the 41 false ones not). Checkpoints are validated (F48). 39 gates,
+  933 mutants defined (the new series run against S36 alone where only it reads the file).
 - **Number theory over Z, `linear_combination`, olympiad problems** (gate S34, `nt_lib.py`, `imo_lib.py`, `lincomb.py`; findings F44; mutants LC / RQ / LS / EP / NP / IV / BC). Divisibility `Z.dvd a b := exists k, b = a * k` with its algebra,
   division with remainder (existence and uniqueness), Bezout, `Z.is_gcd`, `Z.coprime`, `Z.prime`, Euclid's lemma, every integer above 1 has a prime divisor (46 theorems; the one classical axiom `em` is used by four of them:
   `by_contra`, `not_forall`, `not_imp`, `Z.exists_prime_dvd`). `linear_combination c1 h1 ... cn hn` closes an equation of a commutative ring that is the combination of the hypotheses (the proof is built from the ring's own
