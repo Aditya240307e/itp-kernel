@@ -18,7 +18,9 @@ import itp_env_lnl as E
 
 
 class AuthorError(Exception):
-    """a mistake in how the library is being written (not a kernel soundness matter): ill-typed input, unknown name, a proof script that did not finish"""
+    """a mistake in how the library is being written (not a kernel soundness matter): ill-typed input, unknown name, a proof script that did not finish. `fuel` is true when the cause was that the
+    kernel's work budget ran out (a bigger budget might have succeeded), false for a refusal on logical grounds"""
+    fuel = False
 
 
 class Term:
@@ -116,6 +118,9 @@ DEFAULT_FUEL = int(os.environ.get('ITP_FUEL', 2 * 10 ** 9))
 
 
 class World:
+    proof_class = None      # the class of the proof state `prove` makes (tactics.Proof when None): the recorder sets a subclass that logs every tactic call (a class attribute: the worlds are made inside the library builders)
+    on_proved = None        # when set: called as on_proved(world, name, gid, statement, proof) after a theorem was admitted (the recorder collects the logs here)
+
     def __init__(self, parameters=True, prop_elim=True, fuel=None):
         self.probing = 0                    # > 0 while a probe is running (see NodeCache and gym_env.Engine.probe)
         self.k = E.Kernel()
@@ -396,13 +401,16 @@ class World:
         """prove `stmt` with a tactic script (a function of a tactics.Proof), and admit the extracted term through the kernel's checked path"""
         from tactics import Proof
         self._at_top('a theorem'); self._fresh_name(name)
-        stmt = self.term(stmt, 'statement'); p = Proof(self, stmt, name, auto_norm)
+        stmt = self.term(stmt, 'statement'); p = (World.proof_class or Proof)(self, stmt, name, auto_norm)
+        p.script = script
         script(p)
         if not p.done: raise AuthorError('the proof of %s did not finish:\n%s' % (name, p))
         term = p.term()
         try: gid = self.k.declare_checked(stmt.n, term.n, name)
         except (E.ITPError, RuntimeError) as e: raise AuthorError('theorem %s was rejected by the kernel: %s\n  statement: %s' % (name, e, self.show(stmt))) from None
-        self._register(name, gid); self.proofs[name] = p.trace; return self.const(name)
+        self._register(name, gid); self.proofs[name] = p.trace
+        if World.on_proved is not None: World.on_proved(self, name, gid, stmt, p)
+        return self.const(name)
 
     # ------------------------------------------------------------------------------------------------------------------ logic and equality
     def Eq(self, a, b):

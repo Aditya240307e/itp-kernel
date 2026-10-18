@@ -301,6 +301,8 @@ struct KernelWrapper {
     std::pair<uint64_t, uint64_t> extract_stats() { auto g = activate(); return {itp::ctx().extract_fast, itp::ctx().extract_slow}; }
     /// (pairs the quick conversion check looked at, pairs it settled) since the context was made
     std::pair<uint64_t, uint64_t> syn_stats() { auto g = activate(); return {itp::ctx().syn_tries, itp::ctx().syn_yes}; }
+    /// (comparisons of two stuck terms whose frame walk failed and that were retried on the fully normalised terms, those refused without the retry -- the failure was at data, nothing to retry) since the context was made
+    std::pair<uint64_t, uint64_t> neutral_stats() { auto g = activate(); return {itp::ctx().neutral_retries, itp::ctx().neutral_refusals}; }
     /// how many sub-comparisons of two values were answered from the table of pairs already found convertible, since the context was made
     uint64_t conv_memo_hits() { auto g = activate(); return itp::ctx().conv_memo_hits; }
     /// entries of the table of sub-pairs found convertible (it lives for one comparison, so this is 0 between calls)
@@ -323,6 +325,13 @@ struct KernelWrapper {
         if (budget < 1 || budget > 10000000 || depth < 1 || depth > 100000 || rounds < 1 || rounds > 10000) throw ITPError("set_syn_limits: the limits must be within 1..10000000 steps, 1..100000 levels, 1..10000 rounds");
         itp::ctx().syn_budget = budget; itp::ctx().syn_depth = depth; itp::ctx().syn_rounds = rounds;
     }
+    /// The deepest nesting of case-split comparisons a conversion check descends to (default 256): beyond it the comparison fails closed and the stuck terms are compared on their normal forms instead. A test hook.
+    void set_conv_nesting_limit(int n) {
+        auto g = activate();
+        if (n < 0 || n > 4096) throw ITPError("set_conv_nesting_limit: the limit must be within 0..4096 levels (0: no comparison of case-split branches is ever attempted)");
+        itp::ctx().conv_nesting_limit = n;
+    }
+    int get_conv_nesting_limit() { auto g = activate(); return itp::ctx().conv_nesting_limit; }
     std::tuple<int, int, int> get_syn_limits() { auto g = activate(); return {itp::ctx().syn_budget, itp::ctx().syn_depth, itp::ctx().syn_rounds}; }
     std::vector<int> param_slots(uint32_t family_gid) { auto g = activate(); require_global(family_gid, "param_slots"); std::vector<int> out; for (bool b : itp::family_param_slots(family_gid)) out.push_back(b ? 1 : 0); return out; }
     itp::DiscriminationTree index_library() { auto g = activate(); return itp::index_library(); }
@@ -700,6 +709,7 @@ NB_MODULE(itp_env_lnl, m) {
         .def("memo_stats", &KernelWrapper::memo_stats)
         .def("extract_stats", &KernelWrapper::extract_stats)
         .def("syn_stats", &KernelWrapper::syn_stats)
+        .def("neutral_stats", &KernelWrapper::neutral_stats)
         .def("conv_memo_hits", &KernelWrapper::conv_memo_hits)
         .def("conv_memo_size", &KernelWrapper::conv_memo_size)
         .def("unify_memo_hits", &KernelWrapper::unify_memo_hits)
@@ -709,6 +719,8 @@ NB_MODULE(itp_env_lnl, m) {
         .def("memo_table_buckets", &KernelWrapper::memo_table_buckets)
         .def("unify_memo_size", &KernelWrapper::unify_memo_size)
         .def("set_syn_limits", &KernelWrapper::set_syn_limits, "budget"_a, "depth"_a, "rounds"_a)
+        .def("set_conv_nesting_limit", &KernelWrapper::set_conv_nesting_limit, "n"_a)
+        .def("get_conv_nesting_limit", &KernelWrapper::get_conv_nesting_limit)
         .def("get_syn_limits", &KernelWrapper::get_syn_limits)
         .def("replace_fvars", &KernelWrapper::replace_fvars, "term"_a, "replacements"_a)
         .def("resolve_metas", &KernelWrapper::resolve_metas, "term"_a)

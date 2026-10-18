@@ -25,6 +25,7 @@ evaluates to (the kernel's own computation, mirrored on Python integers) and pro
 """
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import itp_env_lnl as E
 from author import AuthorError, Term, NodeCache
 
 
@@ -277,6 +278,7 @@ class Ring:
         self.atoms = []; self.atom_idx = {}
         self.zero_nf = NF((), inst.zero)
         self._poly_memo = {}; self._mono_memo = {}; self._add_memo = {}; self._mul_memo = {}; self._nf_memo = {}; self._pow_memo = {}; self._cexp_memo = {}; self._exp = None
+        self._subs = {}; self._canon_memo = {}; self._carg_memo = {}        # normalisers of the other number systems, and the memos of the atoms' canonical spellings
         self._lc = {}; self._refl = w['refl']; self._symm = w['symm']; self._trans = w['trans']; self._zero_add = inst.zero_add; self._add_zero = inst.add_zero
 
     # ------------------------------------------------------------------------------------------------------------------ terms of normal forms
@@ -422,9 +424,81 @@ class Ring:
 
     # ------------------------------------------------------------------------------------------------------------------ reading an expression
     def atom(self, t):
+        """the index of the atom t: atoms are kept in their canonical spelling (see `canon`), so  f (a + b)  and  f (b + a)  are one atom"""
+        t = self.canon(t)[0]
         i = self.atom_idx.get(t)
         if i is None: i = self.atom_idx[t] = len(self.atoms); self.atoms.append(t)
         return i
+
+    # ------------------------------------------------------------------------------------------------------------------ atoms up to the arithmetic in their arguments
+    def sub_ring(self, inst):
+        """the normaliser for the numbers of another number system (the argument of an atom may be a natural number where the atom is an integer)"""
+        if inst.ty.n == self.A.n: return self
+        r = self._subs.get(inst.ty.n)
+        if r is None: r = self._subs[inst.ty.n] = Ring(self.w, inst)
+        return r
+
+    def canon_arg(self, a):
+        """(the simplest spelling of the number `a`, a proof of  a = it): the zero or the numeral of its value, the atom itself when its normal form is a single atom, else the normal form. (a, None) when `a` is
+        no number of a number system we know, or is spelled so already"""
+        hit = self._carg_memo.get(a)
+        if hit is not None: return hit
+        w = self.w; res = (a, None)
+        try: ty = w.infer(a)
+        except (AuthorError, E.ITPError, RuntimeError): ty = None            # (a term of a context we cannot see into: left as it is)
+        inst = instance_for(w, ty) if ty is not None else None
+        if inst is not None:
+            sub = self.sub_ring(inst); NFa, pa = sub.nf(a); monos = NFa.monos
+            if not monos: res = (a, None) if a == inst.zero else (inst.zero, pa)
+            elif len(monos) == 1 and not monos[0].vars:
+                c = inst.lit(monos[0].coeff)
+                res = (a, None) if a == c else (c, sub.trans(pa, Pf(inst.add_zero(c), NFa.term, c)))       # the normal form of a numeral is  c + 0
+            elif len(monos) == 1 and monos[0].coeff == 1 and len(monos[0].vars) == 1 and monos[0].vars[0][1] == 1:
+                x = sub.atoms[monos[0].vars[0][0]]
+                res = (a, None) if a == x else (x, sub.trans(pa, sub.symm(Pf(sub.L('atom', x), x, NFa.term))))
+            else: res = (a, None) if a == NFa.term else (NFa.term, pa)
+        self._carg_memo[a] = res
+        return res
+
+    def canon(self, t):
+        """(the canonical spelling of the atom t, a proof of  t = it): in an application whose arguments are numbers of a number system we know, each argument is replaced by its `canon_arg`, so that  f (0 + b)
+        is  f b.  (t, None) for an atom that is no such application, or already canonical, or whose function type depends on the arguments that would change"""
+        hit = self._canon_memo.get(t)
+        if hit is not None: return hit
+        w = self.w; res = (t, None)
+        head, args = w.spine(t); hv = w.k.view(head.n)
+        if args and hv[0] in ('const', 'fvar') and 'f_equal' in w:
+            pieces = [self.canon_arg(a) for a in args]
+            if any(pa is not None for _, pa in pieces) and self._plain_function(head, args, pieces): res = self._congruence(t, head, args, pieces)
+        self._canon_memo[t] = res
+        return res
+
+    def _plain_function(self, head, args, pieces):
+        """is the type of `head` a function type whose codomains do not depend on the arguments that change?  (then  f_equal  is well typed at each of them)"""
+        w = self.w
+        try: ty = w.type_of(head)
+        except (AuthorError, E.ITPError, RuntimeError): return False
+        for (ca, pa), a in zip(pieces, args):
+            parts = w.pi_parts(ty)
+            if parts is None: return False
+            if pa is not None and w.k.loose_range(parts[1].n) != 0: return False
+            ty = w.instantiate(parts[1], a)
+        return True
+
+    def _congruence(self, t, head, args, pieces):
+        """(head applied to the new arguments, a proof of  t = it), by `f_equal` at each argument that changes, from the last to the first"""
+        w = self.w; A = self.A; fe = w['f_equal']; cur = list(args); proof = None
+        for i in range(len(args) - 1, -1, -1):
+            ca, pa = pieces[i]
+            if pa is None: continue
+            ty_i = w.infer(args[i]); before = w.app(head, *cur); cur[i] = ca; after = w.app(head, *cur)
+            if i == len(args) - 1: F = w.app(head, *cur[:i])
+            else:
+                prefix = cur[:i]; suffix = cur[i + 1:]
+                F = w.lam(ty_i, lambda x: w.app(head, *prefix, x, *suffix))
+            step = Pf(fe(ty_i, A, F, args[i], ca, pa.proof), before, after)
+            proof = step if proof is None else self.trans(proof, step)
+        return after, proof
 
     def nf(self, t):
         """(normal form of t, proof of  t = normal form)"""
@@ -469,8 +543,9 @@ class Ring:
                 S, ps = self.nf(R.add(args[0], R.one))
                 res = (S, self.trans(eq, ps))
             else:
-                i = self.atom(t); S = self.poly((Mono(((i, 1),), 1),))
-                res = (S, Pf(self.L('atom', t), t, S.term))
+                ct, pc = self.canon(t); i = self.atom(t); S = self.poly((Mono(((i, 1),), 1),))
+                pa = Pf(self.L('atom', ct), ct, S.term)
+                res = (S, pa if pc is None else self.trans(pc, pa))
         self._nf_memo[t] = res
         return res
 

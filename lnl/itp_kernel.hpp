@@ -1104,6 +1104,10 @@ template <class Map> inline void release_table(Map& m) {
     else m.clear();
 }
 
+/// The deepest nesting of case-split comparisons (branches_convertible inside branches_convertible) a conversion check descends to before it gives up with "not convertible" (see branches_convertible).
+/// A test hook, `set_conv_nesting_limit`, lowers it for one context so that the give-up path (and the retry that follows it) can be reached by small terms.
+inline constexpr int kMaxConvNesting = 256;
+
 struct ExecutionContext {
     NodePool<Var>      vars;
     NodePool<App>      apps;
@@ -1165,6 +1169,8 @@ struct ExecutionContext {
     uint64_t extract_fast = 0, extract_slow = 0;     // proof extractions that took the linear-time path / had to evaluate and quote (see extract_proof_term)
     uint64_t syn_tries = 0, syn_yes = 0;             // statistics of the quick conversion check (SynConv): pairs it looked at / pairs it settled
     uint64_t unify_memo_hits = 0;                    // statistics: the same for the unifier's walk (see UnifyMemo)
+    int conv_nesting_limit = kMaxConvNesting;        // see kMaxConvNesting
+    uint64_t neutral_retries = 0, neutral_refusals = 0;   // statistics: comparisons of two stuck terms whose frame walk failed and that were retried on the fully normalised terms / were refused without the retry (see uncertain_failures)
     uint64_t memo_verified = 0, memo_verify_skipped = 0;   // option verify_memo: answers from a table or from the quick check that were decided again and agreed / that could not be (the re-derivation spent its steps)
     uint64_t conv_memo_hits = 0;                     // statistics: sub-comparisons of two values answered from the table of pairs already found convertible (see ConvMemo)
     uint64_t quote_memo_hits = 0;                    // statistics: sub-values written back as syntax from the table (see QuoteMemo)
@@ -2586,8 +2592,8 @@ inline constexpr int64_t kMemoVerifyBase = 20000;           // ... and in all it
 inline constexpr int64_t kMemoVerifyMaxWork = 1000;         // an entry that took more than this was found by a long comparison: its re-derivation (no sharing) is hopeless, so it is not attempted
 struct MemoRedoScope {
     ExecutionContext& x; ThreadGuardState& g;
-    int64_t fuel_saved, granted; bool syn_saved; uint64_t tries, yes, conv_hits, unify_hits, quote_hits, memo_hits, memo_misses;
-    MemoRedoScope() : x(ctx()), g(thread_guard_state()), fuel_saved(g.fuel), granted(0), syn_saved(x.syn_conv), tries(x.syn_tries), yes(x.syn_yes), conv_hits(x.conv_memo_hits), unify_hits(x.unify_memo_hits), quote_hits(x.quote_memo_hits), memo_hits(x.memo_hits), memo_misses(x.memo_misses) {
+    int64_t fuel_saved, granted; bool syn_saved; uint64_t tries, yes, conv_hits, unify_hits, quote_hits, memo_hits, memo_misses, retries, refusals;
+    MemoRedoScope() : x(ctx()), g(thread_guard_state()), fuel_saved(g.fuel), granted(0), syn_saved(x.syn_conv), tries(x.syn_tries), yes(x.syn_yes), conv_hits(x.conv_memo_hits), unify_hits(x.unify_memo_hits), quote_hits(x.quote_memo_hits), memo_hits(x.memo_hits), memo_misses(x.memo_misses), retries(x.neutral_retries), refusals(x.neutral_refusals) {
         const int64_t allowed = std::min<int64_t>(kMemoVerifyTotal, kMemoVerifyBase + 2 * (g.fuel_start - g.fuel));
         granted = std::max<int64_t>(0, std::min<int64_t>({fuel_saved, kMemoVerifyFuel, allowed - g.verify_spent}));
         g.fuel = granted; x.syn_conv = false;
@@ -2596,7 +2602,7 @@ struct MemoRedoScope {
     ~MemoRedoScope() {
         --conv_memo().bypass; --unify_memo().bypass; --quote_memo().bypass; --x.memo_off;
         g.verify_spent += std::min<int64_t>(granted, granted - g.fuel); g.fuel = fuel_saved; x.syn_conv = syn_saved;
-        x.syn_tries = tries; x.syn_yes = yes; x.conv_memo_hits = conv_hits; x.unify_memo_hits = unify_hits; x.quote_memo_hits = quote_hits; x.memo_hits = memo_hits; x.memo_misses = memo_misses;
+        x.syn_tries = tries; x.syn_yes = yes; x.conv_memo_hits = conv_hits; x.unify_memo_hits = unify_hits; x.quote_memo_hits = quote_hits; x.memo_hits = memo_hits; x.memo_misses = memo_misses; x.neutral_retries = retries; x.neutral_refusals = refusals;
     }
     MemoRedoScope(const MemoRedoScope&) = delete;
     MemoRedoScope& operator=(const MemoRedoScope&) = delete;
@@ -2866,12 +2872,19 @@ inline NodeId normalize(NodeId term, const Env& env) {
 /// definitions). A nesting bound that FAILS CLOSED -- "not convertible" -- keeps the kernel total: it can only cause a rejection, never an
 /// unsound acceptance, and differs from the reference only on inputs that overflow the reference's stack.
 inline int& conv_nesting() { static thread_local int n = 0; return n; }
-inline constexpr int kMaxConvNesting = 256;
 struct ConvNestingGuard { ConvNestingGuard() { ++conv_nesting(); } ~ConvNestingGuard() { --conv_nesting(); } };
+
+/// Failures of a comparison that do NOT prove the two sides different. Two stuck terms are compared frame by frame; a case split (or a fixpoint) is compared by the environment it captured, and
+/// two derivations of one computation can capture different ones (see the VNeutral case of conv_value). So when the frame walk of two stuck terms fails at a case split, or anywhere inside
+/// a fixpoint or past the nesting bound, the comparison is retried on the fully normalised terms. A walk that fails at an ARGUMENT -- data, compared by the same walk that decides every success --
+/// has nothing to retry: normalising two terms whose arguments differ is the most expensive way to confirm it, and with a quotient-defined number type (every operation stuck on a
+/// variable unfolds into a page of lifted functions and proofs) it was the whole cost of a failing check. `uncertain_failures()` counts the failures of the first kind; a walk that fails
+/// without having counted one is certain.
+inline int64_t& uncertain_failures() { static thread_local int64_t n = 0; return n; }
 inline bool branches_convertible(NodeId ba, const Env& env_a, NodeId bb, const Env& env_b, uint32_t depth) {
     ITP_STACK_CHECK();
     ConvNestingGuard nesting_guard;
-    if (conv_nesting() > kMaxConvNesting) return false;
+    if (conv_nesting() > ctx().conv_nesting_limit) { ++uncertain_failures(); return false; }
     bool a_is_lambda = ba.tag == NodeType::LAMBDA;
     bool b_is_lambda = bb.tag == NodeType::LAMBDA;
     if (a_is_lambda != b_is_lambda) return false; // arity mismatch: genuinely different shapes
@@ -2900,10 +2913,12 @@ inline bool conv_value(const Value& a, const Value& b, uint32_t depth) {
             return ta.universe_level == tb.universe_level;
         },
         [&](const Closure& ca, const Closure& cb) -> bool {
+            if (ca.body_id == cb.body_id && ca.dom_id == cb.dom_id && ca.env.top.p == cb.env.top.p) return true;       // one closure, shared: the proofs and functions inside a definition's value are compared this way again and again
             Value fresh = fresh_neutral(depth);
             return conv_value(eval(ca.body_id, ca.env.extend(fresh)), eval(cb.body_id, cb.env.extend(fresh)), depth + 1);
         },
         [&](const VPi& pa, const VPi& pb) -> bool {
+            if (pa.dom_id == pb.dom_id && pa.cod_id == pb.cod_id && pa.env.top.p == pb.env.top.p) return true;
             if (!conv_value(eval(pa.dom_id, pa.env), eval(pb.dom_id, pb.env), depth)) return false;
             Value fresh = fresh_neutral(depth);
             return conv_value(eval(pa.cod_id, pa.env.extend(fresh)), eval(pb.cod_id, pb.env.extend(fresh)), depth + 1);
@@ -2911,6 +2926,7 @@ inline bool conv_value(const Value& a, const Value& b, uint32_t depth) {
         [&](const VCtor& ca, const VCtor& cb) -> bool {
             if (ca.ind_type_global_id != cb.ind_type_global_id || ca.ctor_idx != cb.ctor_idx) return false;
             if (ca.args.size() != cb.args.size()) return false;
+            if (ca.args.identity() == cb.args.identity()) return true;                // one shared argument block
             if (ca.args.size() < 2) {                                  // one field: a path, which cannot meet itself (no sharing to exploit)
                 for (std::size_t i = 0; i < ca.args.size(); ++i) {
                     if (!conv_value(ca.args[i], cb.args[i], depth)) return false;
@@ -2947,19 +2963,23 @@ inline bool conv_value(const Value& a, const Value& b, uint32_t depth) {
             // -- an accepted incompleteness, not a soundness gap, in
             // exactly the same spirit as this file's other captured-
             // env comparisons.
-            if (fa.fix_id != fb.fix_id) return false;
-            if (fa.env.size() != fb.env.size()) return false;
+            if (fa.fix_id == fb.fix_id && fa.env.top.p == fb.env.top.p) return true;                    // one fixpoint in one environment
+            if (fa.fix_id != fb.fix_id) { ++uncertain_failures(); return false; }
+            if (fa.env.size() != fb.env.size()) { ++uncertain_failures(); return false; }
             for (uint32_t i = 0; i < fa.env.size(); ++i) {
-                if (!conv_value(fa.env[i], fb.env[i], depth)) return false;
+                if (!conv_value(fa.env[i], fb.env[i], depth)) { ++uncertain_failures(); return false; }
             }
             return true;
         },
         [&](const VNeutral& na, const VNeutral& nb) -> bool {
             if (na.head != nb.head) return false;
             if (na.spine.size() != nb.spine.size()) return false;
+            if (na.spine.identity() == nb.spine.identity()) return true;               // the same spine, shared: the same term
             const ConvMemo::Key memo_key{na.spine.identity(), nb.spine.identity(), uint32_t(na.head.kind), na.head.id, depth, eval_mode_word()};
             auto compare = [&]() -> bool {
             const int64_t work0 = thread_guard_state().fuel;
+            const int64_t uncertain0 = uncertain_failures();
+            bool frame_gap = false;       // the frame walk failed at a pair of frames that are not both applications (a case split on one side): see uncertain_failures
             auto settled = [&](bool r) {            // remember a yes that took real work
                 if (r && !na.spine.empty() && !conv_memo().bypass && work0 - thread_guard_state().fuel >= memo_min_work()) conv_memo().neutrals.try_emplace(memo_key, ConvMemo::HeldSpines{na.spine, nb.spine, work0 - thread_guard_state().fuel});
                 return r;
@@ -3104,9 +3124,11 @@ inline bool conv_value(const Value& a, const Value& b, uint32_t depth) {
                     },
                     [&](const auto&, const auto&) { return false; } // mismatched frame kinds
                 }, na.spine[i], nb.spine[i]);
-                if (!ok) { spine_ok = false; break; }
+                if (!ok) { spine_ok = false; frame_gap = !(std::holds_alternative<ApplyFrame>(na.spine[i]) && std::holds_alternative<ApplyFrame>(nb.spine[i])); break; }
             }
             if (spine_ok) return settled(true);
+            // A walk that failed at an argument, with no case split or fixpoint failing anywhere inside it, is certain: the arguments are different data. Normalising both sides cannot change that.
+            if (!frame_gap && uncertain_failures() == uncertain0) { ++ctx().neutral_refusals; return false; }
             // The frame-by-frame structural walk found a mismatch somewhere on the spine -- this
             // does NOT necessarily mean na and nb are actually different. See the MatchFrame case's
             // own captured_env comment above for the full derivation (confirmed directly, not
@@ -3149,7 +3171,10 @@ inline bool conv_value(const Value& a, const Value& b, uint32_t depth) {
             // once per VNeutral-vs-VNeutral call, after the cheap structural path has already been
             // tried and failed -- not nested recursively the way branches_convertible's own fallback
             // was.
-            return settled(quote(Value{na}, depth) == quote(Value{nb}, depth));
+            ++ctx().neutral_retries;
+            const bool same = quote(Value{na}, depth) == quote(Value{nb}, depth);
+            uncertain_failures() = uncertain0;       // decided now, whichever way: the enclosing comparisons see a certain answer
+            return settled(same);
             };                                       // compare
             if (!na.spine.empty() && !conv_memo().bypass) {
                 if (auto it = conv_memo().neutrals.find(memo_key); it != conv_memo().neutrals.end()) {
@@ -3668,7 +3693,8 @@ struct PiNestingGuard { PiNestingGuard() { ++pi_nesting(); } ~PiNestingGuard() {
 /// a family that lives in Type k, k >= 1, belongs to data. Only a type headed by a Prop-valued family, or by something the syntax cannot classify (a
 /// variable, a definition, a match), can belong to a proof.
 inline bool type_may_be_proposition(NodeId ty) {
-    while (ty.tag == NodeType::PI) ty = ctx().pis[ty.index].cod_id;
+    std::vector<NodeId> doms;                                   // the domains of the Pi telescope crossed, outermost first
+    while (ty.tag == NodeType::PI) { doms.push_back(ctx().pis[ty.index].dom_id); ty = ctx().pis[ty.index].cod_id; }
     if (ty.tag == NodeType::TYPE) return false;
     NodeId head = ty;
     while (head.tag == NodeType::APP) head = ctx().apps[head.index].fn_id;
@@ -3676,6 +3702,15 @@ inline bool type_may_be_proposition(NodeId ty) {
         NodeId r = ctx().globals[ctx().consts[head.index].global_id].type;
         while (r.tag == NodeType::PI) r = ctx().pis[r.index].cod_id;
         if (r.tag == NodeType::TYPE) return ctx().types[r.index].universe_level == 0;
+    }
+    // The type is a variable of the telescope itself (the `B` of `forall A B, ... -> B`, the result type of Quot.lift): when that variable ranges over the types of Type k, k >= 1, its elements are data.
+    if (head.tag == NodeType::VAR) {
+        const Var v = ctx().vars[head.index];
+        if (v.bound && v.n < doms.size()) {
+            NodeId d = doms[doms.size() - 1 - v.n];
+            while (d.tag == NodeType::PI) d = ctx().pis[d.index].cod_id;
+            if (d.tag == NodeType::TYPE && ctx().types[d.index].universe_level >= 1) return false;
+        }
     }
     return true;
 }
@@ -3692,7 +3727,12 @@ inline bool may_be_proof(const Value& v, const ElabCtx& ec) {
             return r.tag == NodeType::TYPE && ctx().types[r.index].universe_level == 0;
         },
         [&](const VNeutral& n) {
-            for (const auto& fr : n.spine) if (!std::holds_alternative<ApplyFrame>(fr)) return true;     // a stuck match: its type is the motive's business, let infer decide
+            for (std::size_t i = n.spine.size(); i-- > 0;) if (const auto* mf = std::get_if<MatchFrame>(&n.spine[i])) {
+                // a stuck match: the outermost one gives the value its type, which is what its motive returns -- read off the motive's syntax (a motive returning data settles it)
+                NodeId m = mf->motive_id;
+                while (m.tag == NodeType::LAMBDA) m = ctx().lambdas[m.index].body_id;
+                return type_may_be_proposition(m);
+            }
             switch (n.head.kind) {
                 case NeutralHead::Kind::GlobalConst: return type_may_be_proposition(ctx().globals[n.head.id].type);
                 case NeutralHead::Kind::LocalVar: return n.head.id < ec.size() && type_may_be_proposition(ec.types[n.head.id]);
@@ -3766,17 +3806,19 @@ inline ElabResult unify_structural(const Value& a_in, const Value& b_in, ElabCtx
             return {};
         },
         [&](const Closure& ca, const Closure& cb) -> ElabResult {
+            if (ca.body_id == cb.body_id && ca.dom_id == cb.dom_id && ca.env.top.p == cb.env.top.p) return {};       // one closure, shared (see conv_value)
             Value dom_a = eval(ca.dom_id, ca.env), dom_b = eval(cb.dom_id, cb.env);
             if (ElabResult r = unify_values(dom_a, dom_b, ec, es); !r) return r;
-            NodeId dom_ty = quote(dom_a, ec.size());
+            NodeId dom_ty = requote(ca.dom_id, ca.env, ec.size(), ec.size());       // the binder's type as written (with the captured values put in), NOT its value written back: that normalises it, and a domain such as `u < u` over the integers is a page of lifted functions
             ElabCtx ec2 = ec.extend(dom_ty);
             Value fresh = fresh_neutral(ec.size());
             return unify_values(eval(ca.body_id, ca.env.extend(fresh)), eval(cb.body_id, cb.env.extend(fresh)), ec2, es);
         },
         [&](const VPi& pa, const VPi& pb) -> ElabResult {
+            if (pa.dom_id == pb.dom_id && pa.cod_id == pb.cod_id && pa.env.top.p == pb.env.top.p) return {};
             Value dom_a = eval(pa.dom_id, pa.env), dom_b = eval(pb.dom_id, pb.env);
             if (ElabResult r = unify_values(dom_a, dom_b, ec, es); !r) return r;
-            NodeId dom_ty = quote(dom_a, ec.size());
+            NodeId dom_ty = requote(pa.dom_id, pa.env, ec.size(), ec.size());       // as written, see the Closure case
             ElabCtx ec2 = ec.extend(dom_ty);
             Value fresh = fresh_neutral(ec.size());
             return unify_values(eval(pa.cod_id, pa.env.extend(fresh)), eval(pb.cod_id, pb.env.extend(fresh)), ec2, es);
@@ -3785,6 +3827,7 @@ inline ElabResult unify_structural(const Value& a_in, const Value& b_in, ElabCtx
             if (ca.ind_type_global_id != cb.ind_type_global_id || ca.ctor_idx != cb.ctor_idx)
                 return mismatch("different constructors");
             if (ca.args.size() != cb.args.size()) return mismatch("constructor arity mismatch");
+            if (ca.args.identity() == cb.args.identity()) return {};                                // one shared argument block
             const bool memoable = ca.args.size() >= 2 && (ec.size() == 0 || ec.uid != 0);          // one field: a path, which cannot meet itself
             const UnifyMemo::Key memo_key{ca.args.identity(), cb.args.identity(), ca.ind_type_global_id, ca.ctor_idx, ec.size(), eval_mode_word(), ec.uid};
             auto compare = [&]() -> ElabResult {
@@ -3810,11 +3853,11 @@ inline ElabResult unify_structural(const Value& a_in, const Value& b_in, ElabCtx
             // inside a captured Fix env won't get solved by this pass,
             // mirroring exactly how a meta buried in a stuck Match's
             // captured env already isn't solved here either.
-            if (fa.fix_id != fb.fix_id) return mismatch("different Fix nodes");
-            if (fa.env.size() != fb.env.size()) return mismatch("Fix captured environments differ in size");
+            if (fa.fix_id == fb.fix_id && fa.env.top.p == fb.env.top.p) return {};                  // one fixpoint in one environment
+            if (fa.fix_id != fb.fix_id) { ++uncertain_failures(); return mismatch("different Fix nodes"); }
+            if (fa.env.size() != fb.env.size()) { ++uncertain_failures(); return mismatch("Fix captured environments differ in size"); }
             for (uint32_t i = 0; i < fa.env.size(); ++i) {
-                if (!conv_value(fa.env[i], fb.env[i], ec.size()))
-                    return mismatch("Fix captured environments differ");
+                if (!conv_value(fa.env[i], fb.env[i], ec.size())) { ++uncertain_failures(); return mismatch("Fix captured environments differ"); }
             }
             return {};
         },
@@ -3823,16 +3866,20 @@ inline ElabResult unify_structural(const Value& a_in, const Value& b_in, ElabCtx
                 return mismatch("different variable/constant heads");
             }
             if (na.spine.size() != nb.spine.size()) return mismatch("spine length mismatch");
+            if (na.spine.identity() == nb.spine.identity()) return {};                              // the same spine, shared: the same term
             const bool memoable = !na.spine.empty() && (ec.size() == 0 || ec.uid != 0);
             const UnifyMemo::Key memo_key{na.spine.identity(), nb.spine.identity(), uint32_t(na.head.kind), na.head.id, ec.size(), eval_mode_word(), ec.uid};
             auto compare = [&]() -> ElabResult {
             const std::size_t pending0 = es.pending.size(); const int64_t work0 = thread_guard_state().fuel;
+            const int64_t uncertain0 = uncertain_failures();
+            bool frame_gap = false;       // the frame walk failed at a pair of frames that are not both applications (a case split on one side): see uncertain_failures
             auto settled = [&]() -> ElabResult {      // remember a yes that took real work and deferred nothing
                 if (memoable && !unify_memo().bypass && es.pending.size() == pending0 && work0 - thread_guard_state().fuel >= memo_min_work())
                     unify_memo().neutrals.try_emplace(memo_key, ConvMemo::HeldSpines{na.spine, nb.spine, work0 - thread_guard_state().fuel});
                 return {};
             };
             bool spine_ok = true;
+            ElabResult failure;           // what the failing frame returned
             for (std::size_t i = 0; i < na.spine.size(); ++i) {
                 ElabResult ok = std::visit(match_on{
                     [&](const ApplyFrame& fa, const ApplyFrame& fb) -> ElabResult {
@@ -3903,9 +3950,12 @@ inline ElabResult unify_structural(const Value& a_in, const Value& b_in, ElabCtx
                     },
                     [&](const auto&, const auto&) -> ElabResult { return mismatch("mismatched eliminator frame kinds"); }
                 }, na.spine[i], nb.spine[i]);
-                if (!ok) { spine_ok = false; break; }
+                if (!ok) { spine_ok = false; frame_gap = !(std::holds_alternative<ApplyFrame>(na.spine[i]) && std::holds_alternative<ApplyFrame>(nb.spine[i])); failure = ok; break; }
             }
             if (spine_ok) return settled();
+            // A walk that failed at an argument, with no case split or fixpoint failing anywhere inside it, is certain (see uncertain_failures): the arguments are different data, and the
+            // answer of that comparison is the answer here. (The failure of the argument is returned as it came: it names the first difference, which is the more useful message.)
+            if (!frame_gap && uncertain_failures() == uncertain0) { ++ctx().neutral_refusals; return failure; }
             // See conv_value's own, mirrored VNeutral case for the full derivation of why this
             // fallback exists and why it takes this specific, non-mutually-recursive shape (quoting
             // each full side once and comparing the resulting NodeId, rather than falling back to
@@ -3914,7 +3964,10 @@ inline ElabResult unify_structural(const Value& a_in, const Value& b_in, ElabCtx
             // session's own direct A/B test, which reproduced a genuine segfault at a simulation
             // budget of 50 during perfectly ordinary UniformPolicy search, well before any
             // pathologically deep term was plausible.
-            if (quote(Value{na}, ec.size()) == quote(Value{nb}, ec.size())) return settled();
+            ++ctx().neutral_retries;
+            const bool same = quote(Value{na}, ec.size()) == quote(Value{nb}, ec.size());
+            uncertain_failures() = uncertain0;       // decided now, whichever way: the enclosing comparisons see a certain answer
+            if (same) return settled();
             return mismatch("spine comparison differs even after full normalization");
             };                                       // compare
             if (memoable && !unify_memo().bypass) {
@@ -3927,7 +3980,7 @@ inline ElabResult unify_structural(const Value& a_in, const Value& b_in, ElabCtx
             Value fresh = fresh_neutral(ec.size());
             Value lhs = eval(ca.body_id, ca.env.extend(fresh));
             Value rhs = apply(Value{nb}, fresh);
-            NodeId dom_ty = quote(eval(ca.dom_id, ca.env), ec.size());
+            NodeId dom_ty = requote(ca.dom_id, ca.env, ec.size(), ec.size());       // as written, see the Closure case of the structural walk
             ElabCtx ec2 = ec.extend(dom_ty);
             return unify_values(lhs, rhs, ec2, es);
         },
@@ -3935,7 +3988,7 @@ inline ElabResult unify_structural(const Value& a_in, const Value& b_in, ElabCtx
             Value fresh = fresh_neutral(ec.size());
             Value lhs = apply(Value{na}, fresh);
             Value rhs = eval(cb.body_id, cb.env.extend(fresh));
-            NodeId dom_ty = quote(eval(cb.dom_id, cb.env), ec.size());
+            NodeId dom_ty = requote(cb.dom_id, cb.env, ec.size(), ec.size());       // as written, see the Closure case of the structural walk
             ElabCtx ec2 = ec.extend(dom_ty);
             return unify_values(lhs, rhs, ec2, es);
         },
@@ -3944,7 +3997,7 @@ inline ElabResult unify_structural(const Value& a_in, const Value& b_in, ElabCtx
             Value fresh = fresh_neutral(ec.size());
             Value lhs = eval(ca.body_id, ca.env.extend(fresh));
             Value rhs = apply(Value{fb}, fresh);
-            NodeId dom_ty = quote(eval(ca.dom_id, ca.env), ec.size());
+            NodeId dom_ty = requote(ca.dom_id, ca.env, ec.size(), ec.size());       // as written, see the Closure case of the structural walk
             ElabCtx ec2 = ec.extend(dom_ty);
             return unify_values(lhs, rhs, ec2, es);
         },
@@ -3952,7 +4005,7 @@ inline ElabResult unify_structural(const Value& a_in, const Value& b_in, ElabCtx
             Value fresh = fresh_neutral(ec.size());
             Value lhs = apply(Value{fa}, fresh);
             Value rhs = eval(cb.body_id, cb.env.extend(fresh));
-            NodeId dom_ty = quote(eval(cb.dom_id, cb.env), ec.size());
+            NodeId dom_ty = requote(cb.dom_id, cb.env, ec.size(), ec.size());       // as written, see the Closure case of the structural walk
             ElabCtx ec2 = ec.extend(dom_ty);
             return unify_values(lhs, rhs, ec2, es);
         },
@@ -3966,9 +4019,12 @@ inline ElabResult unify_values(const Value& a, const Value& b, ElabCtx& ec, Elab
     ITP_STACK_CHECK();
     if (!ctx().prop_mode) return unify_structural(a, b, ec, es);
     const auto meta_mark = ctx().meta_ctx.checkpoint(); const std::size_t pending_mark = es.pending.size();
+    const int64_t uncertain0 = uncertain_failures();
     ElabResult r = unify_structural(a, b, ec, es);
     if (r) return r;
-    return proof_irrelevance_fallback(a, b, ec, es, std::move(r), meta_mark, pending_mark);
+    ElabResult rescued = proof_irrelevance_fallback(a, b, ec, es, std::move(r), meta_mark, pending_mark);
+    if (rescued) uncertain_failures() = uncertain0;          // the pair is equal after all (two proofs of one proposition): whatever failed on the way to that verdict is no longer a failure
+    return rescued;
 }
 
 // ---------------------------------------------------------------------------
@@ -6353,6 +6409,15 @@ inline std::optional<NodeId> expose_pi_folded(NodeId t) {
         std::vector<NodeId> args; NodeId head = t;
         while (head.tag == NodeType::APP) { args.push_back(ctx().apps[head.index].arg_id); head = ctx().apps[head.index].fn_id; }
         std::reverse(args.begin(), args.end());
+        if (head.tag == NodeType::LAMBDA && !args.empty()) {
+            // a beta redex at the head (`motive n` for a motive written as a lambda): contracted on syntax, the arguments substituted unevaluated. (Left to the evaluator it would be read back as the
+            // fully unfolded normal form of the whole type -- for a statement about divisibility or primality of an integer, a million steps.)
+            NodeId v = head; std::size_t used = 0;
+            while (used < args.size() && v.tag == NodeType::LAMBDA) { v = instantiate1(ctx().lambdas[v.index].body_id, args[used]); ++used; }
+            for (; used < args.size(); ++used) v = mk_app(v, args[used]);
+            t = v;
+            continue;
+        }
         if (head.tag != NodeType::CONST) return std::nullopt;
         const GlobalDef& def = ctx().globals[ctx().consts[head.index].global_id];
         if (!def.value) return std::nullopt;                  // an inductive type, a constructor, an axiom: nothing to unfold
@@ -6489,6 +6554,13 @@ inline ElabResult apply(ProofState& ps, NodeId candidate, std::optional<uint32_t
     std::vector<std::pair<uint32_t, NodeId>> arg_metas; // (reference meta id, its own unwrapped arg type)
     std::vector<NodeId> meta_refs;                      // the metavariable standing for each argument, in order
     NodeId concl_ty;                                    // the conclusion with every definition unfolded, for the ordinary unification attempts
+    // ... read back from `concl_unread` the first time it is needed: with `simp` the attempts on the folded conclusion usually succeed, and reading back the unfolded one is by far the dearest part of apply (an
+    // operation of a quotient applied to neutral arguments unfolds to a term hundreds of times larger: `ex_intro Z (fun x => x + 0 = x) 7` spent 200 000 steps on it, a hundred times the rest)
+    std::optional<Value> concl_unread;
+    auto unfolded_conclusion = [&]() -> NodeId {
+        if (concl_unread) { concl_ty = quote(*concl_unread, g.ec.size()); concl_unread.reset(); }
+        return concl_ty;
+    };
     // with simp the lemma's conclusion is also read with definitions folded (and a recursive function unfolded only on a constructor): unifying THAT against the goal is first order, so `?n + ?k` against
     // `n + k` solves ?k := k, which the delta-unfolded stuck `match`es of the same two terms cannot do
     std::optional<NodeId> concl_folded;
@@ -6496,7 +6568,7 @@ inline ElabResult apply(ProofState& ps, NodeId candidate, std::optional<uint32_t
     // a binder hidden behind a definition (`Not P`, `Imp A B`) is exposed by unfolding THAT definition alone, so that the premises -- and the arguments of such a definition -- read as the lemma states them; the
     // reading is abandoned (false) if full delta sees a binder it does not (one behind a recursive type-level function). Otherwise every definition is unfolded, which sees every binder.
     auto peel = [&](bool folded, uint32_t limit) -> bool {
-        arg_metas.clear(); meta_refs.clear(); applied = candidate;
+        arg_metas.clear(); meta_refs.clear(); applied = candidate; concl_unread.reset();
         std::optional<NoDeltaScope> keep_folded; std::optional<GuardedUnfoldScope> guarded;
         if (folded) { keep_folded.emplace(); guarded.emplace(); }
         Value cur = eval(start_ty, g.ec.values);
@@ -6520,7 +6592,7 @@ inline ElabResult apply(ProofState& ps, NodeId candidate, std::optional<uint32_t
         guarded.reset(); keep_folded.reset();               // from here on every definition unfolds again
         Value full = eval(concl, g.ec.values);
         if (std::holds_alternative<VPi>(full) && !stopped) return false;      // (a conclusion that is a Pi because the limit was reached is meant)
-        concl_folded = concl; concl_ty = quote(full, g.ec.size());
+        concl_folded = concl; concl_unread = std::move(full);
         return true;
     };
     // The peeling and the unification of the conclusion with the goal, for a given number of arguments to peel. Nothing is left behind when it fails.
@@ -6541,7 +6613,7 @@ inline ElabResult apply(ProofState& ps, NodeId candidate, std::optional<uint32_t
         // One attempt: the unification under its own reading of the terms. Whatever a failed attempt assigned or deferred is undone, so that the next attempt -- and a refused apply -- start from the state
         // apply was called in (a metavariable guessed by a first-order match must not survive into an attempt that would solve it differently).
         auto attempt = [&](auto&& run) { unified = run(); if (!unified) undo(); };
-        if (!simp) attempt([&] { return unify_and_drain(concl_ty); });
+        if (!simp) attempt([&] { return unify_and_drain(unfolded_conclusion()); });
         else {   // the attempts in order of preference: first order on the folded forms; first order with the definitions unfolded (recursive functions computing on constructors; then not computing at all); full delta with the solutions kept folded; the ordinary attempt (whose error is the one reported)
             unified = std::unexpected(TypeError{TypeErrorKind::UnificationFailure, g.target, std::nullopt, "apply: no attempt was made"});
             if (concl_folded) {
@@ -6562,8 +6634,12 @@ inline ElabResult apply(ProofState& ps, NodeId candidate, std::optional<uint32_t
                 // no recursive function computes at all
                 if (!unified) attempt([&] { GuardedUnfoldScope guarded(false); FoldSolutionsScope fold; return unify_and_drain(*concl_folded); });
             }
-            if (!unified) attempt([&] { FoldSolutionsScope fold; return unify_and_drain(concl_ty); });
-            if (!unified) attempt([&] { return unify_and_drain(concl_ty); });
+            // The last two attempts unfold every definition. When the conclusion has been read in its folded form that reading IS the conclusion for them: unification evaluates it with every definition
+            // unfolded. Reading the unfolded value back into syntax first (unfolded_conclusion) only to evaluate it again is a round trip that costs a hundred times the unification, and the attempts that
+            // reach this point are the ones that fail.
+            const bool by_folded_reading = concl_folded.has_value();
+            if (!unified) { NodeId delta_concl = by_folded_reading ? *concl_folded : unfolded_conclusion(); attempt([&] { FoldSolutionsScope fold; return unify_and_drain(delta_concl); }); }
+            if (!unified) { NodeId delta_concl = by_folded_reading ? *concl_folded : unfolded_conclusion(); attempt([&] { return unify_and_drain(delta_concl); }); }
         }
         if (!unified) { ctx().meta_ctx.rewind(entry_mark); ps.es = entry_es; }
         return unified;
@@ -6683,19 +6759,36 @@ inline ElabResult rewrite_eq(ProofState& ps, NodeId eq_term, NodeId x, NodeId y,
     Goal g = ps.goals[*idx_opt]; // copy: only committed to ps.goals on success
     TypeResult eq_ty_r = infer(eq_term, g.ec, ps.es);
     if (!eq_ty_r) return std::unexpected(eq_ty_r.error());
-    Value eq_ty_val = eval(*eq_ty_r, g.ec.values);
-    auto* eq_neutral = std::get_if<VNeutral>(&eq_ty_val);
-    if (!eq_neutral || eq_neutral->head.kind != NeutralHead::Kind::GlobalConst || eq_neutral->spine.size() != 3)
-        return std::unexpected(TypeError{TypeErrorKind::Mismatch, *eq_ty_r, std::nullopt,
-            "rewrite_eq: eq_term's own type is not a 3-argument (A, x, y) relation application -- expected Eq A x y"});
-    std::vector<NodeId> parts;
-    for (auto& frame : eq_neutral->spine) {
-        auto* af = std::get_if<ApplyFrame>(&frame);
-        if (!af) return std::unexpected(TypeError{TypeErrorKind::Mismatch, *eq_ty_r, std::nullopt, "rewrite_eq: eq_term's own type has a non-application eliminator frame"});
-        parts.push_back(quote(af->arg, g.ec.size()));
+    // A, the type of the equated terms: read off the type of eq_term as it is written when that is `R A x y` with R an inductive family (`Eq`). Only a type that has to be unfolded to show it (a definition
+    // at its head) is evaluated: evaluating `Eq Z (f (2 * a)) (2 * (2 * a) + c)` unfolds the arithmetic inside x and y, ~200 000 steps for a term of a dozen nodes, and only A is wanted from the result.
+    std::optional<NodeId> A_written;
+    {
+        NodeId cur = *eq_ty_r; std::vector<NodeId> written_args;
+        while (true) {
+            auto next = inspect(cur, [&](App a) -> std::optional<NodeId> { written_args.push_back(a.arg_id); return a.fn_id; }, [](auto) -> std::optional<NodeId> { return std::nullopt; });
+            if (!next) break;
+            cur = *next;
+        }
+        bool inductive_head = inspect(cur, [](Const c) { return ctx().globals.defs[c.global_id].is_inductive; }, [](auto) { return false; });
+        if (inductive_head && written_args.size() == 3) A_written = written_args.back();       // (the arguments were collected from the last to the first)
+    }
+    NodeId A;
+    if (A_written) A = *A_written;
+    else {
+        Value eq_ty_val = eval(*eq_ty_r, g.ec.values);
+        auto* eq_neutral = std::get_if<VNeutral>(&eq_ty_val);
+        if (!eq_neutral || eq_neutral->head.kind != NeutralHead::Kind::GlobalConst || eq_neutral->spine.size() != 3)
+            return std::unexpected(TypeError{TypeErrorKind::Mismatch, *eq_ty_r, std::nullopt,
+                "rewrite_eq: eq_term's own type is not a 3-argument (A, x, y) relation application -- expected Eq A x y"});
+        std::vector<NodeId> parts;
+        for (auto& frame : eq_neutral->spine) {
+            auto* af = std::get_if<ApplyFrame>(&frame);
+            if (!af) return std::unexpected(TypeError{TypeErrorKind::Mismatch, *eq_ty_r, std::nullopt, "rewrite_eq: eq_term's own type has a non-application eliminator frame"});
+            parts.push_back(quote(af->arg, g.ec.size()));
+        }
+        A = parts[0];
     }
     const uint32_t n = g.ec.size();
-    NodeId A = parts[0];
     // F13: rewrite the INSTANTIATED goal. A goal produced by apply mentions solved metas as `?m x0 .. xn`; rewriting a context variable inside
     // those spines (but not in the proofs passed alongside) yields an ill-formed goal, and misses the real occurrence hidden inside the meta.
     x = resolve_metas(x); y = resolve_metas(y);

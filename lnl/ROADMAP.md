@@ -4,14 +4,16 @@
 A small, heavily tested trusted core and tactic layer: dependent types, inductive families with parameters and indices, structural recursion, a Prop/Type world with definitional proof irrelevance and restricted elimination,
 the four classical axioms, quotients (five kernel constants and one reduction rule; `funext` is a theorem), tactics (intro, apply, rewrite, cases, induct with equation generalisation, strong induction by bounded
 predicates, generated injectivity lemmas; in the authoring layer exact/rw/rw_at/have/obtain/calc/induction_on/ring/linarith/nlinarith), an independent checker, differential gates against the frozen reference, zero-tolerance random
-oracles, soundness canaries, and a deterministic work budget (a wrong action fails after a bounded number of steps instead of hanging). 39 gates, 933 mutants defined; the whole suite is also run a second time with
+oracles, soundness canaries, and a deterministic work budget (a wrong action fails after a bounded number of steps instead of hanging). 45 gates, 1615 mutants defined; the whole suite is also run a second time with
 `ITP_VERIFY_MEMO=1`, which re-decides every answer a sharing table or the quick conversion check gave.
 Libraries, all built by tactic scripts and re-checked by the kernel (they use NO axioms; the four classical ones are an optional layer, S15): unary Nat (about 125 lemmas), the binary naturals `N` (Coq-style `Pos`/`N`, with the bridge to Nat and
 the induction principle as a theorem), the integers `Z` as a quotient of `N x N` (ring laws, order, strict order, trichotomy, discreteness, integral domain, casts from N; 434 globals, about 25 s to build), a kernel-checked `ring` for `Nat`, `N` and `Z`,
 `linarith` / `nlinarith` over `Z` (exact simplex search, certificate checked by the kernel), `linear_combination`, `interval_cases` and `by_contra`; a number-theory library over Z (divisibility, division with
 remainder, Bezout, gcd, coprimality, primes, Euclid's lemma, every integer > 1 has a prime divisor; 46 theorems, one classical axiom `em`) and three olympiad statements proved (IMO 1959 P1 `gcd(21n+4, 14n+3) = 1`, IMO 2019 P1
 `f(2a) + 2f(b) = f(f(a+b))` iff `f(n) = 2n + c`, the irrationality of sqrt 2).
-Not yet: Q and R, modular arithmetic (`modeq`, squares mod 4 / 8), `omega`/`positivity`/`norm_num`, sums over finite ranges, actions with term arguments in the gym (instantiate, witness), a learned policy. Checking a big `ring`/`linarith` proof cost 0.1-0.5 s (finding F36); after the conversion work of 2026-10-12 (quick check on syntax, three sharing tables, Pi exposure) the final check of the large `nlinarith` proof is 88 thousand
+Also built since (see the status log): the learner's environment with actions that SAY their term arguments (a typed term builder, claims, induction with a chosen principle, injectivity, forward reasoning), a recorder that replays the library's proofs as
+action sequences (398 of 400), and a problem bank of formal olympiad problems with checked faithfulness (28 problems; 26 more are written and not yet integrated).
+Not yet: Q and R, a congruence calculus (`modeq`; squares mod 4 / 8 are proved case by case on remainders in the bank), `omega`/`positivity`/`norm_num`, sums over finite ranges, a trained policy (the first ones are the next step). Checking a big `ring`/`linarith` proof cost 0.1-0.5 s (finding F36); after the conversion work of 2026-10-12 (quick check on syntax, three sharing tables, Pi exposure) the final check of the large `nlinarith` proof is 88 thousand
 steps instead of 1.98 million and the library build is 16% faster. Conversion of exponentially shared values is polynomial (F37, F38).
 
 ## What is missing, with rough effort (expert person-months; treat as +-2x)
@@ -62,6 +64,30 @@ Decisions: R is axiomatised as a single ordered-field structure instance (audit 
 5. Decide: build the library ourselves, or invest in Lean-kernel compatibility and import Mathlib.
 
 ## Status log (kernel features, newest first)
+- **The action language, the typed term builder, the recorder and the problem bank** (gates S37-S42; `gym_terms.py`, `gym_build.py`, `gym_acts.py`, `recorder.py`, `bank.py`, `bank_lib.py`, `semantic.py`, `bank_baseline.py`,
+  `gym_policy.py`; ACTIONS.md, BANK.md; findings F51-F61; mutant series GA / GB / GE / GF / GL / GQ / GR / GS / GT / GX, 1615 mutants in all). 45 gates pass, in both modes (ordinary pass 677 s, `ITP_VERIFY_MEMO=1` 738 s on the 2-core box).
+  * S37: `ring`, `linarith` and `linear_combination` see through the arithmetic in the arguments of an atom (`f (a + b)` and `f (b + a)` are one unknown; congruence proofs checked by the kernel).
+  * S38: a term pool and the actions that carry terms (INSTANTIATE, USE), probes under a chosen work budget, goal identity up to irrelevant order, a cost search (IDA* with the policy's cost as a hook).
+  * S39: a comparison that FAILS is decided by what it found: a refusal at data over a quotient type (`Z.add a b` against `Z.add a a`) costs a few hundred steps instead of 200,000 to 1,600,000; the retry by full normalisation runs
+    only when the failure was uncertain (a case split, a fixpoint, the nesting bound).
+  * S40 (587 checks): a second action language whose arguments are SAID, one typed choice at a time, by a builder that offers only the choices that keep the term well typed (CLAIM, REFINE, APPLY_WITH, REWRITE_WITH, REWRITE_AT, FORWARD,
+    INDUCT_WITH with a chosen principle and starting point, INJECT, LINCOMB, USE with a code); actions as plain JSON; the recorder turns the library's authored proofs into kernel-checked action sequences (398 of 400, 1978 actions, each
+    replayed again from JSON in a fresh engine and re-checked by the independent checker). Measured: world build 2.3-3 s (491 globals), a menu 6 ms, a probe 0.9 ms, menus of 55 actions on average (172 at most).
+  * S41 (127 checks): the problem bank. 28 problems of levels 1-4 (identities, inequalities, divisibility and remainders, IMO 1959 P1, 1964 P1a/b, 1969 P1, 1984 P2, 2019 P1, the irrationality of sqrt 2), each with the problem in words,
+    a SPEC written independently as Python (statements are checked to mean what the words say: windows, atoms, bodies of existentials, 687 mutants of the statements that must all be noticed or explained), a reference proof that replays
+    through the action language in two regimes (prefix; strict, which hides the lemmas written for the problem and needs a self-contained proof), a JSON export with demonstrations, and every statement pinned by digest. The blind search
+    (iterative deepening over the menus, no learning) solves 13 of the 56 (problem, regime) rows at 3000 probes: the identities and `sum_squares_zero`, and the prefix regime of `imo1964_p1a` where the helper is the statement.
+  * S42 (245 checks): pins of the builder and the actions at their limits (shapes, sources, the matcher, the table of heads), written against the first survivors of the mutation run.
+  * `gym_policy.py`: an action assembled from small typed choices (kind, candidate, hypothesis, term tokens, ...) for a policy without a text interface; the round trip over the recorded library proofs rebuilds 1962 of 1978 actions
+    (the 16 others are the open item F61).
+  * Mutation work on the new modules is DEFERRED by decision (it measures completeness of the tests, not the soundness of anything: every term and proof is kernel-checked), until the first trained agents exist. State: run A of the
+    series (GB / GE, 216 mutants): 148 caught, 68 survivors; partial run B (GQ1-GQ174): 95 caught, 79 survivors; S42 was written against them and the runs were not repeated. Survivors still to triage (a test, or `KNOWN_EQUIVALENT` with a
+    reason): run A: GB3 GB7 GB8 GB10 GB15 GB17-GB21 GB25 GB30 GB31 GB34 GB35 GB37 GB53 GB54 GB56 GB58 GB63-GB66 GB71 GB73 GB74 GB76-GB78 GB81-GB88 GB90 GB92 GB109-GB111 GB128 GB130 GB131 GB139-GB141 GB147 GB153 GB155 GB156 GB158
+    GB159 GB165 GB170 GB173 GE67 GE72 GE77 GE85 GE86 GE89 GE97 GE99 GE103 GE104; run B (so far): the GQ mutants of the shape checks, principles, slots and the portable readers (GQ1-GQ174 minus the caught ones, see `logs/mut_s41_B.log`);
+    the series has not been run to completion on the final tree (runs A and B are the only runs on snapshot 22; the others, e.g. GQ175-GQ193, GR and GT, are defined and unmeasured there). S42 sections E-H (the menu of the
+    builder, principles, slots, a spent budget) are planned for that triage.
+  * Next: the rest of the bank (26 more problems are written in `bank_lib2.py`, not yet part of the gated bank), the Gymnasium environment over the bank, imitation of the reference and library proofs, expert iteration against the
+    blind search at equal probe budgets.
 - **The learner's environment on the hybrid kernel, and falsification fuzzing** (gate S36, `gym_env.py`, `gym_search.py`, `gym_fuzz.py`; findings F45-F50; mutants CP / UF / CX / CL / LR / TL / GE / GS). Goals are DATA (a target and
   the hypothesis types, kernel handles; two routes to the same goal give the same object), a menu lists the legal actions (intro, cases, induction, apply and rewrite with library lemmas and hypotheses, ring, linarith, nlinarith,
   by_contra, interval_cases), and a PROBE tries an action atomically (checkpoint, one-goal proof state, action, read the goals, rewind). Nothing in the environment is trusted: a search returns a tree of actions, `commit` replays it

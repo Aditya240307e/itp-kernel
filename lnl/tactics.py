@@ -65,7 +65,10 @@ class Proof:
         if self.done: return 'no goals'
         return '\n\n'.join(('goal %d:\n' % i if self.n_goals > 1 else '') + str(self.goal(i)) for i in range(self.n_goals))
     def _fail(self, what, e):
-        raise AuthorError('%s failed: %s\n%s' % (what, e, self)) from None
+        if self.w.probing: err = AuthorError('%s failed: %s' % (what, e))                  # a search throws these messages away: do not print the proof state for each
+        else: err = AuthorError('%s failed: %s\n%s' % (what, e, self))
+        err.fuel = isinstance(e, E.FuelExhausted)
+        raise err from None
 
     def _sync_names(self, supplied=(), skip=0):
         """give every new goal a name for each hypothesis: the kernel remembers the name of a hypothesis (also when cases/induct revert it and introduce it again), so a hypothesis that has one
@@ -184,9 +187,31 @@ class Proof:
     def left(self): return self.apply('inl')            # A \/ B : prove A
     def right(self): return self.apply('inr')           # A \/ B : prove B
     def exfalso(self): return self.apply('false_elim')  # prove anything from False: the goal becomes False
+    def _ex_parts(self):
+        """(A, P) when the first goal is `Ex A P` -- looking through definitions at its head (`a | b` is one) -- else None"""
+        w = self.w; k = self.k; ex = w.gid.get('Ex')
+        if ex is None or self.done: return None
+        cur = self.ps.goal_target(0)
+        for _ in range(8):
+            n = cur; args = []
+            while True:
+                v = k.view(n)
+                if v[0] != 'app': break
+                args.append(v[2]); n = v[1]
+            args.reverse()
+            v = k.view(n)
+            if v[0] != 'const': return None
+            if v[1] == ex and len(args) == 2: return w.T(args[0]), w.T(args[1])
+            cur = k.unfold_head(cur)
+            if cur is None: return None
+        return None
     def exists(self, witness):
-        """for a goal `Ex A P`: choose the witness; the goal becomes `P witness`"""
-        self.apply('ex_intro'); self.exact(witness); self._norm_all(); return self
+        """for a goal `Ex A P`: choose the witness; the goal becomes `P witness`. The kernel is given the whole of `ex_intro A P witness` at once, so no metavariable for the witness is left in the goal
+        (a goal that mentions an assigned metavariable is expensive to compare with its normal form)."""
+        parts = self._ex_parts()
+        if parts is None: self.apply('ex_intro'); self.exact(witness); self._norm_all(); return self
+        w = self.t(witness)
+        return self.apply('ex_intro', parts[0], parts[1], w)
 
     def have(self, name, fact, script=None):
         """add a fact to the hypotheses. `have('h', proof_term)` reads its statement off the term; `have('h', statement, script)` first proves the statement by `script(p)` (which must close exactly
