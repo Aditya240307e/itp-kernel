@@ -190,6 +190,9 @@ python3 src/python/problems/dataset.py OUT_DIR           # bank.json, splits.jso
 python3 src/python/problems/dataset.py --verify OUT_DIR  # replay every demonstration in a fresh engine over a rebuilt world
 ```
 
+The released copy of dataset v1 is `data/dataset_v1/` (its digests are checked by gate S45, section J; `make dataset-verify` replays all 90 recorded proofs in a fresh engine, about a minute; example 07 reads it
+without the kernel). The result files of the baseline runs on it are in `data/results/` (`docs/TRAINING.md`).
+
 * `bank.json` — section 7's file for all 82 problems, each with its `split` and `family`. 82 demonstrations (1816 actions); 8 problems have a second proof for the strict regime.
 * `splits.json` — the split policy and the splits. **By family, as a pure function of the family key** (`bank_split.py`): the two parts of
   one olympiad problem, a statement in other clothes (`4ab ≤ (a+b)²` and `2ab ≤ a²+b²`), an argument with another constant

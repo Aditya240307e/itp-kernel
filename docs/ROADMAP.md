@@ -1,10 +1,10 @@
 # Roadmap: from this kernel to IMO-level and undergraduate mathematics (a judgment, not a measurement)
 
-## Where we are (measured, 2026-10-12)
+## Where we are (measured, 2026-10-18)
 A small, heavily tested trusted core and tactic layer: dependent types, inductive families with parameters and indices, structural recursion, a Prop/Type world with definitional proof irrelevance and restricted elimination,
 the four classical axioms, quotients (five kernel constants and one reduction rule; `funext` is a theorem), tactics (intro, apply, rewrite, cases, induct with equation generalisation, strong induction by bounded
 predicates, generated injectivity lemmas; in the authoring layer exact/rw/rw_at/have/obtain/calc/induction_on/ring/linarith/nlinarith), an independent checker, differential gates against the frozen reference, zero-tolerance random
-oracles, soundness canaries, and a deterministic work budget (a wrong action fails after a bounded number of steps instead of hanging). 46 gates, 1615 mutants defined; the whole suite is also run a second time with
+oracles, soundness canaries, and a deterministic work budget (a wrong action fails after a bounded number of steps instead of hanging). 46 kernel gates + the learner's gate S44 + the repository gates S45-S46, 1615 mutants defined; the whole suite is also run a second time with
 `ITP_VERIFY_MEMO=1`, which re-decides every answer a sharing table or the quick conversion check gave.
 Libraries, all built by tactic scripts and re-checked by the kernel (they use NO axioms; the four classical ones are an optional layer, S15): unary Nat (about 125 lemmas), the binary naturals `N` (Coq-style `Pos`/`N`, with the bridge to Nat and
 the induction principle as a theorem), the integers `Z` as a quotient of `N x N` (ring laws, order, strict order, trichotomy, discreteness, integral domain, casts from N; 434 globals, about 25 s to build), a kernel-checked `ring` for `Nat`, `N` and `Z`,
@@ -13,6 +13,7 @@ remainder, Bezout, gcd, coprimality, primes, Euclid's lemma, every integer > 1 h
 `f(2a) + 2f(b) = f(f(a+b))` iff `f(n) = 2n + c`, the irrationality of sqrt 2).
 Also built since (see the status log): the learner's environment with actions that SAY their term arguments (a typed term builder, claims, induction with a chosen principle, injectivity, forward reasoning), a recorder that replays the library's proofs as
 action sequences (398 of 400), and a problem bank of formal olympiad problems with checked faithfulness (82 problems, nine of them IMO problems, levels 1-5) and dataset v1 on it (reference proofs in two regimes, a corpus of 398 library lemma proofs, leak-resistant splits: 56 train / 10 dev / 16 test).
+Also since: a learner (features, a transformer + GRU policy network over options, behaviour cloning, policy-guided IDA* search, REINFORCE / filtered-BC loops, a Gymnasium environment `ITPBank-v0`; gate S44) with its first measurements -- a baseline, not a result (`TRAINING.md`) -- and a design note for the manager/worker architecture (`ARCHITECTURE_RL.md`), and the repository reorganised by role (`src/{c++,python}`, `tests`, `mutants`, `examples`, `docs`, `data`, `legacy`) with gates for the layout and the examples.
 Not yet: Q and R, a congruence calculus (`modeq`; squares mod 4 / 8 are proved case by case on remainders in the bank), `omega`/`positivity`/`norm_num`, sums over finite ranges, a trained policy (the first ones are the next step). Checking a big `ring`/`linarith` proof cost 0.1-0.5 s (finding F36); after the conversion work of 2026-10-12 (quick check on syntax, three sharing tables, Pi exposure) the final check of the large `nlinarith` proof is 88 thousand
 steps instead of 1.98 million and the library build is 16% faster. Conversion of exponentially shared values is polynomial (F37, F38).
 
@@ -64,6 +65,14 @@ Decisions: R is axiomatised as a single ordered-field structure instance (audit 
 5. Decide: build the library ourselves, or invest in Lean-kernel compatibility and import Mathlib.
 
 ## Status log (kernel features, newest first)
+- **The learner, the repository layout, examples and docs** (gates S44, S45, S46; `src/python/learner/`, `tests/repo/`, `examples/`, `README.md`, `docs/TRAINING.md`, `docs/ARCHITECTURE_RL.md`; findings F68-F70). 46 kernel gates + S44 pass from the new layout (ordinary pass 626 s on the 2-core box, S44 68 s).
+  * The learner: `ml_features` (goals as token sequences, symbol bags), `ml_model` (transformer encoder, GRU decoder over the assembler's decisions, dot-product scoring of options, value head; 1.56 M parameters), `ml_data`, `ml_train` (behaviour cloning), `ml_search`
+    (policy-guided IDA*), `ml_rl` (REINFORCE, filtered BC), `ml_eval`, `ml_report`, `bank_env` (Gymnasium). First measurements: BC overfits the 56 training problems within four epochs; blind search solves 1/10 dev and 2/16 test problems; the policy-guided search
+    and RL loops are tested but not evaluated at scale (`TRAINING.md`).
+  * The layout: `lnl/` became `src/c++/{hybrid,reference}`, `src/python/{authoring,checker,library,environment,problems,learner}`, `tests/{kernel,library,environment,problems,learner,repo,support,fuzz,bench,golden}`, `mutants/`, `docs/`, `legacy/`;
+    `itp_paths.py` puts every directory on `sys.path` (module names stay flat and are unique), `build_kernel.py` builds either kernel, `tests/run_gates.py` + `gate_registry.py` run the gates, `mutants/mutate.py` copies `src/` + `tests/` + `build/` per mutant.
+  * S45 (layout, 5 s) and S46 (the seven examples, about 2 minutes) keep it that way (F69); two stale recorder mutants repaired (F68); `recheck.py` (a second opinion on a whole world) and `audit.py` moved into `src/python/checker/`.
+  * Design note `ARCHITECTURE_RL.md`: a worker that closes goals in short budgeted sequences, a critic, a manager whose only extra move is CLAIM, exact hindsight relabelling, search first and expert iteration, staged S0-S4 with stopping rules.
 - **The bank grows to 82 problems; dataset v1** (gate S43; `bank_lib2.py`, `bank_all.py`, `bank_split.py`, `lib_corpus.py`, `dataset.py`; BANK.md sections 6-7b; findings F62-F67). 46 gates pass, in both modes (ordinary pass 748 s, `ITP_VERIFY_MEMO=1` 1299 s on the 2-core box).
   * S43 (500 s): the 54 problems added to the 28 of S41 -- levels 1-5, nine IMO problems in all (1959 P1, 1964 P1 (a), (b) and P2, 1969 P1, 1982 P1, 1984 P2, 1988 P6 by Vieta jumping, 2019 P1) -- each with its statement pinned by digest, a faithfulness
     check against an independent Python spec with negative controls (statement mutants: 687 over the first 28, 1415 over the 54; each caught or explained by a `skip_mutants` entry with its reason), a reference proof that replays as kernel-checked

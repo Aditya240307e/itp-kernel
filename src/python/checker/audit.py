@@ -8,9 +8,8 @@ that the term can reach. Inductive families and constructors are part of the ker
 
 The point of the function is the trusted-base accounting of a proof: a result that reports no axioms and no quotient constants is a theorem of the
 bare kernel; one that reports only Quot.sound is a theorem of the kernel plus the quotient rule; and so on. Nothing here is trusted by the kernel."""
-import os as _os, sys as _sys; _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', '..', 'src', 'python')); import itp_paths  # noqa: E402,F401
-import harness as H
-from harness import parse_raw
+import os as _os, sys as _sys; _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..')); import itp_paths  # noqa: E402,F401
+from recheck import parse_raw
 
 KINDS = ('inductive', 'constructor', 'definition', 'quot', 'axiom')
 

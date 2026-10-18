@@ -1,0 +1,9 @@
+{
+ "dataset_version": 1,
+ "files": {
+  "bank.json": "6ff5d0ddf292fc31",
+  "splits.json": "4b6bcead77237b97",
+  "DATASET_CARD.md": "d4e7dc9eb05f7915",
+  "library.json": "a25243b3e85d23d3"
+ }
+}

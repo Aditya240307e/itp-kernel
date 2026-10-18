@@ -1,0 +1,101 @@
+{
+ "args": {
+  "data": "data/dataset_v1",
+  "split": "dev",
+  "probes": 500,
+  "time": 60.0,
+  "blind": false,
+  "model": "artifacts/models/bc1_early.pt",
+  "out": "data/results/smoke_policy.json",
+  "regimes": "prefix",
+  "names": "ident_diff_squares,not_dvd_between,imo2019_p1,coprime_consecutive",
+  "step_cost": 0.2,
+  "topk": 24,
+  "cap": 9.0,
+  "threads": 1,
+  "temperature": 1.0
+ },
+ "rows": [
+  {
+   "solved": true,
+   "probes": 3,
+   "seconds": 0.24,
+   "steps": 1,
+   "policy_seconds": 0.01,
+   "expansions": 6,
+   "proof": [
+    {
+     "kind": "RING"
+    }
+   ],
+   "name": "ident_diff_squares",
+   "regime": "prefix",
+   "level": 1,
+   "split": "dev",
+   "method": "policy"
+  },
+  {
+   "solved": false,
+   "probes": 501,
+   "seconds": 33.01,
+   "steps": null,
+   "policy_seconds": 11.9,
+   "expansions": 3020,
+   "name": "not_dvd_between",
+   "regime": "prefix",
+   "level": 2,
+   "split": "dev",
+   "method": "policy"
+  },
+  {
+   "solved": true,
+   "probes": 36,
+   "seconds": 1.93,
+   "steps": 1,
+   "policy_seconds": 0.95,
+   "expansions": 229,
+   "proof": [
+    {
+     "kind": "REFINE",
+     "codes": [
+      [
+       [
+        "c",
+        9,
+        4
+       ],
+       [
+        "c",
+        488,
+        1
+       ],
+       [
+        "c",
+        489,
+        1
+       ]
+      ]
+     ]
+    }
+   ],
+   "name": "imo2019_p1",
+   "regime": "prefix",
+   "level": 4,
+   "split": "test",
+   "method": "policy"
+  },
+  {
+   "solved": false,
+   "probes": 501,
+   "seconds": 24.34,
+   "steps": null,
+   "policy_seconds": 10.46,
+   "expansions": 2818,
+   "name": "coprime_consecutive",
+   "regime": "prefix",
+   "level": 2,
+   "split": "test",
+   "method": "policy"
+  }
+ ]
+}

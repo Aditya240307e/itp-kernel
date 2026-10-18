@@ -24,4 +24,4 @@ GATE_CMDS = (['kernel/s2_tests.py', '1500'], ['kernel/s26_memo_tests.py'], ['ker
 # gates above long before these would matter, so the mutation driver does not run them; `run_gates.py --ml` does
 ML_GATE_CMDS = (['learner/s44_ml_tests.py'],)
 # the gates of the repository itself (its layout, its examples); `run_gates.py --repo`
-REPO_GATE_CMDS = ()
+REPO_GATE_CMDS = (['repo/s45_layout_tests.py'], ['repo/s46_examples_tests.py'])

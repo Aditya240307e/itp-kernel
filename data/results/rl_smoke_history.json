@@ -1,0 +1,78 @@
+{
+ "args": {
+  "data": "data/dataset_v1",
+  "init": "artifacts/models/random_tiny.pt",
+  "out": "artifacts/models/rl_smoke.pt",
+  "iters": 2,
+  "episodes": 6,
+  "mode": "reinforce",
+  "lr": 0.0002,
+  "bc_coef": 0.5,
+  "temperature": 1.0,
+  "max_actions": 40,
+  "max_decisions": 400,
+  "refused_weight": 0.3,
+  "len_penalty": 0.005,
+  "lemma_frac": 0.35,
+  "batch": 32,
+  "seed": 0,
+  "threads": 1,
+  "eval_every": 2,
+  "dev_samples": 1
+ },
+ "history": [
+  {
+   "iter": 0,
+   "bank": [
+    0,
+    4
+   ],
+   "lemmas": [
+    0,
+    2
+   ],
+   "steps": 14,
+   "buffer": 0,
+   "seconds": 51
+  },
+  {
+   "iter": 1,
+   "bank": [
+    0,
+    4
+   ],
+   "lemmas": [
+    0,
+    2
+   ],
+   "steps": 25,
+   "buffer": 0,
+   "seconds": 66,
+   "dev_solved": []
+  }
+ ],
+ "won": {
+  "ineq_am_gm_two": 0,
+  "Z.add_le_add_left": 0,
+  "ineq_a_plus_b_cubed": 0,
+  "n5_minus_n_div30": 0,
+  "imo1984_p2": 0,
+  "N.add_assoc": 0,
+  "N.pow_one": 0,
+  "ineq_square_sum_three": 0,
+  "ineq_pairs_eight": 0,
+  "not_imp": 0
+ },
+ "seen": {
+  "ineq_am_gm_two": 1,
+  "Z.add_le_add_left": 1,
+  "ineq_a_plus_b_cubed": 2,
+  "n5_minus_n_div30": 1,
+  "imo1984_p2": 2,
+  "N.add_assoc": 1,
+  "N.pow_one": 1,
+  "ineq_square_sum_three": 1,
+  "ineq_pairs_eight": 1,
+  "not_imp": 1
+ }
+}
