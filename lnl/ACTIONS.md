@@ -122,7 +122,7 @@ kernel accepts and every offered choice is legal; every action kind is accepted/
 nothing; the portable form round-trips and malformed data is `ActionError`; probes leave the kernel as it was; menus are
 bounded and deterministic and every action is found again from its signature; the library's proofs replay (also from JSON
 in a fresh engine, also checked by the independent checker); random play on true and false statements never finishes a false
-one. The mutation driver (`mutate.py`, 1613 mutants of the engine/builder/actions/recorder) measures how much of this
+one. The mutation driver (`mutate.py`, 1615 mutants of the engine/builder/actions/recorder) measures how much of this
 the gates actually pin down.
 
 ## 8. Not done yet

@@ -134,8 +134,9 @@ class RecordingProof(Proof):
         return self._log('by_contra', lambda: Proof.by_contra(self, name), lambda: {'name': name})
     def interval_cases(self, var, lo, hi, name=None):
         return self._log('interval_cases', lambda: Proof.interval_cases(self, var, lo, hi, name), lambda: {'lvl': self._level(var), 'lo': lo, 'hi': hi, 'name': name})
-    def induction_on(self, lemma, var, names=()):
-        return self._log('induction_on', lambda: Proof.induction_on(self, lemma, var, names), lambda: {'lemma': self.t(lemma), 'lvl': self._level(var), 'names': tuple(names)})
+    def induction_on(self, lemma, var, names=(), extra=()):
+        return self._log('induction_on', lambda: Proof.induction_on(self, lemma, var, names, extra), lambda: {'lemma': self.t(lemma), 'lvl': self._level(var), 'names': tuple(names)},
+                         lambda: dict(self.last_induction))                  # (what `induction_on` applied the principle to: the extra arguments, and whether the variable itself was one)
     def assumption(self): return self._log('assumption', lambda: Proof.assumption(self))
 
     def have(self, name, fact, script=None):
@@ -436,7 +437,8 @@ class Ctx:
     def __init__(self, eng, g, raw, lm):
         self.eng = eng; self.k = eng.k; self.w = eng.w; self.g = g; self.raw = raw; self.lm = lm
         self.space = eng.space(g); self._menu = None
-        paired = set(lm.values()); self.extras = [j for j in range(g.n_hyps) if j not in paired]
+        paired = set(lm.values())                                                  # (the hypotheses the engine introduced for an outer goal, before a claim, are retired: they belong to no goal of the author's below this point)
+        self.extras = [j for j in range(g.n_hyps) if j not in paired and g.hyp_names[j][:1] != RETIRED]
     @property
     def menu(self):
         if self._menu is None: self._menu = self.eng.menu(self.g)
@@ -687,9 +689,11 @@ def tr_arith(kind):
     def tr(ctx, node):
         pre = []
         for e in node.info['extra']:
-            pre.append(forward_plans(ctx, ctx.node(e))[0][0])
+            n = ctx.node(e)
+            if ctx.k.view(n)[0] == 'fvar': continue                        # (a hypothesis as a hint: the arithmetic reads every hypothesis anyway)
+            pre.append(forward_plans(ctx, n)[0][0])
         plans = [pre + [Action(kind, 0)]]
-        if pre: plans.append([Action(kind, 0)])
+        if pre: plans += [[Action(kind, 0)], list(pre)]                   # (a hint that is the goal closes it by itself: the engine's forward step settles the goal, and nothing is left for the arithmetic)
         return plans
     return tr
 
@@ -706,9 +710,22 @@ def tr_lincomb(ctx, node):
 
 
 def tr_induction_on(ctx, node):
-    info = node.info; n = ctx.node(info['lemma']); v = ctx.k.view(n)
+    """`induction_on` applied the principle to the motive, the extra arguments the author gave and (when the principle takes it there) the variable: the action says the principle, the variable, and the
+    arguments that are the principle's starting point (`Principle.free`), which must be exactly what the author gave"""
+    info = node.info; k = ctx.k; n = ctx.node(info['lemma']); v = k.view(n)
     if v[0] != 'const': raise Gap('head', 'the principle is not a global')
-    return [[Action(Kind.INDUCT_WITH, 0, (), (((('c', v[1], 0),)),), (ctx.hyp(info['lvl']),))]]
+    pr = ctx.eng.principles.get(v[1])
+    if pr is None: raise Gap('principle', 'the global %d is not an induction principle of the action language' % v[1])
+    x = ctx.hyp(info['lvl'])
+    applied = [ctx.node(e) for e in info['extra']] + ([k.mk_fvar(x)] if info['takes_var'] else [])          # (the arguments after the motive, which is the first)
+    if pr.mi != 0 or len(applied) != pr.last: raise Gap('principle', '%d arguments after the motive, the action language\'s reading of the principle takes %d' % (len(applied), pr.last))
+    if pr.major_explicit and applied[pr.ni - 1] != k.mk_fvar(x): raise Gap('principle', 'the principle\'s major argument is not the variable')
+    codes = [(('c', v[1], 0),)]
+    for j in pr.free:
+        ok, ty = k.infer_open(applied[j - 1], ctx.g.hyp_types)
+        if not ok: raise Gap('principle', 'an argument of the principle is ill-typed')
+        codes.append(ctx.code_node(applied[j - 1], ty))
+    return [[Action(Kind.INDUCT_WITH, 0, (), tuple(codes), (x,))]]
 
 
 def tr_interval_cases(ctx, node):

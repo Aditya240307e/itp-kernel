@@ -5,13 +5,15 @@ deterministic world (the library, then the problems in the order they were regis
 know about it: where it comes from, what it says in words, **a check that the formal statement says what the words
 say**, a reference proof, and the regimes it is attacked in. Everything is data: the agent sees a goal, never text.
 
-Files: `bank.py` (design, building, checks, export), `bank_lib.py` (the problems), `semantic.py` (reference semantics
-and faithfulness checks), `bank_baseline.py` (blind-search difficulty), gate `s41_bank_tests.py` (127 checks),
-`s41_golden.json` (digest of every statement).
+Files: `bank.py` (design, building, checks, export), `bank_lib.py` (the first 28 problems) and `bank_lib2.py` (54
+more), `bank_all.py` (the whole bank as one world), `semantic.py` (reference semantics and faithfulness checks),
+`bank_baseline.py` (blind-search difficulty), `bank_split.py` (train/dev/test), `lib_corpus.py` (the proofs of the library
+lemmas as action sequences), `dataset.py` (build, verify and describe the dataset), gates `s41_bank_tests.py` (the 28:
+127 checks, `s41_golden.json`) and `s43_bank2_tests.py` (the 54 and the dataset machinery: `s43_golden.json`).
 
 ```python
-import bank_lib
-bank = bank_lib.load()                         # builds the world once (a couple of seconds)
+import bank_all
+bank = bank_all.load()                         # the 82 problems: builds the world once (about 20 seconds)
 bank.names(level=2, topic='divisibility')      # the index
 ep = bank.episode('imo1959_p1')                # a gym Episode: the statement as a goal, with the premises of the prefix regime
 ep = bank.episode('imo1969_p1', 'strict')      # ... with the lemmas written for the problem hidden
@@ -104,16 +106,19 @@ the problem. For a dataset that is the main risk, and `semantic.py` is the indep
    from `ab ≤ a²+b²`, or `gcd(21n+4, 14n+3)=1` from `gcd(20n+4, 14n+3)=1`. `atoms` gives the intended *numbers* of every
    relation atom of the conclusion (both sides of `=`, `≤`, `<`; `(a, b)` of `∣`; `(a, b, d)` of `is_gcd`), and they must
    match at every row.
+5b. **Hypothesis atoms.** The same for the relation atoms of the *hypotheses* (`hatoms=[(lhs, rhs), ...]`, in the order they
+   are written, no quantifier inside): `x² + y² = 3 z²` has the same integer solutions as `x² + y² = -3 z²` (both only the
+   origin), so no truth table sees a slip in that hypothesis — the numbers do (`x2_y2_3z2`).
 6. **Body.** A closed existential is true as soon as one witness works, so truth tables cannot see whether a connective or
    an inequality *inside* the body is the right way round. `body=(kinds, pred)` compares the body of the leading
    existentials at every combination of a point and the witnesses of the window (`imo1984_p2`, `imo1969_p1`,
    `square_mod_four`, `cube_mod_nine`, `odd_square_mod_eight`).
 7. **Negative controls.** `mutants(ast)` makes every plausible slip of the statement, one at a time — a changed
    numeral, `<`↔`≤`, `+`↔`−`, a swapped argument, `∧`↔`∨`, a dropped or extra negation, a changed quantifier, a changed
-   hypothesis, … (687 over the bank). Each one **must differ** from the statement in some part or in the numbers of an atom.
+   hypothesis, … (687 over the first 28 problems, 1415 over the 54 added). Each one **must differ** from the statement in some part or in the numbers of an atom.
    A mutant that survives is an error: the box would not notice that slip when the formalisation makes it. A mutant
    that genuinely means the same thing (a divisor and its negative, the sign of a base inside a square, `c` for `-c` under a symmetric window) is listed in
-   `skip_mutants={'description substring': 'reason'}` — 17 are, each with its reason, the gate prints them.
+   `skip_mutants={'description substring': 'reason'}` — each with its reason (5 problems of the first 28, 9 of the 54; the divisor-and-its-negative slip is the usual one).
 
 **What this is not.** It is a check on small values, never a proof of faithfulness: it cannot tell a statement that
 differs only outside the window, and the text → spec step is still a human step (that is why the spec is written
@@ -142,17 +147,24 @@ identities, `sum_squares_zero` and the trivial prefix regime of `imo1964_p1a` fa
 right square as a hint term, the number-theory lemmas need the case split — a good signal that the bank asks for
 ideas and not only for search.
 
-## 6. The problems (28)
+## 6. The problems (82)
 
 | level | problems |
 |---|---|
-| 1 | `ident_diff_squares`, `ident_sophie_germain`, `ident_brahmagupta`, `ident_consecutive_four`, `ident_fourth_powers`, `ineq_am_gm_two`, `ineq_square_sum_three`, `ineq_four_ab`, `ineq_cauchy_two`, `sum_squares_zero` |
-| 2 | `imo1959_p1` (IMO 1959 P1), `not_dvd_between`, `square_mod_four`, `sum_two_squares_mod4`, `odd_square_mod_eight`, `cube_mod_nine`, `cube_minus_n_div6`, `pow_sub_dvd`, `coprime_consecutive`, `no_square_between`, `N.induction3` (a library principle, no spec) |
-| 3 | `sqrt2_irrational`, `three_dvd_sum_squares`, `imo1984_p2` (IMO 1984 P2, exists), `imo1969_p1` (IMO 1969 P1), `imo1964_p1b` (IMO 1964 P1b), `imo1964_p1a` (IMO 1964 P1a, answer) |
-| 4 | `imo2019_p1` (IMO 2019 P1, answer: all functions with `f(2a)+2f(b)=f(f(a+b))`) |
+| 1 | `ident_diff_squares`, `ident_sophie_germain`, `ident_brahmagupta`, `ident_consecutive_four`, `ident_fourth_powers`, `ineq_am_gm_two`, `ineq_square_sum_three`, `ineq_four_ab`, `ineq_cauchy_two`, `sum_squares_zero`, `ident_cube_sum`, `ident_cube_diff`, `ident_three_cubes`, `ident_pell_product`, `ineq_three_squares`, `ineq_shifted_squares`, `ineq_cross_terms`, `find_all_x2_eq_x` (answer) |
+| 2 | `imo1959_p1` (IMO 1959 P1), `not_dvd_between`, `square_mod_four`, `sum_two_squares_mod4`, `odd_square_mod_eight`, `cube_mod_nine`, `cube_minus_n_div6`, `pow_sub_dvd`, `coprime_consecutive`, `no_square_between`, `N.induction3` (a library principle, no spec), `ineq_cubes_two`, `ineq_cubes_three`, `ineq_pairs_eight`, `ineq_fourth_powers_three`, `ineq_four_fourth_powers`, `quad_form_zero`, `square_mod_three`, `consecutive_product_even`, `three_consecutive_div3`, `five_dvd_fifth_power`, `fourth_power_odd_16`, `gcd_shift`, `no_square_pronic`, `five_dvd_six_pow_minus_one`, `three_dvd_four_pow_plus_five`, `two_pow_gt_n`, `three_consecutive_not_squarefree` (exists), `ineq_cauchy_three`, `ineq_chebyshev_cubes`, `ineq_a_plus_b_cubed`, `ineq_square_products` |
+| 3 | `sqrt2_irrational`, `three_dvd_sum_squares`, `imo1984_p2` (IMO 1984 P2, exists), `imo1969_p1` (IMO 1969 P1), `imo1964_p1b` (IMO 1964 P1b), `imo1964_p1a` (IMO 1964 P1a, answer), `diff_squares_not_2_mod_4`, `pythag_three`, `cube_sum_not_4_mod_9`, `gcd_sum_product`, `dvd_coprime_product`, `square_not_prime`, `bernoulli_int`, `find_all_xy_eq_x_plus_y` (answer), `find_all_n_plus_1_dvd` (answer), `frobenius_3_5`, `fe_additive` (answer), `no_f_f_succ`, `sqrt3_irrational`, `pell_infinitely_many`, `no_x2_minus_2y2_eq_3`, `three_squares_mod_eight`, `schur_nonneg`, `n5_minus_n_div30`, `imo1964_p2` (IMO 1964 P2), `n4_n2_1_composite` |
+| 4 | `imo2019_p1` (IMO 2019 P1, answer: all functions with `f(2a)+2f(b)=f(f(a+b))`), `x2_y2_3z2` (infinite descent), `fe_f_x_plus_f_y` (answer), `imo1982_p1` (IMO 1982 P1, answer: `f(1982) = 660`), `fe_quadratic` (answer) |
+| 5 | `imo1988_p6` (IMO 1988 P6, Vieta jumping) |
+
+Nine are IMO problems (1959 P1, 1964 P1 a/b and P2, 1969 P1, 1982 P1, 1984 P2, 1988 P6, 2019 P1). The level is how much *thinking* the
+problem asks for, not how long the proof is: the case enumerations (`pythag_three`, `cube_sum_not_4_mod_9`,
+`three_squares_mod_eight`: 107–197 actions) are level 3, `imo1964_p1a` is one `APPLY` in the prefix regime. Inequalities
+that are over the reals in the original (`imo1964_p2`, `schur_nonneg`, the AM-GM family) are stated for integers (the
+`notes` of the problem say so) until the ordered-field layer exists.
 
 `sqrt2_irrational` and `imo2019_p1` are declared (the library proves them) and are not self-contained: their strict
-regime is not available (`strict=False`).
+regime is not available (`strict=False`). Eight problems have two reference proofs (prefix and strict).
 
 ## 7. Export
 
@@ -171,6 +183,24 @@ The ids in `statement_code` and in the steps are those of *this* world: a consum
 pinned in `s41_golden.json` — a change to a printed statement fails the gate until it is accepted consciously
 (`S41_UPDATE_GOLDEN=1`).
 
+## 7b. The dataset (`dataset.py`)
+
+```
+python3 dataset.py OUT_DIR           # bank.json, splits.json, library.json, DATASET_CARD.md, manifest.json (digests)
+python3 dataset.py --verify OUT_DIR  # replay every demonstration in a fresh engine over a rebuilt world
+```
+
+* `bank.json` — section 7's file for all 82 problems, each with its `split` and `family`. 82 demonstrations (1816 actions); 8 problems have a second proof for the strict regime.
+* `splits.json` — the split policy and the splits. **By family, as a pure function of the family key** (`bank_split.py`): the two parts of
+  one olympiad problem, a statement in other clothes (`4ab ≤ (a+b)²` and `2ab ≤ a²+b²`), an argument with another constant
+  (`sqrt2`/`sqrt3`) are in one split; the split of a family is a hash of its key under a frozen salt (found once, the smallest
+  that satisfies the coverage requirements: every split has problems of levels 1–3, test has IMO problems and six topics), so
+  **adding problems never moves an old one**. Version 1: 56 train / 10 dev / 16 test (test has `imo2019_p1`, `imo1964_p1a/b`,
+  `x2_y2_3z2`, `frobenius_3_5`, …). Dev picks the epoch and the search parameters; test is read once.
+* `library.json` — the proofs of the library's 398 lemmas (1978 actions) as action sequences, with a split by lemma name (the
+  imitation data besides the bank); a lemma whose statement is a bank problem's is marked `bank_duplicate` and left out of training.
+* `DATASET_CARD.md` — generated from the files (counts, splits, kinds of action), pinned by the manifest.
+
 ## 8. Adding to the bank
 
 1. Write the statement and its **text**, then the **spec** (independently — do not copy the formal statement).
@@ -183,8 +213,9 @@ pinned in `s41_golden.json` — a change to a printed statement fails the gate u
    `audit_prims` / `audit_theorems` confirm the entry against the definitions and the proved theorems.
 4. Run the gate (`S41_ONLY=B python3 s41_bank_tests.py` for the bank content), update the golden digests on purpose.
 
-## 9. Gate S41 (127 checks, ≈150 s)
+## 9. Gates S41 and S43
 
+**S41** (127 checks, about 150 s) — the first 28 problems and the machinery:
 A. the meaning tables against the library definitions and 383 proved theorems, and corrupted tables are noticed ·
 A2. the reader and the evaluator, wrong specs are rejected, atoms, body, vacuity, equivalences · B. every problem:
 metadata, faithfulness, all mutants caught, skip reasons, golden digests · C. replay in both regimes, the independent
@@ -194,6 +225,17 @@ bookkeeping errors · F. banks of deliberately wrong formalisations are rejected
 non-theorem / lazy build / unsayable statement.
 Environment: `S41_ONLY=A,A2,B,…`, `S41_FAILFAST`, `S41_TRACE`, `S41_UPDATE_GOLDEN`, `S41_HEAVY`.
 
+**S43** (about 7 min) — the 54 added problems and the dataset:
+A. `hatoms` (the `-3 z²` mutant survives without them, wrong numbers and counts are rejected), the recorder's claims under
+the hypotheses of the outer goal (`sqrt3_irrational`, `x2_y2_3z2`) and a `linarith` whose hint is the goal (`schur_nonneg`),
+`induction_on` with the starting point as an extra argument and what it refuses · B. every new problem: faithfulness with 1415
+mutants all caught, statements pinned in `s43_golden.json`, the old 28 still those of `s41_golden.json`, no two problems with the
+same statement · C. replay in both regimes (1384 actions), the independent checker on all but the seven proofs it takes longest on
+(15 s to minutes; `S43_HEAVY=1` includes them), JSON round-trip in a fresh engine · D. helper lemmas hidden in the strict regime,
+`Episode` playthroughs · E. splits (partition, no family straddles, coverage, purity: the same split with fewer problems),
+the card, the library corpus replays from its JSON.
+Environment: `S43_ONLY=A,B,…`, `S43_FAILFAST`, `S43_TRACE`, `S43_UPDATE_GOLDEN`, `S43_HEAVY`.
+
 ## 10. Toward ISL N1–N3, A1–A3
 
 What the bank still needs, in the order the problems need it: `Z.modeq` and a congruence calculus; factorial and
@@ -201,3 +243,9 @@ finite sums/products (an `N`-indexed recursion) for Euclid, Wilson, telescoping;
 layer (ℚ then ℝ as one auditable structure) for the A problems — each new symbol needs its entry in the meaning tables
 and its mutants in `mutants()`; more of the level-3 lemmas that the ISL solutions are built from (Vieta jumping,
 infinite descent, bounding arguments, the standard inequality toolbox).
+
+Limits of the reference proofs that the new problems exposed: `INDUCT_WITH` cannot generalise variables that were introduced
+before the induction (a descent is proved by `Z.strong_induction` with an explicit statement, not by a bare induction);
+`linarith` has no integer reasoning (no gcd, no parity: `8a + 1 = 8n + 2` is refuted by an explicit case split on
+`K ≤ -1 / K = 0 / K ≥ 1`); `x**2` is `Z.sqr x` after normalisation and not definitionally `Z.pow x 2`, so a lemma used inside a
+motive is stated with `x*x`.

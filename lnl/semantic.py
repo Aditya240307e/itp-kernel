@@ -439,9 +439,13 @@ class Spec:
     `body=(kinds, pred)`: for a conclusion that begins with existentials (`exists a, exists b, B(a, b)`): the kinds of the witnesses and the intended meaning of the BODY as a predicate of the parameters and then the
     witnesses (`pred(*params, a, b)`).  A closed existential is true as soon as ONE witness works, so the truth tables above do not see whether a connective or an inequality inside the body is the right way round
     (a body with `or` for `and` has more witnesses, and still has the one that the problem needs); the body is compared at every combination of a point and the witnesses of the window `windows['ex']` (a sample when
-    that is a lot), and so are the bodies of the mutants."""
-    def __init__(self, params, hyps=(), concl=None, windows=None, fns=None, points=1200, skip_mutants=None, max_mutants=120, note='', atom=None, atoms=None, extra_fns=(), body=None):
+    that is a lot), and so are the bodies of the mutants.
+    `hatoms`: the same for the relation atoms of the HYPOTHESES (all of them, in the order they are written; no quantifier inside a hypothesis): the numbers of  x^2 + y^2 = 3 z^2  are
+    `(lambda x, y, z: x * x + y * y, lambda x, y, z: 3 * z * z)`.  A truth table does not see a slip in a hypothesis that has the same solutions (`-3 z^2` for `3 z^2` over the integers: both have only the
+    origin), and a Diophantine hypothesis is the usual case."""
+    def __init__(self, params, hyps=(), concl=None, windows=None, fns=None, points=1200, skip_mutants=None, max_mutants=120, note='', atom=None, atoms=None, extra_fns=(), body=None, hatoms=None):
         self.params = tuple(params); self.hyps = tuple(hyps); self.concl = concl; self.windows = windows or {}; self.fns = fns; self.points = points; self.extra_fns = tuple(extra_fns)
+        self.hatoms = None if hatoms is None else [tuple(a) for a in hatoms]
         self.skip_mutants = skip_mutants or {}; self.max_mutants = max_mutants; self.note = note
         self.atoms = None if atoms is None and atom is None else ([tuple(atom)] if atom is not None else [tuple(a) for a in atoms])
         self.body = None if body is None else (tuple(body[0]), body[1])
@@ -502,7 +506,12 @@ def strip_witnesses(concl, bodykinds):
     return concl
 
 
-def _tables(sem, ast, pts, kinds0=None, bodykinds=None):
+def _canon_atom(kind, vals):
+    """the numbers of a hypothesis atom at one point, as they are compared: an equation may be written either way round"""
+    return (kind,) + (tuple(sorted(vals)) if kind == 'eq' else tuple(vals))
+
+
+def _tables(sem, ast, pts, kinds0=None, bodykinds=None, hyp_atoms=False):
     """the values of the parts of the statement at the points: (kinds, {'hyp0': [bool], .., 'concl': [bool] | 'lhs', 'rhs'}, atoms) where atoms = [(kind, [column of each argument])] for the relation
     atoms of the conclusion's quantifier-free skeleton; with `bodykinds` also 'body': the body of the leading existentials at the `body_rows`.  Raises Unsupported, ShapeChange (kinds0 given and different)."""
     kinds, hyps, concl = sem.parts(ast)
@@ -510,6 +519,13 @@ def _tables(sem, ast, pts, kinds0=None, bodykinds=None):
     tabs = {}
     for i, h in enumerate(hyps):
         f = sem.compile(h); tabs['hyp%d' % i] = [bool(f(p)) for p in pts]
+    if hyp_atoms:
+        j = 0
+        for h in hyps:
+            for kind, args, binders in conclusion_atoms(h):
+                if binders: raise Unsupported('a relation under a quantifier inside a hypothesis: `hatoms` does not cover it')
+                fs = [sem.compile(x) for x in args]
+                tabs['hatom%d' % j] = [_canon_atom(kind, [f(p) for f in fs]) for p in pts]; j += 1
     if concl[0] == 'iff':
         f, g = sem.compile(concl[1]), sem.compile(concl[2])
         tabs['lhs'] = [bool(f(p)) for p in pts]; tabs['rhs'] = [bool(g(p)) for p in pts]
@@ -595,7 +611,8 @@ def check_spec(sem, ast, spec, mutate=True, seed=1, strict=True):
         pts, total = _box(sem, kinds, spec.fns, spec.points, rng, spec.extra_fns)
         rep.points = len(pts)
         bk = None if spec.body is None else spec.body[0]
-        try: _, tabs, atoms = _tables(sem, ast, pts, None, bk)
+        ha = spec.hatoms is not None
+        try: _, tabs, atoms = _tables(sem, ast, pts, None, bk, ha)
         except Unsupported as e: rep.errors.append('evaluation: %s' % (e,)); return rep
         except ShapeChange: rep.errors.append('the conclusion does not begin with existentials of the kinds %s the spec gives for its body' % (bk,)); return rep
         want = {}; where = {}
@@ -618,6 +635,17 @@ def check_spec(sem, ast, spec, mutate=True, seed=1, strict=True):
                         bad = [j for j in range(len(at.rows)) if tuple(c[j] for c in at.cols) != tuple(c[j] for c in want_cols)]
                         rep.errors.append('the numbers in atom %d of the conclusion (%s) differ from the intended ones at %d of %d rows, e.g. at %s: statement %s, intended %s' % (
                             i, at.kind, len(bad), len(at.rows), _showpt(at.rows[bad[0]]), tuple(c[bad[0]] for c in at.cols), tuple(c[bad[0]] for c in want_cols)))
+        if ha:
+            names = sorted((nm for nm in tabs if nm.startswith('hatom')), key=lambda nm: int(nm[5:]))
+            if len(spec.hatoms) != len(names): rep.errors.append('the hypotheses have %d relation atoms, the spec gives the numbers of %d' % (len(names), len(spec.hatoms)))
+            else:
+                for i, (nm, fs) in enumerate(zip(names, spec.hatoms)):
+                    kind = tabs[nm][0][0]
+                    if len(fs) != len(tabs[nm][0]) - 1: rep.errors.append('atom %d of the hypotheses (%s) has %d arguments, the spec gives %d' % (i, kind, len(tabs[nm][0]) - 1, len(fs))); continue
+                    want_h = [_canon_atom(kind, [f(*p) for f in fs]) for p in pts]
+                    bad = [j for j in range(len(pts)) if tabs[nm][j] != want_h[j]]
+                    if bad: rep.errors.append('the numbers in atom %d of the hypotheses (%s) differ from the intended ones at %d of %d points, e.g. at %s: statement %s, intended %s' % (
+                        i, kind, len(bad), len(pts), _showpt(pts[bad[0]]), tabs[nm][bad[0]][1:], want_h[bad[0]][1:]))
         hy = [tabs['hyp%d' % i] for i in range(len(hyps))]
         rep.nonvacuous = sum(1 for j in range(len(pts)) if all(h[j] for h in hy))
         if rep.nonvacuous == 0: rep.errors.append('no point satisfies the hypotheses: the problem is vacuous on this box')
@@ -635,14 +663,14 @@ def check_spec(sem, ast, spec, mutate=True, seed=1, strict=True):
             if len(ms) > spec.max_mutants: ms = rng2.sample(ms, spec.max_mutants)
             idx = list(range(len(pts))); rng2.shuffle(idx); small = sorted(idx[:250])
             spts = [pts[j] for j in small]
-            if bk is not None: _, ref_small, ref_small_at = _tables(sem, ast, spts, None, bk)         # (the sample of the body rows depends on the points)
+            if bk is not None: _, ref_small, ref_small_at = _tables(sem, ast, spts, None, bk, ha)         # (the sample of the body rows depends on the points)
             else: ref_small = {nm: [tabs[nm][j] for j in small] for nm in tabs}; ref_small_at = _atom_tables(sem, concl, spts) if spec.atoms is not None else None
             for d, m in ms:
                 rep.mutants += 1
                 differ = None
                 for sub in (small, None):                                # a few points first; the whole box only for a mutant that these do not tell apart
                     use = spts if sub is not None else pts
-                    try: kd2, tb2, at2 = _tables(sem, m, use, kinds, bk)
+                    try: kd2, tb2, at2 = _tables(sem, m, use, kinds, bk, ha)
                     except ShapeChange: rep.shape_caught += 1; differ = True; break
                     except Unsupported: rep.unevaluable += 1; differ = True; break
                     except (ArithmeticError, TypeError, ValueError, RecursionError, IndexError): rep.unevaluable += 1; differ = True; break

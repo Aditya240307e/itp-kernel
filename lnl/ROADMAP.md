@@ -4,7 +4,7 @@
 A small, heavily tested trusted core and tactic layer: dependent types, inductive families with parameters and indices, structural recursion, a Prop/Type world with definitional proof irrelevance and restricted elimination,
 the four classical axioms, quotients (five kernel constants and one reduction rule; `funext` is a theorem), tactics (intro, apply, rewrite, cases, induct with equation generalisation, strong induction by bounded
 predicates, generated injectivity lemmas; in the authoring layer exact/rw/rw_at/have/obtain/calc/induction_on/ring/linarith/nlinarith), an independent checker, differential gates against the frozen reference, zero-tolerance random
-oracles, soundness canaries, and a deterministic work budget (a wrong action fails after a bounded number of steps instead of hanging). 45 gates, 1615 mutants defined; the whole suite is also run a second time with
+oracles, soundness canaries, and a deterministic work budget (a wrong action fails after a bounded number of steps instead of hanging). 46 gates, 1615 mutants defined; the whole suite is also run a second time with
 `ITP_VERIFY_MEMO=1`, which re-decides every answer a sharing table or the quick conversion check gave.
 Libraries, all built by tactic scripts and re-checked by the kernel (they use NO axioms; the four classical ones are an optional layer, S15): unary Nat (about 125 lemmas), the binary naturals `N` (Coq-style `Pos`/`N`, with the bridge to Nat and
 the induction principle as a theorem), the integers `Z` as a quotient of `N x N` (ring laws, order, strict order, trichotomy, discreteness, integral domain, casts from N; 434 globals, about 25 s to build), a kernel-checked `ring` for `Nat`, `N` and `Z`,
@@ -12,7 +12,7 @@ the induction principle as a theorem), the integers `Z` as a quotient of `N x N`
 remainder, Bezout, gcd, coprimality, primes, Euclid's lemma, every integer > 1 has a prime divisor; 46 theorems, one classical axiom `em`) and three olympiad statements proved (IMO 1959 P1 `gcd(21n+4, 14n+3) = 1`, IMO 2019 P1
 `f(2a) + 2f(b) = f(f(a+b))` iff `f(n) = 2n + c`, the irrationality of sqrt 2).
 Also built since (see the status log): the learner's environment with actions that SAY their term arguments (a typed term builder, claims, induction with a chosen principle, injectivity, forward reasoning), a recorder that replays the library's proofs as
-action sequences (398 of 400), and a problem bank of formal olympiad problems with checked faithfulness (28 problems; 26 more are written and not yet integrated).
+action sequences (398 of 400), and a problem bank of formal olympiad problems with checked faithfulness (82 problems, nine of them IMO problems, levels 1-5) and dataset v1 on it (reference proofs in two regimes, a corpus of 398 library lemma proofs, leak-resistant splits: 56 train / 10 dev / 16 test).
 Not yet: Q and R, a congruence calculus (`modeq`; squares mod 4 / 8 are proved case by case on remainders in the bank), `omega`/`positivity`/`norm_num`, sums over finite ranges, a trained policy (the first ones are the next step). Checking a big `ring`/`linarith` proof cost 0.1-0.5 s (finding F36); after the conversion work of 2026-10-12 (quick check on syntax, three sharing tables, Pi exposure) the final check of the large `nlinarith` proof is 88 thousand
 steps instead of 1.98 million and the library build is 16% faster. Conversion of exponentially shared values is polynomial (F37, F38).
 
@@ -64,6 +64,14 @@ Decisions: R is axiomatised as a single ordered-field structure instance (audit 
 5. Decide: build the library ourselves, or invest in Lean-kernel compatibility and import Mathlib.
 
 ## Status log (kernel features, newest first)
+- **The bank grows to 82 problems; dataset v1** (gate S43; `bank_lib2.py`, `bank_all.py`, `bank_split.py`, `lib_corpus.py`, `dataset.py`; BANK.md sections 6-7b; findings F62-F67). 46 gates pass, in both modes (ordinary pass 748 s, `ITP_VERIFY_MEMO=1` 1299 s on the 2-core box).
+  * S43 (500 s): the 54 problems added to the 28 of S41 -- levels 1-5, nine IMO problems in all (1959 P1, 1964 P1 (a), (b) and P2, 1969 P1, 1982 P1, 1984 P2, 1988 P6 by Vieta jumping, 2019 P1) -- each with its statement pinned by digest, a faithfulness
+    check against an independent Python spec with negative controls (statement mutants: 687 over the first 28, 1415 over the 54; each caught or explained by a `skip_mutants` entry with its reason), a reference proof that replays as kernel-checked
+    actions in the prefix regime and, where it proves its lemmas inline, in the strict regime, and the independent checker's verdict (all but 7 slow case enumerations: F67).
+  * The machinery the new problems needed: `induction_on` with the principle's extra arguments (the starting point of `Z.induction_from`, strong induction) and INDUCT_WITH for it (F62); retired outer-goal hypotheses are not extras (F63); a hint that is the
+    goal or a hypothesis (F64); `Spec(hatoms=..)` for the atoms of hypotheses (F65).
+  * The DATASET (`dataset.py` writes it outside the repository: bank.json, library.json, splits.json, DATASET_CARD.md, manifest.json with digests): 82 reference proofs (1816 actions), 8 strict-regime proofs (546 actions), the proofs of 398 library lemmas (1978 actions),
+    and the SPLITS: by family, a frozen hash (salt 25), 56 train / 10 dev / 16 test, the test split with three IMO problems and level-4 problems, the train split with the level-5 problem (F66).
 - **The action language, the typed term builder, the recorder and the problem bank** (gates S37-S42; `gym_terms.py`, `gym_build.py`, `gym_acts.py`, `recorder.py`, `bank.py`, `bank_lib.py`, `semantic.py`, `bank_baseline.py`,
   `gym_policy.py`; ACTIONS.md, BANK.md; findings F51-F61; mutant series GA / GB / GE / GF / GL / GQ / GR / GS / GT / GX, 1615 mutants in all). 45 gates pass, in both modes (ordinary pass 677 s, `ITP_VERIFY_MEMO=1` 738 s on the 2-core box).
   * S37: `ring`, `linarith` and `linear_combination` see through the arithmetic in the arguments of an atom (`f (a + b)` and `f (b + a)` are one unknown; congruence proofs checked by the kernel).

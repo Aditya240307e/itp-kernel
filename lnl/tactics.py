@@ -500,15 +500,30 @@ class Proof:
         self.have(name, self.T(var, lambda x: w.Eq(x, lit(lo))), lambda q: q.linarith())
         return self
 
-    def induction_on(self, lemma, var, names=()):
-        """induction by a library principle  lemma : forall P z, (premise) -> P z  on a hypothesis `var` whose type is opaque to `induct` (a quotient). The motive is read off the goal by abstracting `var`;
-        the goal becomes the premise, and `names` introduce its binders. Hypotheses that depend on `var` are not generalised: do the induction before introducing them."""
+    def induction_on(self, lemma, var, names=(), extra=()):
+        """induction by a library principle on a hypothesis `var`, for a type that `induct` cannot split (a quotient) or a principle of another shape than the type's own (induction from a starting point, strong
+        induction, in both directions). The principle is  lemma : forall P [extra..] [z], premises -> [forall n, side premises ->] P z.  The motive P is read off the goal by abstracting `var`; `extra` are the
+        principle's other data arguments that come before its premises (the starting point `a` of `Z.induction_from` and `Z.strong_induction`); the variable itself is passed too when the principle takes it there
+        (`N.induction_on`, `Z.induction_on`), and otherwise found by unification with the goal. The goals are the premises, in order: the cases first, then the side premises that only talk about the variable
+        (`a <= n`: `assumption` or `linarith` closes them). `names` introduce the binders of the first goal. Hypotheses that depend on `var` are not generalised: do the induction before introducing them."""
         w = self.w; lvl = self._level(var)
         with self.focus():
             x = self.h(var) if isinstance(var, str) else var; g = self.goal().target
             ty = w.T(self.ps.goal_hyp_type(0, lvl))
             motive = w.T(self.k.mk_lambda(ty.n, self.k.abstract_fvars(g.n, [lvl])))
-        self.apply(lemma, motive, x)
+            given = [self.t(e) for e in extra]
+            cur = w.type_of(self.t(lemma))                    # the principle's type, past the motive and the extras
+            for a in [motive] + given:
+                parts = w.pi_parts(cur)
+                if parts is None: raise AuthorError('induction_on: %s takes fewer arguments than the motive and %d more' % (lemma, len(given)))
+                cur = w.instantiate(parts[1], a)
+            parts = w.pi_parts(cur)
+            takes_var = False
+            if parts is not None:                             # the next binder is the variable's if it is data (a premise is a proposition)
+                ok, sort = self.k.infer_open(parts[0].n, w.ctx)
+                takes_var = bool(ok) and sort != w.PROP.n
+        self.last_induction = {'extra': given, 'takes_var': takes_var}
+        self.apply(lemma, motive, *given, *([x] if takes_var else []))
         if names: self.intro(*names)
         return self
 
