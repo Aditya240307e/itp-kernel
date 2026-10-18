@@ -11,11 +11,13 @@ bug into an immediate, located error. Run this after any change to itp_kernel.hp
 Leak detection is off here (the Python interpreter itself leaks at exit); the evaluator's leaks are checked separately by compiling a standalone driver with
 -fsanitize=address and running it with detect_leaks=1.
 
-The scratch directory is a copy of src/ and tests/ with its own build/: the sanitized hybrid kernel, and the (ordinary) reference kernel copied from the repository's build/.
+The scratch directory is a copy of the directories of itp_paths.COPIED_DIRS (src, tests, legacy, data) with its own build/: the sanitized hybrid kernel, and the (ordinary) reference kernel copied from the
+repository's build/.
 """
 import glob, os, shutil, subprocess as sp, sys, tempfile
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src', 'python')); import itp_paths  # noqa: E402
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = itp_paths.ROOT
 
 
 def main(argv):
@@ -28,7 +30,7 @@ def main(argv):
     os.makedirs(work, exist_ok=True)
     try:
         ign = shutil.ignore_patterns('__pycache__', '*.pyc')
-        for d in ('src', 'tests'): shutil.copytree(os.path.join(ROOT, d), os.path.join(work, d), dirs_exist_ok=True, ignore=ign)
+        for d in itp_paths.COPIED_DIRS: shutil.copytree(os.path.join(ROOT, d), os.path.join(work, d), dirs_exist_ok=True, ignore=ign)
         os.makedirs(os.path.join(work, 'build'), exist_ok=True)
         for so in glob.glob(os.path.join(ROOT, 'build', 'itp_env_ref*')): shutil.copy2(so, os.path.join(work, 'build'))
         env = dict(os.environ, ITP_EXTRA_CXXFLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer -O1 -g')

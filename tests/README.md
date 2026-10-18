@@ -116,7 +116,7 @@ Times are seconds on the 2-core box with two gates at a time (the last full run,
 
 | gate | time | what it protects |
 |---|---|---|
-| `s45_layout_tests.py` |  | The repository's layout is the layout the documentation describes, and stays so. |
+| `s45_layout_tests.py` |  | The repository's layout is the layout the documentation describes, and stays so; the release archive is sound; the copies of the tree in which mutants and sanitizers run are complete. |
 | `s46_examples_tests.py` |  | The examples run. |
 
 ## Adding a gate

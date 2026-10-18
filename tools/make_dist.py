@@ -31,7 +31,8 @@ def file_list():
         for d, dirs, files in os.walk(ROOT):
             dirs[:] = [x for x in dirs if x not in SKIP_DIRS]
             names += [os.path.relpath(os.path.join(d, f), ROOT) for f in files]
-    return sorted(n for n in names if not n.endswith(SKIP_SUFFIX) and not set(n.split('/')) & SKIP_DIRS)
+    generated = ('MANIFEST.sha256', 'RELEASE.txt')                  # (an extracted archive holds the previous ones; they are made afresh below)
+    return sorted(n for n in names if not n.endswith(SKIP_SUFFIX) and not set(n.split('/')) & SKIP_DIRS and n not in generated)
 
 
 def sha256(path):

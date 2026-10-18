@@ -11,9 +11,11 @@ Every script and module of the project begins with one line that puts src/python
   * tests and each of its subdirectories (the gates and the modules they share).
 
 Module names are unique across all of these directories (the layout gate, tests/repo/s45_layout_tests.py, checks it), so the order does not matter.  The root is derived from THIS file's location, never from
-the working directory or from an environment variable: a copy of src/ and tests/ (the mutation driver tests mutated copies) is a complete, self-consistent tree.
+the working directory or from an environment variable: a copy of the directories in COPIED_DIRS plus a build directory (the mutation driver and the sanitizer run the gates in such copies) is a complete,
+self-consistent tree.  (Complete means COMPLETE: the gates import `curriculum` and `hypergraph` from legacy/.  A copy that lacks a directory the gates need makes every gate fail, and then every mutant
+looks caught -- `python3 mutants/mutate.py --selftest` and the layout gate S45 check that an unmutated copy passes a gate.)
 
-Constants: ROOT SRC_PY SRC_CPP TESTS GOLDEN MUTANTS EXAMPLES DOCS DATA LEGACY BUILD
+Constants: ROOT SRC_PY SRC_CPP TESTS GOLDEN MUTANTS EXAMPLES DOCS DATA LEGACY BUILD COPIED_DIRS
 """
 import os, sys
 
@@ -29,6 +31,7 @@ DATA = os.path.join(ROOT, 'data')
 LEGACY = os.path.join(ROOT, 'legacy')
 BUILD = os.environ.get('ITP_BUILD_DIR') or os.path.join(ROOT, 'build')
 
+COPIED_DIRS = ('src', 'tests', 'legacy', 'data')         # what a self-contained copy of the tree needs besides build/ (tools/sanitize.py and mutants/mutate.py copy exactly these)
 _NOT_SOURCE = ('golden',)
 
 

@@ -14,7 +14,9 @@ and fragile in exactly the ways this gate watches:
   G. requirements.txt names exactly the third-party packages the code imports;
   H. the required directories and files exist, and nothing else is lying around at the top level;
   I. the Makefile parses (`make -n` on each target) and its targets are the documented ones;
-  J. the dataset on disk (data/dataset_v1): the manifest's digests are those of the files, and the files agree with each other.
+  J. the dataset on disk (data/dataset_v1): the manifest's digests are those of the files, and the files agree with each other;
+  K. the release archive: tools/make_dist.py makes a tar and a zip that hold every file once, a manifest that checks, and nothing of the build or the machine;
+  L. the copies of the tree in which the mutation driver and the sanitizer run the gates are complete (an unmutated copy passes a gate).
 """
 import os as _os, sys as _sys; _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', '..', 'src', 'python')); import itp_paths  # noqa: E402,F401
 import ast, collections, glob, hashlib, json, os, re, shutil, subprocess, sys, tempfile
@@ -183,7 +185,8 @@ REQUIRED_FILES = ['README.md', 'Makefile', 'requirements.txt', '.gitignore',
                   'data/dataset_v1/bank.json', 'data/dataset_v1/splits.json', 'data/dataset_v1/library.json', 'data/dataset_v1/manifest.json', 'data/dataset_v1/DATASET_CARD.md']
 REQUIRED_DIRS = ['src/python/authoring', 'src/python/checker', 'src/python/library', 'src/python/environment', 'src/python/problems', 'src/python/learner',
                  'tests/kernel', 'tests/library', 'tests/environment', 'tests/problems', 'tests/learner', 'tests/repo', 'tests/support', 'tests/golden', 'examples', 'data/results']
-TOP_LEVEL = {'README.md', 'Makefile', 'requirements.txt', '.gitignore', '.git', 'build', 'dist', 'artifacts', 'src', 'tests', 'mutants', 'examples', 'docs', 'data', 'legacy', 'tools', '.venv'}
+TOP_LEVEL = {'README.md', 'Makefile', 'requirements.txt', '.gitignore', '.git', 'build', 'dist', 'artifacts', 'src', 'tests', 'mutants', 'examples', 'docs', 'data', 'legacy', 'tools', '.venv',
+             'MANIFEST.sha256', 'RELEASE.txt'}                      # (the last two: what tools/make_dist.py adds to a release archive, hence present in an extracted one)
 
 
 def sec_H():
@@ -237,10 +240,65 @@ def sec_J():
         expect(rows and {r['name'] for r in rows} <= set(splits['problems'][split]), 'J  data/results/%s.json describes problems of the %s split only' % (f, split))
 
 
+# ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ K. the release archive
+def sec_K():
+    """tools/make_dist.py: the archive (made here into a temporary directory, from this tree -- which may itself be an extracted archive) holds each file once, under one top-level directory, its MANIFEST
+    checks against the bytes in the archive, it holds nothing of the build or of the machine, its top-level entries are the repository's, and the zip holds what the tar holds"""
+    import tarfile, zipfile
+    tmp = tempfile.mkdtemp(prefix='s45_dist_')
+    try:
+        r = subprocess.run([sys.executable, os.path.join(ROOT, 'tools', 'make_dist.py'), '--out', tmp, '--name', 'itp-s45'], capture_output=True, text=True, timeout=300)
+        expect(r.returncode == 0, 'K  make_dist.py fails: %s' % (r.stderr or r.stdout)[-300:])
+        tp, zp = os.path.join(tmp, 'itp-s45.tar.gz'), os.path.join(tmp, 'itp-s45.zip')
+        if not (os.path.isfile(tp) and os.path.isfile(zp)): expect(False, 'K  make_dist.py made no archive'); return
+        with tarfile.open(tp) as tf:
+            members = [m for m in tf.getmembers() if m.isfile()]
+            names = [m.name for m in members]
+            expect(len(names) == len(set(names)), 'K  a file occurs twice in the tar: %s' % sorted(n for n, c in collections.Counter(names).items() if c > 1)[:5])
+            expect(all(n.startswith('itp-s45/') for n in names), 'K  every file of the tar is under the one top-level directory')
+            inner = {n.split('/', 1)[1]: m for n, m in zip(names, members)}
+            tops = {n.split('/')[0] for n in inner}
+            expect(tops <= TOP_LEVEL, 'K  top-level entries of the archive that the repository does not have: %s' % sorted(tops - TOP_LEVEL))
+            need = {'MANIFEST.sha256', 'RELEASE.txt', 'README.md', 'Makefile', 'requirements.txt', 'src', 'tests', 'examples', 'docs', 'data', 'mutants', 'tools', 'legacy'}
+            expect(need <= tops, 'K  the archive lacks parts of the repository: %s' % sorted(need - tops))
+            bad = [n for n in inner if n.endswith(('.so', '.pyc', '.o', '.pyd')) or set(n.split('/')) & {'.git', 'build', '__pycache__', 'dist', '.venv'}]
+            expect(not bad, 'K  build products or caches in the archive: %s' % bad[:5])
+            man = {}
+            for line in tf.extractfile(inner['MANIFEST.sha256']).read().decode().splitlines():
+                digest, _, path = line.partition('  ')
+                man[path] = digest
+            expect(set(man) == set(inner) - {'MANIFEST.sha256', 'RELEASE.txt'}, 'K  the manifest lists exactly the other files (missing %s, extra %s)' % (sorted(set(inner) - set(man) - {'MANIFEST.sha256', 'RELEASE.txt'})[:3], sorted(set(man) - set(inner))[:3]))
+            wrong = [p for p, d in man.items() if p in inner and hashlib.sha256(tf.extractfile(inner[p]).read()).hexdigest() != d]
+            expect(not wrong, 'K  the manifest\'s digest differs from the archived bytes of %s' % wrong[:5])
+            rel_txt = tf.extractfile(inner['RELEASE.txt']).read().decode()
+            expect(rel_txt.startswith('commit ') and 'files %d' % len(man) in rel_txt, 'K  RELEASE.txt names the commit and the number of files (%r)' % rel_txt[:120])
+        with zipfile.ZipFile(zp) as zf:
+            expect(sorted(n for n in zf.namelist() if not n.endswith('/')) == sorted(names), 'K  the zip holds the files of the tar')
+        if os.path.isdir(os.path.join(ROOT, '.git')) and shutil.which('git'):
+            r = subprocess.run(['git', '-C', ROOT, 'ls-files', '-co', '--exclude-standard'], capture_output=True, text=True)
+            if r.returncode == 0:
+                want = {n for n in r.stdout.split('\n') if n and os.path.isfile(os.path.join(ROOT, n))}
+                got = set(inner) - {'MANIFEST.sha256', 'RELEASE.txt'}
+                expect(got == want, 'K  the archive holds the files git knows (missing %s, extra %s)' % (sorted(want - got)[:3], sorted(got - want)[:3]))
+    finally: shutil.rmtree(tmp, ignore_errors=True)
+
+
+# ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ L. copies of the tree
+def sec_L():
+    """the mutation driver and the sanitizer run the gates in COPIES of the tree.  A copy that lacks something the gates need (it once lacked legacy/) makes every gate fail, and a mutation run then reports
+    every mutant as caught -- the worst failure a test of tests can have, because it looks like success.  So: the copy lists are one list (itp_paths.COPIED_DIRS), and the driver's own self-test -- an
+    unmutated copy passes a gate, the same copy without legacy/ fails it -- passes."""
+    for d in itp_paths.COPIED_DIRS: expect(os.path.isdir(os.path.join(ROOT, d)), 'L  COPIED_DIRS names %s, which is not a directory of the repository' % d)
+    for f in ('mutants/mutate.py', 'tools/sanitize.py'): expect('itp_paths.COPIED_DIRS' in read(os.path.join(ROOT, f)), 'L  %s does not copy the directories of itp_paths.COPIED_DIRS' % f)
+    for d in ('src', 'tests', 'legacy'): expect(d in itp_paths.COPIED_DIRS, 'L  COPIED_DIRS lacks %s' % d)
+    r = subprocess.run([sys.executable, os.path.join(ROOT, 'mutants', 'mutate.py'), '--selftest'], capture_output=True, text=True, timeout=600)
+    expect(r.returncode == 0, 'L  `mutate.py --selftest` fails: %s' % (r.stdout + r.stderr)[-400:].replace('\n', ' | '))
+
+
 def main():
     import time
     t0 = time.time()
-    for name, fn in (('A', sec_A), ('B', sec_B), ('C', sec_C), ('D', sec_D), ('E', sec_E), ('F', sec_F), ('G', sec_G), ('H', sec_H), ('I', sec_I), ('J', sec_J)):
+    for name, fn in (('A', sec_A), ('B', sec_B), ('C', sec_C), ('D', sec_D), ('E', sec_E), ('F', sec_F), ('G', sec_G), ('H', sec_H), ('I', sec_I), ('J', sec_J), ('K', sec_K), ('L', sec_L)):
         t1 = time.time(); n0, f0 = CHECKS[0], len(FAIL)
         try: fn()
         except Exception as e:
