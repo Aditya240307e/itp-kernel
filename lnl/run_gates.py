@@ -3,6 +3,7 @@
 
     python3 run_gates.py                      all gates, 2 at a time
     python3 run_gates.py -j 1                 serial (use this when timing matters)
+    python3 run_gates.py --ml                 the gates of the learner's machinery too (s44; they need torch and gymnasium)
     python3 run_gates.py s14_prop_world_tests.py s15_classical_tests.py     only these
 
 The gate list lives in mutate.py (GATE_CMDS) so there is exactly one place to add a gate. A gate passes iff it
@@ -28,14 +29,17 @@ def run_one(cmd, timeout):
 
 
 def main(argv):
-    jobs, timeout, names = 2, 1800, []
+    jobs, timeout, names, with_ml = 2, 1800, [], False
     it = iter(argv)
     for a in it:
         if a == '-j': jobs = int(next(it))
         elif a == '--timeout': timeout = int(next(it))
+        elif a == '--ml': with_ml = True
         else: names.append(a)
-    cmds = [c for c in mutate.GATE_CMDS if not names or c[0] in names]
-    unknown = set(names) - {c[0] for c in mutate.GATE_CMDS}
+    ml = [c[0] for c in mutate.ML_GATE_CMDS]
+    known = list(mutate.GATE_CMDS) + (list(mutate.ML_GATE_CMDS) if with_ml or any(n in ml for n in names) else [])
+    cmds = [c for c in known if not names or c[0] in names]
+    unknown = set(names) - {c[0] for c in known}
     if unknown:
         print('unknown gate(s): %s' % ', '.join(sorted(unknown))); return 2
     t0, failed = time.time(), []

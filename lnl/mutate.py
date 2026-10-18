@@ -1648,6 +1648,9 @@ MUTANTS = {
 GATE_CMDS = (['s2_tests.py', '1500'], ['s26_memo_tests.py'], ['s16_quot_tests.py'], ['s17_irrelevance_tests.py'], ['s18_deep_tests.py'], ['s19_boundary_tests.py'], ['s20_reservation_tests.py'], ['s21_view_tests.py'], ['s22_simp_tests.py'], ['s23_ring_tests.py'], ['s24_bin_tests.py'], ['s25_nring_tests.py'], ['s30_zlib_tests.py'], ['s31_linarith_tests.py'], ['s34_nt_tests.py'], ['s32_synconv_tests.py'], ['s33_convmemo_tests.py'], ['s35_matchcheck_tests.py'], ['s40_actions_tests.py'], ['s42_pins_tests.py'], ['s41_bank_tests.py'], ['s43_bank2_tests.py'], ['s36_gym_tests.py'], ['s37_atoms_tests.py'], ['s38_terms_tests.py'], ['s39_failfast_tests.py'], ['s27_fuel_tests.py'], ['s28_headunfold_tests.py'], ['s29_apply_pi_goal_tests.py'], ['harness.py', '1500', '3'], ['s3_tests.py', '600'], ['s4_tests.py', '800'], ['s5_tests.py', '1200', '3'], ['s5_probe_tests.py', '500', '7'], ['s6_logic_tests.py'], ['s6_f6_tests.py'],
              ['s7_param_tests.py', '150', '600'], ['s8_indep_tests.py', '100'], ['s9_strong_tests.py'], ['s10_noconf_tests.py'], ['s11_eqgen_tests.py'], ['s12_probe_eq_tests.py', '150'], ['s13_prop_tests.py'],
              ['s14_prop_world_tests.py', '600'], ['s15_classical_tests.py', '300'], ['oracle_gate.py'])
+# the gates of the LEARNER's machinery (features, network, search, Gymnasium environment): they need torch and gymnasium, which the kernel and its tactics do not, and a mutant of the kernel is caught by the
+# gates above long before these would matter, so the mutation driver does not run them; `run_gates.py --ml` does
+ML_GATE_CMDS = (['s44_ml_tests.py'],)
 # a gate has failed when it exits non-zero or prints one of these markers
 FAIL_RE = re.compile(r"GATE: FAIL|Traceback")        # NOT words like ACCEPTED/FAILED: healthy gate output contains them ("ACCEPTED 0"); the exit status is the real signal
 # mutants that no gate can distinguish from the original BY CONSTRUCTION (equivalent mutants); each needs a reason

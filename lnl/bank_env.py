@@ -1,0 +1,206 @@
+"""bank_env.py -- the problem bank as a Gymnasium environment, at the level of the policy's DECISIONS.
+
+    env = BankEnv(bank, names=splits['train'], regime='prefix')
+    obs, info = env.reset(options={'problem': 'imo1959_p1'})
+    while True:
+        a = int(np.argmax(np.where(info['action_mask'], scores, -1e9)))      # an option of the current decision
+        obs, reward, terminated, truncated, info = env.step(a)
+
+One episode is one proof attempt.  The state is a proof of the problem's statement; the agent works on its first open goal.  To act, it answers the engine's questions (`gym_policy.Assembler`): which kind of
+action, which lemma, which hypothesis, then -- for the actions that carry terms -- the next token of the term it says, each among the OPTIONS the engine offers at that point.  When the last question is answered
+the action is probed and, if it applies, taken; a proof that closes every goal is checked by the kernel and ends the episode with `solve_reward`.  There is no text interface anywhere: the observation is the goal
+as token sequences and the options as integer rows.
+
+OBSERVATION (a Dict of arrays, padded; `n_options` and `action_mask` say how much is real):
+    tokens, seg, hyp_of            the goal: `[CLS] hyp_1 [SEP] ... [TGT] target` as token ids, the segment of each token, the hypothesis it belongs to (-1: none)
+    n_hyps, goals_left             number of hypotheses of the goal, number of open goals
+    overlap                        (globals, 2): the fraction of each global's symbols (type, conclusion) that the goal mentions
+    choice                         the kind of decision (`ml_features.CHOICE_NAMES`), the kind of action it belongs to (-1: not yet known), the position inside a term
+    hole                           the tokens of the type of the term being said (padding 0)
+    rows, n_options, mask          the options: (otype, a, b, flags) rows, how many, which are legal
+ACTION   Discrete(max_options): the index of the option (`action_masks()` says which are legal; an illegal index raises ValueError, or with `illegal='penalize'` loses the decision and pays `fail_penalty`).   REWARD   `solve_reward` (default 1) when the proof is finished and kernel-checked; `-action_penalty` for every action taken, `-fail_penalty`
+for every action that did not apply.   TRUNCATION   after `max_actions` actions (taken or refused) or `max_decisions` decisions.
+`info` has the problem, the number of actions taken and refused (= probes), and -- when `rich` -- the raw `Choice` and `GoalFeat` that the learners of this repository use to recompute log-probabilities.
+Nothing the agent does can make a false theorem provable: the kernel checks every finished proof.
+"""
+import os, sys, random
+import numpy as np
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gymnasium as gym
+from gymnasium import spaces
+import itp_env_lnl as E
+import gym_env as G, gym_policy as P
+from gym_env import ActionError
+import ml_features as F, ml_data as D
+from author import AuthorError
+
+
+class BankEnv(gym.Env):
+    metadata = {'render_modes': []}
+
+    def __init__(self, bank, names=None, regime='prefix', ctx=None, engine=None, max_actions=60, max_decisions=600, max_options=1024, max_tokens=512,
+                 solve_reward=1.0, action_penalty=0.0, fail_penalty=0.0, seed=0, rich=True, lemmas=None, illegal='raise'):
+        super().__init__()
+        self.bank = bank; self.regime = regime
+        self.lemmas = dict(lemmas or {})                # name -> (statement, premises): library lemmas to prove, besides the problems of the bank
+        self.names = list(names if names is not None else bank.placed)
+        self.eng = engine or G.Engine(bank.w, kinds=set(G.Kind), strict=False)
+        self.ctx = ctx or D.DataContext(bank.w)
+        self.max_actions = max_actions; self.max_decisions = max_decisions; self.max_options = max_options; self.max_tokens = max_tokens
+        self.solve_reward = solve_reward; self.action_penalty = action_penalty; self.fail_penalty = fail_penalty; self.rich = rich
+        if illegal not in ('raise', 'penalize'): raise ValueError("illegal is 'raise' or 'penalize'")
+        self.illegal = illegal                         # an option index outside the current decision's options: an error, or a decision lost with the penalty of a refused action
+        self.rng = random.Random(seed)
+        n_glob = self.ctx.bags.n
+        self.n_globals = n_glob
+        self.observation_space = spaces.Dict({
+            'tokens': spaces.Box(0, F.VOCAB, (max_tokens,), np.int32), 'seg': spaces.Box(0, 2, (max_tokens,), np.int8), 'hyp_of': spaces.Box(-1, 4096, (max_tokens,), np.int16),
+            'n_hyps': spaces.Box(0, 4096, (), np.int32), 'goals_left': spaces.Box(0, 4096, (), np.int32),
+            'overlap': spaces.Box(0.0, 1.0, (n_glob, 2), np.float32),
+            'choice': spaces.Box(-1, 1 << 20, (3,), np.int32),
+            'hole': spaces.Box(0, F.VOCAB, (F.MAX_HOLE_TOKENS,), np.int32),
+            'rows': spaces.Box(-(1 << 31), (1 << 31) - 1, (max_options, 4), np.int64), 'n_options': spaces.Box(0, max_options, (), np.int32),
+            'mask': spaces.Box(0, 1, (max_options,), np.int8)})
+        self.action_space = spaces.Discrete(max_options)
+        self.ep = None; self.name = None; self.asm = None; self.choice = None; self.gf = None; self.ov = None
+        self.actions = 0; self.fails = 0; self.decisions = 0; self.solved = False; self.term = None
+        self.trajectory = []                           # per action: (GoalFeat, overlap, [(Choice, index)], taken) -- what a learner needs to recompute the log-probabilities; taken is True (the engine took
+                                                       # the action), False (it refused it) or None (the episode ended before the action was complete)
+        self._cur = []
+
+    # ------------------------------------------------------------------------------------------------------------------------------------------------------------------ episodes
+    def reset(self, seed=None, options=None):
+        super().reset(seed=seed)
+        if seed is not None: self.rng = random.Random(seed)
+        name = (options or {}).get('problem') or self.rng.choice(self.names)
+        regime = (options or {}).get('regime', self.regime)
+        if name in self.lemmas: stmt, prem = self.lemmas[name]
+        else:
+            pl = self.bank.placed[name]; stmt, prem = pl.stmt, pl.premises(regime)
+        self.name = name; self.ep = G.Episode(self.eng, stmt, name, premises=prem)
+        self.actions = 0; self.fails = 0; self.decisions = 0; self.solved = False; self.term = None; self.trajectory = []; self._cur = []
+        self._begin_goal()
+        return self._obs(), self._info()
+
+    def _begin_goal(self):
+        ep = self.ep
+        if ep.done: self.choice = None; return
+        g = ep.goal(); m = ep.menu()
+        self.gf = F.goal_features(self.ctx.ser, g); self.ov = self.ctx.bags.overlap(self.gf.symbols)
+        self.asm = P.Assembler(self.eng, g, m, rare=True); self._cur = []
+        self.choice = self.asm.start()
+        if self.choice is None: self._refused(None)
+
+    def _refused(self, action):
+        """the assembled action cannot be taken: the same goal again, a new assembly"""
+        self.fails += 1
+        if self.rich and self._cur: self.trajectory.append((self.gf, self.ov, self._cur, False))
+        self._cur = []
+        if self.actions + self.fails >= self.max_actions: self.choice = None; return
+        ep = self.ep
+        self.asm = P.Assembler(self.eng, ep.goal(), ep.menu(), rare=True); self.choice = self.asm.start()
+        if self.choice is None: self.choice = None
+
+    # ------------------------------------------------------------------------------------------------------------------------------------------------------------------ step
+    def step(self, a):
+        a = int(a)
+        if self.choice is None: raise RuntimeError('the episode is over')
+        ch = self.choice
+        reward = 0.0; terminated = False
+        if not 0 <= a < len(ch.options):
+            if self.illegal == 'raise': raise ValueError('option %d of %d' % (a, len(ch.options)))
+            self.decisions += 1; reward -= self.fail_penalty
+            truncated = self.decisions >= self.max_decisions
+            if truncated: self.choice = None
+            return (self._obs() if self.choice is not None else self._empty_obs()), reward, False, truncated, self._info()
+        self.decisions += 1
+        if self.rich: self._cur.append((ch, a))
+        nxt = self.asm.choose(a)
+        if nxt is not None:
+            self.choice = nxt
+        else:                                                                    # the action is complete
+            action = self.asm.action
+            taken = False
+            if action is not None:
+                try:
+                    self.ep.step(action); taken = True
+                except (ActionError, AuthorError, E.ITPError, RuntimeError) as e:
+                    if isinstance(e, E.FuelExhausted): pass
+            if taken:
+                self.actions += 1; reward -= self.action_penalty
+                if self.rich: self.trajectory.append((self.gf, self.ov, self._cur, True))
+                self._cur = []
+                if self.ep.done:
+                    try:
+                        self.term = self.ep.finish(); self.solved = True; reward += self.solve_reward; terminated = True
+                    except Exception: terminated = True
+                    self.choice = None
+                elif self.actions + self.fails >= self.max_actions: self.choice = None
+                else: self._begin_goal()
+            else:
+                reward -= self.fail_penalty
+                self._refused(action)
+        truncated = (not terminated) and (self.choice is None or self.decisions >= self.max_decisions)
+        if self.decisions >= self.max_decisions: self.choice = None if not terminated else self.choice
+        if self.choice is None and self._cur and self.rich:                         # the episode ended in the middle of an action: its decisions were made, the action never was
+            self.trajectory.append((self.gf, self.ov, self._cur, None)); self._cur = []
+        obs = self._obs() if self.choice is not None else self._empty_obs()
+        return obs, reward, terminated, truncated, self._info()
+
+    # ------------------------------------------------------------------------------------------------------------------------------------------------------------------ observations
+    def _info(self):
+        info = {'problem': self.name, 'actions': self.actions, 'refused': self.fails, 'decisions': self.decisions, 'solved': self.solved}
+        if self.choice is not None:
+            n = len(self.choice.options); m = np.zeros(self.max_options, dtype=np.int8); m[:min(n, self.max_options)] = 1
+            info['action_mask'] = m
+            if self.rich: info['choice'] = self.choice; info['goal_feat'] = self.gf; info['overlap'] = self.ov; info['in_action'] = len(self._cur)
+        return info
+
+    def action_masks(self):
+        m = np.zeros(self.max_options, dtype=np.int8)
+        if self.choice is not None: m[:min(len(self.choice.options), self.max_options)] = 1
+        return m
+
+    def _empty_obs(self):
+        return {'tokens': np.zeros(self.max_tokens, np.int32), 'seg': np.zeros(self.max_tokens, np.int8), 'hyp_of': np.full(self.max_tokens, -1, np.int16), 'n_hyps': np.int32(0), 'goals_left': np.int32(0),
+                'overlap': np.zeros((self.n_globals, 2), np.float32), 'choice': np.array([-1, -1, 0], np.int32), 'hole': np.zeros(F.MAX_HOLE_TOKENS, np.int32),
+                'rows': np.zeros((self.max_options, 4), np.int64), 'n_options': np.int32(0), 'mask': np.zeros(self.max_options, np.int8)}
+
+    def _obs(self):
+        gf = self.gf; ch = self.choice
+        L = min(len(gf.tokens), self.max_tokens)
+        tokens = np.zeros(self.max_tokens, np.int32); tokens[:L] = gf.tokens[:L]
+        seg = np.zeros(self.max_tokens, np.int8); seg[:L] = gf.seg[:L]
+        hyp_of = np.full(self.max_tokens, -1, np.int16)
+        for h, (a, b) in enumerate(gf.spans):
+            if a < L: hyp_of[a:min(b, L)] = h
+        ov = np.zeros((self.n_globals, 2), np.float32); k = min(len(self.ov), self.n_globals); ov[:k] = self.ov[:k]
+        rows = np.zeros((self.max_options, 4), np.int64); r = F.rows_array(ch.options)[:self.max_options]; rows[:len(r)] = r
+        hole = np.zeros(F.MAX_HOLE_TOKENS, np.int32); h_ = F.hole_tokens(self.ctx.ser, ch.hole)[:F.MAX_HOLE_TOKENS]; hole[:len(h_)] = h_
+        m = np.zeros(self.max_options, np.int8); m[:len(r)] = 1
+        return {'tokens': tokens, 'seg': seg, 'hyp_of': hyp_of, 'n_hyps': np.int32(gf.n_hyps), 'goals_left': np.int32(self.ep.n_goals), 'overlap': ov,
+                'choice': np.array([F.CHOICE_ID[ch.name], -1 if ch.kind is None else int(ch.kind), min(ch.pos, 31)], np.int32), 'hole': hole, 'rows': rows, 'n_options': np.int32(len(r)), 'mask': m}
+
+
+def library_lemmas(bank, ddir, split=None, max_len=None):
+    """{name: (statement, premises)} for the library lemmas of a dataset directory (library.json), the ones whose statement is not already a bank problem; `split`: only those of the given split; `max_len`:
+    only those whose recorded proof has at most that many actions"""
+    import json
+    lib = json.load(open(os.path.join(ddir, 'library.json')))
+    out = {}
+    for l in lib['lemmas']:
+        if l['bank_duplicate'] or (split is not None and l['split'] != split) or (max_len is not None and l['length'] > max_len): continue
+        gid = l['gid']; out[l['name']] = (bank.w.T(bank.k.global_info(gid)[1]), gid)
+    return out
+
+
+def make(split=None, names=None, **kw):
+    """a BankEnv over the whole bank (`bank_all.load()`: the world is built, about 30 s), restricted to a split of `bank_split` ('train', 'dev', 'test') or to `names`; the other arguments are BankEnv's"""
+    import bank_all, bank_split as BS
+    bk = bank_all.load()
+    if names is None and split is not None: names = [n for n in bk.placed if BS.split_of(n) == split]
+    return BankEnv(bk, names=names, **kw)
+
+
+try: gym.register(id='ITPBank-v0', entry_point='bank_env:make')                   # gym.make('ITPBank-v0', split='train')
+except Exception: pass
