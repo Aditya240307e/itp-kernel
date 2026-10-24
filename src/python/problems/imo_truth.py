@@ -665,6 +665,157 @@ def _():
     return all(f[k] == k for k in f) and all(k in f for k in range(0, 15))
 
 
+# ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ the third batch (bank_imo4)
+def _P(n): return n * n + n + 1
+
+
+def _fragrant(a, b):
+    """the set {P(a+1), .., P(a+b)} is fragrant: at least two elements, and each element has a prime factor in common with another one"""
+    vals = [_P(a + i) for i in range(1, b + 1)]
+    return b >= 2 and all(any(gcd(vals[i], vals[j]) > 1 for j in range(b) if j != i) for i in range(b))
+
+
+@claim('imo2016_p4a', 'a < 1000: the least a for which {P(a+1), .., P(a+6)} is fragrant is 195, and 196 is the next')
+def _():
+    return [a for a in range(0, 1000) if _fragrant(a, 6)] [:2] == [195, 196]
+
+
+@claim('imo2016_p4b', 'a < 1000000, b <= 5: no fragrant set (and for b = 6 the least a is 195)')
+def _():
+    return all(not _fragrant(a, b) for a in range(0, 1000000) for b in range(1, 6))
+
+
+@claim('isl2000_n4', 'a <= 70, m <= 40, n <= 150')
+def _():
+    sols = {(a, m, n) for a in range(1, 71) for m in range(1, 41) for n in range(1, 151) if (a + 1) ** n % (a ** m + 1) == 0}
+    want = {(a, m, n) for a in range(1, 71) for m in range(1, 41) for n in range(1, 151) if a == 1 or m == 1 or (a == 2 and m == 3 and n >= 2)}
+    return sols == want
+
+
+@claim('isl2007_n2', '2 <= b <= 300, 2 <= n <= 6: b is an n-th power residue modulo every k in 2..500 exactly when b is an n-th power', 'range')
+def _():
+    ok = True
+    for n in range(2, 7):
+        res = {k: {pow(a, n, k) for a in range(k)} for k in range(2, 501)}
+        for b in range(2, 301):
+            isp = any(A ** n == b for A in range(1, 18))
+            everywhere = all(b % k in res[k] for k in range(2, 501))
+            ok = ok and (everywhere == isp)
+    return ok
+
+
+@claim('isl2012_n4b', 'm, n <= 2000: (m^2 + n)(n^2 + m) = 2 (m - n)^3 has no solution')
+def _():
+    for n in range(1, 2001):
+        for m in range(n + 1, 2001):                 # (m - n)^3 > 0 forces m > n
+            if (m * m + n) * (n * n + m) == 2 * (m - n) ** 3: return False
+    return True
+
+
+@claim('isl2012_n6', 'x <= 300, y <= 300: for every x >= 2 some n <= 70 has 2^n y + 1 not dividing x^(2^n) - 1')
+def _():
+    for x in range(2, 301):
+        for y in range(1, 301):
+            if all(pow(x, 2 ** n, 2 ** n * y + 1) == 1 for n in range(1, 71)): return False
+    return True
+
+
+def _fe_solutions(K, bound, ok):
+    """all f : {1..K} -> positive integers, f(n) <= bound(n), with ok(f, m, n) for all m, n <= K (backtracking: the pairs are checked as soon as both values are assigned)"""
+    out = []
+    f = {}
+
+    def rec(k):
+        if k > K: out.append(tuple(f[i] for i in range(1, K + 1))); return
+        for val in range(1, bound(k) + 1):
+            f[k] = val
+            if all(ok(f, m, k) and ok(f, k, m) for m in range(1, k + 1)): rec(k + 1)
+        f.pop(k, None)
+    rec(1)
+    return out
+
+
+@claim('isl2013_n1', 'f on {1..9}, f(n) <= n^3 + 13 (m^2 + f(n) divides m f(m) + n for m, n <= 9): only the identity', 'search')
+def _():
+    sols = _fe_solutions(9, lambda n: n ** 3 + 13, lambda f, m, n: (m * f[m] + n) % (m * m + f[n]) == 0)
+    return sols == [tuple(range(1, 10))]
+
+
+@claim('apmo2019_p1', 'f on {1..9}, f(n) <= 2 n^2 (f(a) + b divides a^2 + f(a) f(b) for a, b <= 9): only the identity', 'search')
+def _():
+    sols = _fe_solutions(9, lambda n: 2 * n * n, lambda f, a, b: (a * a + f[a] * f[b]) % (f[a] + b) == 0)
+    return sols == [tuple(range(1, 10))]
+
+
+@claim('isl2014_n2', 'd = |x - y| <= 2000000: y^2 + d y + 7 d^2 = (d + 1)^3 (y = min(x, y)) solved exactly by the discriminant')
+def _():
+    found = set()
+    for d in range(0, 2000001):
+        D = 4 * (d + 1) ** 3 - 27 * d * d                     # y^2 + d y + (7 d^2 - (d + 1)^3) = 0
+        r = isqrt(D)
+        if r * r != D or (r - d) % 2 != 0: continue
+        y = (r - d) // 2
+        if y >= 1: found.add((y, y + d))
+    want = {(1, 1)}
+    for k in range(2, 1500):
+        x, y = k ** 3 + k * k - 2 * k - 1, k ** 3 + 2 * k * k - k - 1
+        if y - x <= 2000000: want.add((x, y))
+    return {(min(a, b), max(a, b)) for (a, b) in found} == want and all(7 * x * x - 13 * x * y + 7 * y * y == (abs(x - y) + 1) ** 3 for (x, y) in want)
+
+
+@claim('isl2021_n1', 'a < 400, b < 8000: the integer values n of (a b + 3 b + 8) / (a^2 + b + 3) with a^2 + b + 3 free of prime cubes: only n = 2')
+def _():
+    def cubefree(X):
+        p = 2
+        while p ** 3 <= X:
+            if X % (p ** 3) == 0 and is_prime(p): return False
+            p += 1
+        return True
+    vals = set()
+    for a in range(1, 400):
+        for b in range(1, 8000):
+            X = a * a + b + 3; Y = a * b + 3 * b + 8
+            if Y % X == 0 and cubefree(X): vals.add(Y // X)
+    return vals == {2}
+
+
+@claim('classic_ab_cd_sum', 'a, b, c <= 150, d = a b / c')
+def _():
+    for a in range(1, 151):
+        for b in range(a, 151):
+            for c in range(1, 151):
+                if (a * b) % c == 0 and _mr(a + b + c + a * b // c): return False
+    return True
+
+
+@claim('classic_odd_prime_pow_sum', 'p in {3, 5, 7, 11, 13, 17}, |a|, |b| <= 120')
+def _():
+    return all((a ** p + b ** p) % (p * p) == 0 for p in (3, 5, 7, 11, 13, 17) for a in range(-120, 121) for b in range(-120, 121) if (a ** p + b ** p) % p == 0)
+
+
+@claim('classic_descent_2xyz', '|x|, |y| <= 3000, z from the quadratic z^2 - 2 x y z + x^2 + y^2 = 0')
+def _():
+    sols = set()
+    for x in range(-3000, 3001):
+        for y in range(-3000, 3001):
+            D = x * x * y * y - x * x - y * y
+            if D < 0: continue
+            r = isqrt(D)
+            if r * r != D: continue
+            for z in {x * y - r, x * y + r}: sols.add((x, y, z))
+    return sols == {(0, 0, 0)}
+
+
+@claim('classic_two_coprime', '7 <= n < 30000')
+def _():
+    return all(any(gcd(a, n - a) == 1 for a in range(2, n - 1)) for n in range(7, 30000)) and [n for n in range(2, 7) if not any(gcd(a, n - a) == 1 for a in range(2, n - 1))] == [2, 3, 4, 6]
+
+
+@claim('classic_n4_4n', 'n <= 38 (Miller-Rabin): n^4 + 4^n is prime only for n = 1')
+def _():
+    return [n for n in range(1, 39) if _mr(n ** 4 + 4 ** n)] == [1]
+
+
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ driver
 def run(names=None, out=print):
     names = list(names) if names else list(CLAIMS)
