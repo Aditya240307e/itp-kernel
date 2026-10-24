@@ -27,6 +27,7 @@ from author import AuthorError
 import gym_env as G
 import gym_build as GB
 import gym_acts as ACTS
+import gym_premises as PM
 from gym_env import Kind, ActionError
 
 # the "direction" of an action: what it does to the goal (docs/ARCHITECTURE_RL.md, section 2)
@@ -94,7 +95,7 @@ class Example:
     def key(self): return (self.stmt.n, self.premises)
     def to_dict(self):
         return {'kind': self.kind, 'statement': self.text, 'statement_digest': digest(self.text), 'statement_code': None if self.code is None else [list(t) for t in self.code],
-                'premises': self.premises, 'steps': self.steps, 'length': self.length, 'origin': self.origin, 'verified': self.verified}
+                'premises': PM.to_json(self.premises), 'steps': self.steps, 'length': self.length, 'origin': self.origin, 'verified': self.verified}
     def __repr__(self): return 'Example(%s, %d actions, %s)' % (self.kind, self.length, self.text[:80])
 
 

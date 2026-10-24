@@ -463,7 +463,7 @@ class Ctx:
         """(token, Head) of a term that is a global or a hypothesis"""
         k = self.k; v = k.view(n)
         if v[0] == 'const':
-            if v[1] >= self.eng.limit: raise Gap('premise', 'the global %d is not available' % v[1])
+            if not self.eng.sees(v[1]): raise Gap('premise', 'the global %d is not available' % v[1])
             h = self.space.table.heads.get(v[1])
             if h is None: raise Gap('head', 'the global %d cannot be used in a term' % v[1])
             return ('c', v[1], 0), h

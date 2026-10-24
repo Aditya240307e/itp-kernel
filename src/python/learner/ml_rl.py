@@ -86,8 +86,8 @@ def main(argv=None):
     data = T.build_steps(a.data, bk, ctx, G.Engine(bk.w, kinds=set(G.Kind), strict=True))
     demo = list(data['bank'].get('train', [])) + list(data['lib'].get('train', []))
     net, cfg, _ = T.load(a.init, ctx.bags); net.train()
-    ref_len = {r['name']: r['demonstration']['length'] for r in T.load_dataset(a.data)[0]['problems']}
-    train_names = sorted(n for n in bk.placed if BS.split_of(n) == 'train' and ref_len[n] <= a.max_ref_len); dev_names = sorted(n for n in bk.placed if BS.split_of(n) == 'dev')
+    ref_len = {r['name']: r['demonstration']['length'] for r in T.load_dataset(a.data)[0]['problems'] if 'demonstration' in r}          # (a statement-only problem has no reference proof: not played here)
+    train_names = sorted(n for n in bk.placed if BS.split_of(n) == 'train' and n in ref_len and ref_len[n] <= a.max_ref_len); dev_names = sorted(n for n in bk.placed if BS.split_of(n) == 'dev')
     lemmas = BE.library_lemmas(bk, a.data, split='train', max_len=a.max_ref_len); lemma_names = sorted(lemmas)
     env = BE.BankEnv(bk, train_names, ctx=ctx, engine=eng, max_actions=a.max_actions, max_decisions=a.max_decisions, seed=a.seed, lemmas=lemmas)
     opt = torch.optim.AdamW(net.parameters(), lr=a.lr, weight_decay=0.01)

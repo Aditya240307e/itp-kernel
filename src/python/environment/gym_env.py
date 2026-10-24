@@ -42,6 +42,7 @@ from tactics import Proof, HOLE_BASE
 import ring as R
 import gym_terms as GT
 import gym_build as GB
+import gym_premises as PM
 
 
 OBS_TAG_NAMES = E.OBS_TAG_NAMES
@@ -328,7 +329,7 @@ class Engine:
         self.claim_hints = tuple(claims)                                          # closed statements (kernel handles) that the menu offers as CLAIMs, when it lists that kind
         self.terms = (TERMS_DEFAULT or (kinds is not None and bool(self.kinds & TERM_KINDS))) if terms is None else bool(terms)       # does the menu list the actions that carry terms (INSTANTIATE, USE)? They are legal either way
         self.inst_lemmas = tuple(inst_lemmas)                                     # the library lemmas (names) that INSTANTIATE is offered for, besides the hypotheses
-        self.premises = premises
+        self.premises = premises                                                 # (a property: None, an int or a gym_premises.Premises)
         self.probe_fuel = dict(PROBE_FUEL); self.default_fuel = DEFAULT_PROBE_FUEL if probe_fuel is None else int(probe_fuel)
         self.strict = STRICT_DEFAULT if strict is None else strict
         self.stats = collections.Counter()
@@ -345,9 +346,24 @@ class Engine:
 
     # -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- set-up
     @property
+    def premises(self): return self._premises
+
+    @premises.setter
+    def premises(self, v):
+        self._premises = v = PM.of(v)
+        self._hidden = v.hidden if isinstance(v, PM.Premises) else ()
+
+    @property
     def limit(self):
-        n = self.k.num_globals()
-        return n if self.premises is None else min(self.premises, n)
+        """the exclusive upper bound of the ids the actions may use (some below it may be hidden: `sees`)"""
+        return PM.upto(self._premises, self.k.num_globals())
+
+    def sees(self, gid):
+        """may an action use the global `gid`? (the premises: a prefix of the world, less the ranges a Premises hides)"""
+        if not 0 <= gid < self.limit: return False
+        for a, b in self._hidden:
+            if a <= gid < b: return False
+        return True
 
     @contextlib.contextmanager
     def in_context(self, types, names=None):
@@ -584,7 +600,7 @@ class Engine:
     # -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- the menu
     def menu(self, g):
         """the legal actions of a goal, with their candidate table. Nothing here is tried: an action may still fail when probed."""
-        w = self.w; k = self.k; limit = self.limit; nh = g.n_hyps
+        w = self.w; k = self.k; nh = g.n_hyps
         actions = []; cands = []; cperm = []                 # (cperm: for each candidate, 1 if it is a rewrite by a permutative equation)
         if not self.auto_intro and unfolds_to_pi(k, g.target): actions.append(Action(Kind.INTRO, 0))
         for h in range(nh):
@@ -598,7 +614,7 @@ class Engine:
         seen = set()
         for c in k.library_candidates(self.lib, tnorm, nh):
             v = k.view(c)
-            if v[0] != 'const' or v[1] >= limit or v[1] in seen: continue
+            if v[0] != 'const' or not self.sees(v[1]) or v[1] in seen: continue
             seen.add(v[1])
             if self.profile(v[1]).undetermined: continue
             if self.type_filter and not fps_compatible(self.lemma_fps(v[1]), goal_fps): continue       # a lemma about another type
@@ -613,7 +629,7 @@ class Engine:
         def occurs(head, pat): return any(shim.match(pat, t, {}) for t in heads.get(head, ()))
         for head in sorted(t_consts):
             for gid, rev, pat in self._rw_index.get(head, ()):
-                if gid >= limit or not occurs(head, pat): continue
+                if not self.sees(gid) or not occurs(head, pat): continue
                 cands.append((k.mk_const(gid), rev, None)); cperm.append(int(self.profile(gid).permutative)); actions.append(Action(Kind.REWRITE, len(cands) - 1))
         for h in range(nh):
             pr = self.hyp_profile(g, h)
@@ -701,7 +717,7 @@ class Engine:
         cands = [(k.mk_fvar(h), g.hyp_types[h], g.hyp_types[:h]) for h in range(g.n_hyps)]
         for name in self.inst_lemmas:
             gid = w.gid.get(name)
-            if gid is not None and gid < self.limit: cands.append((k.mk_const(gid), k.global_info(gid)[1], []))
+            if gid is not None and self.sees(gid): cands.append((k.mk_const(gid), k.global_info(gid)[1], []))
         for term, ty, ctx in cands:
             doms = self._inst_binders(ty, ctx)
             if doms: out.append((term, ty, ctx, doms))
@@ -1060,7 +1076,7 @@ class Episode:
         interleaved on one engine. Default: whatever the engine has now, and it stays.
         `track`: keep the proof tree (gym_tree.ProofTree: `self.tree`, and `self.events` for what the last step achieved) from which the theorems the episode proved can be read, finished or not."""
         self.eng = engine; self.name = name
-        self.premises = engine.premises if premises is Episode._KEEP else premises
+        self.premises = engine.premises if premises is Episode._KEEP else PM.of(premises)
         self._sync()
         self.stmt = engine.w.term(stmt, 'statement'); self.p = engine.start(self.stmt, name)
         self.steps = []; self._menu = None; self._goal = None

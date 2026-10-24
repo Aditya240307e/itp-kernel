@@ -35,7 +35,7 @@ FAMILIES = {
     'ident_cube_sum': 'ident_cubes', 'ident_cube_diff': 'ident_cubes', 'ident_three_cubes': 'ident_cubes',
     'ineq_cubes_two': 'ineq_cubes', 'ineq_cubes_three': 'ineq_cubes',
     'ineq_cauchy_two': 'ineq_cauchy', 'ineq_cauchy_three': 'ineq_cauchy',
-    'five_dvd_fifth_power': 'n5_minus_n', 'n5_minus_n_div30': 'n5_minus_n',
+    'n5_minus_n_div30': 'n5_minus_n',                        # (five_dvd_fifth_power, the other member, became a library lemma)
     'five_dvd_six_pow_minus_one': 'dvd_by_induction', 'three_dvd_four_pow_plus_five': 'dvd_by_induction',
     'no_square_between': 'between_squares', 'no_square_pronic': 'between_squares',
 }

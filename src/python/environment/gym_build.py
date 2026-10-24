@@ -444,9 +444,9 @@ class Builder:
             if h.flex is not None and kk == h.arity and not rare: continue
             bound = self._match_head(h, kk, H)
             if bound is not None: out.append((h, kk, bound))
-        limit = space.eng.limit
+        eng = space.eng
         for h in space.table.candidates(syms):
-            if h.ident >= limit or h.arity < m: continue
+            if not eng.sees(h.ident) or h.arity < m: continue
             kk = h.arity - m
             if h.flex is not None and kk == h.arity and not rare: continue
             if self._is_numeral_spelling(h, kk, H): continue
@@ -593,7 +593,7 @@ class Builder:
                     if h is None: raise BuildError('no variable at level %d' % tok[1])
                     node = k.mk_fvar(tok[1])
                 else:
-                    if not 0 <= tok[1] < self.space.eng.limit: raise BuildError('no global %d' % tok[1])
+                    if not self.space.eng.sees(tok[1]): raise BuildError('no global %d' % tok[1])
                     h = self.space.table.heads.get(tok[1])
                     if h is None: raise BuildError('the global %d cannot be used in a term' % tok[1])
                     node = k.mk_const(tok[1])

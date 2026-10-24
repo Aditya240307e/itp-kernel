@@ -29,6 +29,19 @@ def _zgcd(a, b): return math.gcd(a, b)
 def _pow(a, n):
     if n < 0 or n > 200 or (abs(a) > 1 and n * max(1, abs(a).bit_length()) > 4000): raise Unsupported('power out of range')
     return a ** n
+def _sum(f, n):
+    if n < 0 or n > 3000: raise Unsupported('a sum over a range outside the window')
+    return sum(f(i) for i in range(n))
+def _prod(f, n):
+    if n < 0 or n > 400: raise Unsupported('a product over a range outside the window')
+    r = 1
+    for i in range(n):
+        r *= f(i)
+        if abs(r) > 10 ** 4000: raise Unsupported('a product out of range')
+    return r
+def _fact(n):
+    if n < 0 or n > 200: raise Unsupported('a factorial out of range')
+    return math.factorial(n)
 def _is_prime(p):
     if p < 2: return False
     i = 2
@@ -47,7 +60,9 @@ VALUE_PRIMS = {
     'Succ': (1, lambda n: n + 1), 'add': (2, lambda a, b: a + b), 'mul': (2, lambda a, b: a * b), 'pow': (2, _pow), 'pred': (1, lambda n: max(n - 1, 0)),
     'Pos.add': (2, lambda a, b: a + b), 'Pos.mul': (2, lambda a, b: a * b), 'Pos.pow': (2, _pow), 'Pos.sqr': (1, lambda a: a * a), 'Pos.succ': (1, lambda a: a + 1), 'Z.ppow': (2, _pow),
     'N.to_nat': (1, lambda n: n), 'N.of_nat': (1, lambda n: n), 'Pos.to_nat': (1, lambda n: n),
+    'Z.sum': (2, _sum), 'Z.prod': (2, _prod), 'Z.fact': (1, _fact),                          # sum_{i<n} f(i), prod_{i<n} f(i), n!   (audited against the library's recursion equations by `audit_theorems`)
 }
+FN_ARGS = {'Z.sum': (0,), 'Z.prod': (0,)}                                                     # the arguments of a prim that are functions (a lambda there is read as a function)
 PROP_PRIMS = {
     'Z.le': (2, lambda a, b: a <= b), 'Z.lt': (2, lambda a, b: a < b), 'N.le': (2, lambda a, b: a <= b), 'N.lt': (2, lambda a, b: a < b), 'Le': (2, lambda a, b: a <= b), 'Lt': (2, lambda a, b: a < b),
     'Z.dvd': (2, _zdvd),
@@ -60,7 +75,7 @@ LOGIC = {'And': 'and', 'Or': 'or', 'Iff': 'iff', 'Not': 'not', 'True': 'true', '
 
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ the AST
 # ('int', n) | ('bv', i) | ('prim', name, args) | ('call', i, args) | ('eq', a, b) | ('all', kind, body) | ('ex', kind, body) | ('imp', a, b)  [b has a dummy binder: the proof of a]
-# | ('and', a, b) | ('or', a, b) | ('iff', a, b) | ('not', a) | ('true',) | ('false',)       kinds: 'Z' 'N' ('fn', n_args)
+# | ('and', a, b) | ('or', a, b) | ('iff', a, b) | ('not', a) | ('true',) | ('false',) | ('lam', kind, body)  [a function value: only as an argument of Z.sum / Z.prod]       kinds: 'Z' 'N' ('fn', n_args)
 def show_ast(a, names=()):
     t = a[0]
     if t == 'int': return str(a[1])
@@ -71,6 +86,9 @@ def show_ast(a, names=()):
     if t in ('all', 'ex'):
         nm = 'x%d' % len(names)
         return '(%s %s : %s, %s)' % ('forall' if t == 'all' else 'exists', nm, a[1], show_ast(a[2], names + (nm,)))
+    if t == 'lam':
+        nm = 'i%d' % len(names)
+        return '(fun %s => %s)' % (nm, show_ast(a[2], names + (nm,)))
     if t == 'imp': return '(%s -> %s)' % (show_ast(a[1], names), show_ast(a[2], names + ('_',)))
     if t in ('and', 'or', 'iff'): return '(%s %s %s)' % (show_ast(a[1], names), {'and': '/\\', 'or': '\\/', 'iff': '<->'}[t], show_ast(a[2], names))
     if t == 'not': return '~%s' % show_ast(a[1], names)
@@ -135,15 +153,19 @@ class Semantics:
             return nm in PROP_PRIMS or nm in LOGIC or nm in ('Eq', 'Ex')
         return False
 
-    def decode(self, node, stack=()):
-        """the AST of a statement (or a term), `stack`: the kinds of the enclosing binders, innermost last"""
+    def decode(self, node, stack=(), fn_ok=False):
+        """the AST of a statement (or a term), `stack`: the kinds of the enclosing binders, innermost last; `fn_ok`: a lambda is read as a function value (the argument of a sum or a product)"""
         k = self.k; v = k.view(node); t = v[0]
         if t == 'bvar': return ('bv', v[1])
         if t == 'pi':
             kind = self._kind(v[1], stack)
             if kind == 'prop': return ('imp', self.decode(v[1], stack), self.decode(v[2], stack + ('prop',)))
             return ('all', kind, self.decode(v[2], stack + (kind,)))
-        if t == 'lam': raise Unsupported('a lambda outside an existential')
+        if t == 'lam':
+            if not fn_ok: raise Unsupported('a lambda outside an existential or a sum')
+            kind = self._kind(v[1], stack)
+            if kind not in ('Z', 'N'): raise Unsupported('a lambda over %s' % (kind,))
+            return ('lam', kind, self.decode(v[2], stack + (kind,)))
         if t not in ('const', 'app'): raise Unsupported('a term of kind %s' % t)
         head, args = self._spine(node); hv = k.view(head)
         if hv[0] == 'bvar':
@@ -169,7 +191,8 @@ class Semantics:
         if nm in VALUE_PRIMS or nm in PROP_PRIMS:
             ar = (VALUE_PRIMS.get(nm) or PROP_PRIMS[nm])[0]
             if len(args) != ar: raise Unsupported('%s applied to %d arguments (it takes %d)' % (nm, len(args), ar))
-            return ('prim', nm, tuple(self.decode(a, stack) for a in args))
+            fns = FN_ARGS.get(nm, ())
+            return ('prim', nm, tuple(self.decode(a, stack, i in fns) for i, a in enumerate(args)))
         raise Unsupported('the symbol %s has no meaning in the evaluator' % nm)
 
     def _numeral(self, nm, node):
@@ -247,6 +270,8 @@ class Semantics:
                     if cb(env + (x,)): return True
                 return False
             return f_ex
+        if t == 'lam':
+            cb = comp(a[2]); return lambda env: (lambda x: cb(env + (x,)))
         if t == 'imp':
             c0, c1 = comp(a[1]), comp(a[2]); return lambda env: (not c0(env)) or c1(env + (None,))
         if t == 'andd':
@@ -293,7 +318,7 @@ def shift(a, d, cut):
             if i is None: return None
             return ('call', i[1], tuple(xs))
         return ('prim', a[1], tuple(xs))
-    if t in ('all', 'ex'):
+    if t in ('all', 'ex', 'lam'):
         b = shift(a[2], d, cut + 1)
         return None if b is None else (t, a[1], b)
     if t in ('imp', 'andd'):
@@ -306,7 +331,7 @@ def shift(a, d, cut):
 
 
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ mutants (the negative controls)
-SWAP_PRIM = {'Z.le': 'Z.lt', 'Z.lt': 'Z.le', 'N.le': 'N.lt', 'N.lt': 'N.le', 'Z.add': 'Z.sub', 'Z.sub': 'Z.add', 'Z.mul': 'Z.add', 'Le': 'Lt', 'Lt': 'Le', 'N.add': 'N.mul', 'N.mul': 'N.add'}
+SWAP_PRIM = {'Z.sum': 'Z.prod', 'Z.prod': 'Z.sum', 'Z.le': 'Z.lt', 'Z.lt': 'Z.le', 'N.le': 'N.lt', 'N.lt': 'N.le', 'Z.add': 'Z.sub', 'Z.sub': 'Z.add', 'Z.mul': 'Z.add', 'Le': 'Lt', 'Lt': 'Le', 'N.add': 'N.mul', 'N.mul': 'N.add'}
 SWAP_LOGIC = {'and': 'or', 'or': 'and'}
 
 
@@ -317,6 +342,19 @@ def mutants(a):
 
 
 def _in(desc, ctx): return desc + (' in ' + ctx if ctx else '')
+
+
+def reindex(a, delta, depth=0):
+    """the AST with the bound variable of index `depth` (0: the innermost binder of the AST's top) replaced by that variable plus `delta` (the index of a sum moved by one)"""
+    t = a[0]
+    if t == 'bv':
+        if a[1] != depth: return a
+        return ('prim', 'Z.add', (a, ('int', delta))) if delta > 0 else ('prim', 'Z.sub', (a, ('int', -delta)))
+    if t in ('int', 'true', 'false'): return a
+    if t == 'prim' or t == 'call': return (t, a[1], tuple(reindex(x, delta, depth) for x in a[2]))
+    if t in ('all', 'ex', 'lam'): return (t, a[1], reindex(a[2], delta, depth + 1))
+    if t in ('imp', 'andd'): return (t, reindex(a[1], delta, depth), reindex(a[2], delta, depth + 1))
+    return (t,) + tuple(reindex(x, delta, depth) for x in a[1:])
 
 
 RELATIONS = frozenset(PROP_PRIMS)
@@ -336,12 +374,22 @@ def _mut(a, names, ctx):
         if a[1] == 'Z.sub' and len(a[2]) == 2: yield _in('swap the arguments of Z.sub', here), ('prim', 'Z.sub', (a[2][1], a[2][0]))
         if a[1] == 'Z.dvd' and len(a[2]) == 2: yield _in('swap the arguments of Z.dvd', here), ('prim', a[1], (a[2][1], a[2][0]))
         if a[1] in RELATIONS: yield _in('negate %s' % a[1], here), ('not', a)
+        if a[1] in FN_ARGS and len(a[2]) == 2:                                            # the slips of a sum: the upper limit, the index
+            f, n = a[2]
+            yield _in('upper limit of %s + 1' % a[1], here), ('prim', a[1], (f, ('prim', 'N.succ', (n,))))
+            yield _in('upper limit of %s - 1' % a[1], here), ('prim', a[1], (f, ('prim', 'pred', (n,))))
+            if f[0] == 'lam':
+                yield _in('index of %s + 1' % a[1], here), ('prim', a[1], (('lam', f[1], reindex(f[2], 1)), n))
+                yield _in('index of %s - 1' % a[1], here), ('prim', a[1], (('lam', f[1], reindex(f[2], -1)), n))
         for i, x in enumerate(a[2]):
             for d, m in _mut(x, names, here): yield d, ('prim', a[1], a[2][:i] + (m,) + a[2][i + 1:])
         return
     if t == 'call':
         for i, x in enumerate(a[2]):
             for d, m in _mut(x, names, ctx): yield d, ('call', a[1], a[2][:i] + (m,) + a[2][i + 1:])
+        return
+    if t == 'lam':
+        for d, m in _mut(a[2], names + ('i%d' % len(names),), ctx): yield d, ('lam', a[1], m)
         return
     if t == 'eq':
         here = show_ast(a, names)
@@ -427,6 +475,7 @@ def standard_functions(arity=1, seed=7, tables=24):
 class Spec:
     """what a statement is supposed to say, as Python:  params  the kinds of the leading quantified variables ('Z', 'N', 'P', or 'fn' for a function given by the test functions);
     hyps  one predicate for each hypothesis; concl  the conclusion, or (lhs, rhs) when it is an equivalence; each takes the values of the parameters (and nothing else).
+    `domains`: for a parameter of kind Z, N or P, the values it takes in the box instead of the window (None: the window); a problem whose answer is a large number needs it: (a, b) in a window and c in {.., 198, ..}.
     `windows` overrides the evaluator's windows {'z': .., 'n': .., 'ex': ..} ('ex': the window of the witnesses of existentials); `fns` the test functions for the parameters of kind 'fn' (default: `standard_functions`), `extra_fns` more of them (the functions
     that satisfy the equation of the problem only partly are the ones that tell a quantifier from a slip of it); `points` caps the box;
     `skip_mutants`: {description substring: reason}: mutants whose description contains the substring are known to mean the same thing as the statement (the reason says why); they are not tested.
@@ -444,7 +493,8 @@ class Spec:
     `hatoms`: the same for the relation atoms of the HYPOTHESES (all of them, in the order they are written; no quantifier inside a hypothesis): the numbers of  x^2 + y^2 = 3 z^2  are
     `(lambda x, y, z: x * x + y * y, lambda x, y, z: 3 * z * z)`.  A truth table does not see a slip in a hypothesis that has the same solutions (`-3 z^2` for `3 z^2` over the integers: both have only the
     origin), and a Diophantine hypothesis is the usual case."""
-    def __init__(self, params, hyps=(), concl=None, windows=None, fns=None, points=1200, skip_mutants=None, max_mutants=120, note='', atom=None, atoms=None, extra_fns=(), body=None, hatoms=None):
+    def __init__(self, params, hyps=(), concl=None, windows=None, fns=None, points=1200, skip_mutants=None, max_mutants=120, note='', atom=None, atoms=None, extra_fns=(), body=None, hatoms=None, domains=None):
+        self.domains = None if domains is None else tuple(None if d is None else tuple(d) for d in domains)
         self.params = tuple(params); self.hyps = tuple(hyps); self.concl = concl; self.windows = windows or {}; self.fns = fns; self.points = points; self.extra_fns = tuple(extra_fns)
         self.hatoms = None if hatoms is None else [tuple(a) for a in hatoms]
         self.skip_mutants = skip_mutants or {}; self.max_mutants = max_mutants; self.note = note
@@ -460,11 +510,12 @@ class Report:
         self.ok, self.points, self.nonvacuous, self.mutants, self.caught, self.equivalent, len(self.survivors), self.errors[:2])
 
 
-def _box(sem, kinds, fns, cap, rng, extra=()):
+def _box(sem, kinds, fns, cap, rng, extra=(), domains=None):
     """the points of the box: every combination of the windows (functions: the test functions, `fns` of the spec or the standard ones) when that is at most `cap`, else a random sample"""
     dom = []
-    for kd in kinds:
-        if kd in ('Z', 'N', 'P'): dom.append(list(sem.window(kd)))
+    for i, kd in enumerate(kinds):
+        if domains is not None and i < len(domains) and domains[i] is not None: dom.append(list(domains[i]))                 # the spec says which values this parameter takes
+        elif kd in ('Z', 'N', 'P'): dom.append(list(sem.window(kd)))
         else: dom.append((list(fns) if fns is not None else list(sem.functions(kd[1]))) + list(extra))
     total = 1
     for d in dom: total *= len(d)
@@ -592,6 +643,39 @@ def _atoms_same(x, y):
     return True
 
 
+def _closed(a):
+    """is the formula built from numerals and numeral arithmetic only (no variable, no quantifier, no function)?"""
+    t = a[0]
+    if t in ('int', 'true', 'false'): return True
+    if t == 'prim': return all(_closed(x) for x in a[2])
+    if t in ('eq', 'and', 'or', 'iff'): return _closed(a[1]) and _closed(a[2])
+    if t == 'not': return _closed(a[1])
+    return False
+
+
+def _children(a):
+    t = a[0]
+    if t in ('eq', 'and', 'or', 'iff', 'imp', 'andd'): return [a[1], a[2]]
+    if t == 'not': return [a[1]]
+    if t in ('all', 'ex', 'lam'): return [a[2]]
+    if t in ('prim', 'call'): return list(a[2])
+    return []
+
+
+def ground_equivalents(sem, ast):
+    """the descriptions of the mutants `A and B -> A or B` (and `or -> and`) where A and B are CLOSED statements (numerals and their arithmetic) with the same truth value: the mutant is the same statement
+    (this is the usual case of an attained value written into a conclusion: `n >= 495 and 495 = 9 * 51 + 36`)"""
+    out = set()
+    def go(a):
+        if a[0] in ('and', 'or') and _closed(a[1]) and _closed(a[2]):
+            try: fa = bool(sem.compile(a[1])(())); fb = bool(sem.compile(a[2])(()))
+            except Exception: fa = fb = None
+            if fa is not None and fa == fb: out.add('%s -> %s in %s' % (a[0], SWAP_LOGIC[a[0]], show_ast(a, ())))
+        for x in _children(a): go(x)
+    go(ast)
+    return out
+
+
 def check_spec(sem, ast, spec, mutate=True, seed=1, strict=True):
     """the formal statement against its intended meaning: every part must agree with the Python predicate at every point of the box; the intended atom (if the spec gives one) must be made of the same
     numbers; the statement must be NON-VACUOUS (some point satisfies all the hypotheses; the sides of an equivalence are each true somewhere and false somewhere); and the NEGATIVE CONTROLS: every
@@ -609,7 +693,7 @@ def check_spec(sem, ast, spec, mutate=True, seed=1, strict=True):
         if tuple('fn' if isinstance(x, tuple) else x for x in kinds) != tuple(spec.params): rep.errors.append('the statement quantifies %s, the spec says %s' % (kinds, spec.params)); return rep
         if len(hyps) != len(spec.hyps): rep.errors.append('the statement has %d hypotheses, the spec %d' % (len(hyps), len(spec.hyps))); return rep
         if (concl[0] == 'iff') != isinstance(spec.concl, tuple): rep.errors.append('the conclusion is %s, the spec says %s' % ('an equivalence' if concl[0] == 'iff' else 'not an equivalence', 'an equivalence' if isinstance(spec.concl, tuple) else 'a single statement')); return rep
-        pts, total = _box(sem, kinds, spec.fns, spec.points, rng, spec.extra_fns)
+        pts, total = _box(sem, kinds, spec.fns, spec.points, rng, spec.extra_fns, spec.domains)
         rep.points = len(pts)
         bk = None if spec.body is None else spec.body[0]
         ha = spec.hatoms is not None
@@ -655,9 +739,9 @@ def check_spec(sem, ast, spec, mutate=True, seed=1, strict=True):
                 if not any(tabs[side]): rep.errors.append('the %s of the equivalence is never true on the box: add test points / functions' % side)
                 if all(tabs[side]): rep.errors.append('the %s of the equivalence is always true on the box: add test points / functions' % side)
         if mutate and rep.ok:
-            ms = list(mutants(ast)); keep = []
+            ms = list(mutants(ast)); keep = []; ground = ground_equivalents(sem, ast)
             for d, m in ms:
-                if any(s in d for s in spec.skip_mutants): rep.equivalent += 1
+                if d in ground or any(s in d for s in spec.skip_mutants): rep.equivalent += 1
                 else: keep.append((d, m))
             ms = keep
             rng2 = random.Random(seed + 1)

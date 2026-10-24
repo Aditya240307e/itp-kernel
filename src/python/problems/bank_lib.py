@@ -15,6 +15,7 @@ import os, sys, math
 import imo_lib
 from nt_lib import _syms
 from lnl_base import thm
+from ext_lib import destruct
 from semantic import Spec
 import bank as B
 from bank import BANK
@@ -152,30 +153,7 @@ def _(w, b):
         def _(p): p.intro('a', 'c', 'd', 'e'); p.nlinarith(('Z.sq_nonneg', lambda q: q.h('a') * q.h('e') - q.h('c') * q.h('d')))
 
 
-@BANK.problem('sum_squares_zero', text='If a and b are integers with a^2 + b^2 = 0, then a = 0 and b = 0.', source='folklore', topics=('algebra', 'inequality'), level=1,
-              spec=Spec(('Z', 'Z'), (lambda a, b: a * a + b * b == 0,), lambda a, b: a == 0 and b == 0))
-def _(w, b):
-    s = _syms(w); Z, Eq, zzero = s.Z, s.Eq, s.zzero
-    with w.nota.using(Z):
-        @thm(w, 'sum_squares_zero', [Z, Z, lambda a, c: Eq(a ** 2 + c ** 2, zzero)], lambda a, c, h: Eq(a, zzero) & Eq(c, zzero))
-        def _(p):
-            p.intro('a', 'c', 'h')
-            p.have('ha', p.T('a', lambda a_: Eq(a_ * a_, zzero)), lambda q: q.nlinarith(('Z.sq_nonneg', q.h('a')), ('Z.sq_nonneg', q.h('c'))))
-            p.have('hc', p.T('c', lambda c_: Eq(c_ * c_, zzero)), lambda q: q.nlinarith(('Z.sq_nonneg', q.h('a')), ('Z.sq_nonneg', q.h('c'))))
-            p.split()
-            p.obtain(['u', 'u'], ('Z.mul_eq_zero', 'a', 'a', 'ha')); p.exact('u'); p.exact('u')
-            p.obtain(['v', 'v'], ('Z.mul_eq_zero', 'c', 'c', 'hc')); p.exact('v'); p.exact('v')
-
-
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ level 2: divisibility and parity
-def destruct(p, fact, names):
-    r"""`obtain` for a fact that is a chain  exists x, exists y, A /\ B /\ C ..  (nested to the right): one name per component, in order"""
-    if len(names) == 2: return p.obtain(names, fact)
-    p.obtain([names[0], '_d1'], fact)
-    for i in range(1, len(names) - 2): p.cases('_d%d' % i, names=[names[i], '_d%d' % (i + 1)])
-    p.cases('_d%d' % (len(names) - 2), names=[names[-2], names[-1]])
-
-
 def _dvd(a, b): return (a == 0 and b == 0) or (a != 0 and b % a == 0)
 
 
@@ -184,39 +162,6 @@ def AND(*ps):
     r = ps[-1]
     for q in reversed(ps[:-1]): r = q & r
     return r
-
-
-@BANK.problem('not_dvd_between', text='Let d > 0 and k be integers. No multiple of d lies strictly between dk and d(k+1): if dk < x < d(k+1) then d does not divide x.', source='folklore', topics=('number-theory', 'divisibility'), level=2,
-              spec=Spec(('Z', 'Z', 'Z'), (lambda d, k, x: d > 0, lambda d, k, x: d * k < x, lambda d, k, x: x < d * (k + 1)), lambda d, k, x: not _dvd(d, x), windows={'z': 6},
-                        atom=(lambda d, k, x: d, lambda d, k, x: x)))
-def _(w, b):
-    s = _syms(w); Z, zlt, zzero, D = s.Z, s.zlt, s.zzero, s.D
-    with w.nota.using(Z):
-        @thm(w, 'not_dvd_between', [Z, Z, Z, lambda d, k, x: zlt(zzero, d), lambda d, k, x, h: zlt(d * k, x), lambda d, k, x, h, h1: zlt(x, d * (k + 1))], lambda d, k, x, h, h1, h2: ~D(d, x))
-        def _(p):
-            p.intro('d', 'k', 'x', 'hd', 'h1', 'h2', 'hx')
-            p.cases('hx', names=['m', 'hm'])
-            p.obtain(['c', 'c'], ('Z.le_or_lt', 'm', 'k'))
-            p.nlinarith(); p.nlinarith()
-
-
-@BANK.problem('square_mod_four', text='The square of every integer is of the form 4k or 4k + 1.', source='folklore', topics=('number-theory', 'modular', 'parity'), level=2,
-              spec=Spec(('Z',), (), lambda n: any(n * n == 4 * k or n * n == 4 * k + 1 for k in range(0, 40)), windows={'z': 6, 'ex': 40},
-                        body=(('Z',), lambda n, k: n * n == 4 * k or n * n == 4 * k + 1),
-                        atoms=[(lambda n, k: n * n, lambda n, k: 4 * k), (lambda n, k: n * n, lambda n, k: 4 * k + 1)]))
-def _(w, b):
-    s = _syms(w); Z, Eq, Ex, zzero, zlt = s.Z, s.Eq, s.Ex, s.zzero, s.zlt
-    with w.nota.using(Z):
-        lit = w.nota.lit
-        @thm(w, 'square_mod_four', [Z], lambda n: Ex(Z, w.lam(Z, lambda k: Eq(n ** 2, 4 * k) | Eq(n ** 2, 4 * k + 1))))
-        def _(p):
-            p.intro('n')
-            p.have('h2', p.T('', lambda: zlt(zzero, lit(2))), lambda q: q.linarith())
-            destruct(p, ('Z.exists_divmod', lit(2), 'h2', 'n'), ['q', 'r', 'e', 'h0', 'h1'])
-            p.rw('e')
-            p.interval_cases('r', 0, 1)
-            p.rw('r_eq'); p.exists(p.T('q', lambda q: q ** 2)); p.left(); p.ring()
-            p.rw('r_eq'); p.exists(p.T('q', lambda q: q ** 2 + q)); p.right(); p.ring()
 
 
 @BANK.problem('sum_two_squares_mod4', text='No integer of the form 4k + 3 is a sum of two squares: a^2 + b^2 /= 4k + 3 for all integers a, b, k.', source='folklore', topics=('number-theory', 'modular', 'diophantine'), level=2,
@@ -256,45 +201,6 @@ def _(w, b):
             p.interval_cases('r', 0, 1)
             p.rw('r_eq'); p.exists(p.T('j', lambda j: 2 * j ** 2 + j)); p.ring()
             p.rw('r_eq'); p.exists(p.T('j', lambda j: 2 * j ** 2 + 3 * j + 1)); p.ring()
-
-
-@BANK.problem('cube_mod_nine', text='The cube of every integer is of the form 9k, 9k + 1 or 9k + 8.', source='folklore', topics=('number-theory', 'modular'), level=2,
-              spec=Spec(('Z',), (), lambda n: any(n ** 3 in (9 * k, 9 * k + 1, 9 * k + 8) for k in range(-80, 81)), windows={'z': 8, 'ex': 80},
-                        body=(('Z',), lambda n, k: n ** 3 in (9 * k, 9 * k + 1, 9 * k + 8)),
-                        atoms=[(lambda n, k: n ** 3, lambda n, k: 9 * k), (lambda n, k: n ** 3, lambda n, k: 9 * k + 1), (lambda n, k: n ** 3, lambda n, k: 9 * k + 8)]))
-def _(w, b):
-    s = _syms(w); Z, Eq, Ex, zzero, zlt = s.Z, s.Eq, s.Ex, s.zzero, s.zlt
-    with w.nota.using(Z):
-        lit = w.nota.lit
-        @thm(w, 'cube_mod_nine', [Z], lambda n: Ex(Z, w.lam(Z, lambda k: Eq(n ** 3, 9 * k) | (Eq(n ** 3, 9 * k + 1) | Eq(n ** 3, 9 * k + 8)))))
-        def _(p):
-            p.intro('n')
-            p.have('h3', p.T('', lambda: zlt(zzero, lit(3))), lambda q: q.linarith())
-            destruct(p, ('Z.exists_divmod', lit(3), 'h3', 'n'), ['q', 'r', 'e', 'h0', 'h1'])
-            p.rw('e')
-            p.interval_cases('r', 0, 2)
-            p.rw('r_eq'); p.exists(p.T('q', lambda q: 3 * q ** 3)); p.left(); p.ring()
-            p.rw('r_eq'); p.exists(p.T('q', lambda q: 3 * q ** 3 + 3 * q ** 2 + q)); p.right(); p.left(); p.ring()
-            p.rw('r_eq'); p.exists(p.T('q', lambda q: 3 * q ** 3 + 6 * q ** 2 + 4 * q)); p.right(); p.right(); p.ring()
-
-
-@BANK.problem('cube_minus_n_div6', text='For every integer n, 6 divides n^3 - n.', source='folklore', topics=('number-theory', 'divisibility', 'modular'), level=2,
-              spec=Spec(('Z',), (), lambda n: _dvd(6, n ** 3 - n), atom=(lambda n: 6, lambda n: n ** 3 - n)))
-def _(w, b):
-    s = _syms(w); Z, zzero, zlt, D = s.Z, s.zzero, s.zlt, s.D
-    with w.nota.using(Z):
-        lit = w.nota.lit
-        @thm(w, 'cube_minus_n_div6', [Z], lambda n: D(lit(6), n ** 3 - n))
-        def _(p):
-            p.intro('n')
-            p.have('h6', p.T('', lambda: zlt(zzero, lit(6))), lambda q: q.linarith())
-            destruct(p, ('Z.exists_divmod', lit(6), 'h6', 'n'), ['q', 'r', 'e', 'h0', 'h1'])
-            p.rw('e')
-            p.interval_cases('r', 0, 5)
-            for k in range(6):                      # n = 6q + k:  n^3 - n = 6 (36 q^3 + 18 k q^2 + 3 k^2 q - q + (k^3 - k) / 6)
-                p.rw('r_eq')
-                p.exists(p.T('q', lambda q, k=k: lit(36) * q ** 3 + lit(18 * k) * q ** 2 + lit(3 * k * k) * q - q + lit((k ** 3 - k) // 6)))
-                p.ring()
 
 
 @BANK.problem('pow_sub_dvd', text='For integers a, b and every natural number n, a - b divides a^n - b^n.', source='folklore', topics=('number-theory', 'divisibility', 'induction'), level=2,
@@ -340,60 +246,6 @@ def _(w, b):
             p.obtain(['d', 'd'], ('Z.le_or_lt', (s.zneg, 'm'), 'n')); p.nlinarith(); p.nlinarith()
 
 
-@BANK.problem('three_dvd_sum_squares', text='If 3 divides a^2 + b^2 for integers a and b, then 3 divides both a and b.', source='folklore', topics=('number-theory', 'divisibility', 'modular'), level=3,
-              spec=Spec(('Z', 'Z'), (lambda a, b: _dvd(3, a * a + b * b),), lambda a, b: _dvd(3, a) and _dvd(3, b), atoms=[(lambda a, b: 3, lambda a, b: a), (lambda a, b: 3, lambda a, b: b)],
-                        skip_mutants={'constant 3 -> -3 in (Z.dvd 3': 'a divisor and its negative divide the same integers'}))
-def _(w, b):
-    s = _syms(w); Z, Eq, zzero, zlt, D = s.Z, s.Eq, s.zzero, s.zlt, s.D
-    with w.nota.using(Z):
-        lit = w.nota.lit
-        @thm(w, 'three_dvd_sum_squares', [Z, Z, lambda a, c: D(lit(3), a ** 2 + c ** 2)], lambda a, c, h: D(lit(3), a) & D(lit(3), c))
-        def _(p):
-            p.intro('a', 'c', 'h'); p.cases('h', names=['k', 'hk'])
-            p.have('h3', p.T('', lambda: zlt(zzero, lit(3))), lambda q: q.linarith())
-            destruct(p, ('Z.exists_divmod', lit(3), 'h3', 'a'), ['q', 'r', 'e1', 'h10', 'h11'])
-            destruct(p, ('Z.exists_divmod', lit(3), 'h3', 'c'), ['t', 'u', 'e2', 'h20', 'h21'])
-            p.rw_at('hk', 'e1'); p.rw_at('hk', 'e2')
-            p.interval_cases('r', 0, 2)
-            for rv in range(3):
-                p.interval_cases('u', 0, 2)
-                for uv in range(3):
-                    p.rw_at('hk', 'r_eq'); p.rw_at('hk', 'u_eq')
-                    if rv == 0 and uv == 0:
-                        p.split()
-                        p.exists('q'); p.rw('e1'); p.rw('r_eq'); p.ring()
-                        p.exists('t'); p.rw('e2'); p.rw('u_eq'); p.ring()
-                    else:
-                        x = rv * rv + uv * uv; k0 = x // 3
-                        p.exfalso()
-                        p.apply('not_dvd_between', lit(3), lit(k0), lit(x))
-                        p.linarith(); p.linarith(); p.linarith()
-                        p.exists(p.T('k q t', lambda k_, q_, t_: k_ - 3 * q_ ** 2 - 2 * rv * q_ - 3 * t_ ** 2 - 2 * uv * t_))
-                        p.linear_combination((1, 'hk'))
-
-
-@BANK.problem('N.induction3', text='Induction in steps of three: if P(0), P(1) and P(2) hold, and P(m) implies P(m + 3) for every natural number m, then P(n) holds for every natural number n.', source='folklore',
-              topics=('induction', 'logic'), level=2)
-def _(w, b):
-    s = _syms(w); N, PROP, F = s.N, s.PROP, s.F
-    N0, nsucc = w['N0'], w['N.succ']
-    PN = w.arrow(N, PROP)
-    def S3(m): return nsucc(nsucc(nsucc(m)))
-    @thm(w, 'N.induction3', [PN, N, lambda P, n: P(N0), lambda P, n, h0: P(nsucc(N0)), lambda P, n, h0, h1: P(nsucc(nsucc(N0))),
-                              lambda P, n, h0, h1, h2: F([N, lambda m: P(m)], lambda m, hm: P(S3(m)))],
-         lambda P, n, h0, h1, h2, hs: P(n))
-    def _(p):
-        p.intro('P', 'n', 'h0', 'h1', 'h2', 'hs')
-        st = p.T('P', lambda P: F([N], lambda k: P(k) & (P(nsucc(k)) & P(nsucc(nsucc(k))))))
-        def main(q):
-            q.intro('k'); q.induction_on('N.induction_on', 'k')
-            q.split(); q.exact('h0'); q.split(); q.exact('h1'); q.exact('h2')
-            q.intro('m', 'hm'); q.cases('hm', names=['a', 'bc']); q.cases('bc', names=['b', 'c'])
-            q.split(); q.exact('b'); q.split(); q.exact('c'); q.apply('hs'); q.exact('a')
-        p.have('hq', st, main)
-        p.obtain(['a', 'bc'], ('hq', 'n')); p.exact('a')
-
-
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ level 3: olympiad problems
 @BANK.problem('imo1984_p2', text='Find two positive integers a and b such that none of the numbers a, b, a + b is divisible by 7 and (a + b)^7 - a^7 - b^7 is divisible by 7^7.', source='IMO 1984 P2', year=1984,
               topics=('number-theory', 'divisibility', 'construction'), level=3, kind='exists', answer='a = 18, b = 1 (and the pairs equivalent to it modulo 7^3)',
@@ -429,7 +281,7 @@ def _prime(n):
 
 
 @BANK.problem('imo1969_p1', text='Prove that there exist infinitely many positive integers a such that n^4 + a is not a prime number for any positive integer n.', source='IMO 1969 P1', year=1969,
-              topics=('number-theory', 'prime', 'construction', 'identity'), level=3, helpers=('not_prime_mul', 'germain_not_prime'),
+              topics=('number-theory', 'prime', 'construction', 'identity'), level=3, helpers=('germain_not_prime',),
               spec=Spec(('Z',), (lambda m: m >= 0,), lambda m: any(a > m and all(not _prime(n ** 4 + a) for n in range(1, 9)) for a in range(-70, 71)), windows={'z': 8, 'ex': 70, 'atom': 3},
                         body=(('Z',), lambda m, a: a > m and all(not _prime(n ** 4 + a) for n in range(1, 9))),
                         atoms=[(lambda m, a: m, lambda m, a: a), (lambda m, a, n: 0, lambda m, a, n: n), (lambda m, a, n: n ** 4 + a,)]))
@@ -438,14 +290,6 @@ def _(w, b):
     prime = w['Z.prime']
     with w.nota.using(Z):
         lit = w.nota.lit
-
-        @thm(w, 'not_prime_mul', [Z, Z, lambda a, c: zlt(zone, a), lambda a, c, h: zlt(zone, c)], lambda a, c, h1, h2: ~prime(a * c))
-        def not_prime_mul_script(p):
-            p.intro('a', 'c', 'h1', 'h2', 'hp'); p.cases('hp', names=['g1', 'g2'])
-            p.have('ha', p.T('a', lambda a_: zlt(zzero, a_)), lambda q: q.linarith())
-            p.obtain(['e', 'e'], ('g2', 'a', 'ha', ('Z.dvd_mul_right', 'a', 'c')))
-            p.linarith()
-            p.nlinarith()
 
         @thm(w, 'germain_not_prime', [Z, Z, lambda n, k: zlt(zzero, n), lambda n, k, h: zle(lit(2), k)], lambda n, k, h1, h2: ~prime(n ** 4 + 4 * k ** 4))
         def germain_script(p):
@@ -458,7 +302,6 @@ def _(w, b):
 
         @thm(w, 'imo1969_p1', [Z, lambda m: zle(zzero, m)], lambda m, h: Ex(Z, w.lam(Z, lambda a: zlt(m, a) & F([Z, lambda n: zlt(zzero, n)], lambda n, hn: ~prime(n ** 4 + a)))))
         def _(p):
-            p.have('not_prime_mul', w.type_of(w['not_prime_mul']), not_prime_mul_script)
             p.have('germain_not_prime', w.type_of(w['germain_not_prime']), germain_script)
             p.intro('m', 'hm')
             p.exists(p.T('m', lambda m_: 4 * (m_ + 2) ** 4))

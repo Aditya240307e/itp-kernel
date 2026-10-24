@@ -162,6 +162,7 @@ class Assembler:
         heads = self.space.table.heads
         for gid in sorted(heads):
             if gid >= limit: break
+            if not eng.sees(gid): continue
             h = heads[gid]
             if kind in (Kind.REWRITE_WITH, Kind.REWRITE_AT) and ACTS.eq_sides(eng, h.concl) is None: continue
             if kind == Kind.FORWARD and h.arity == 0: continue
@@ -432,7 +433,7 @@ class Assembler:
         conv = ACTS.conv_fn(eng, g.n_hyps)
         prs = []
         for gid in sorted(eng.principles):
-            if gid >= eng.limit: continue
+            if not eng.sees(gid): continue
             pr = eng.principles[gid]; binding = {}
             if ACTS.match_any(k, pr.T, g.hyp_types[x], binding, conv) and all(HOLE + j in binding for j in pr.auto): prs.append(pr)
         if not prs: raise Infeasible('no principle is about this variable')

@@ -9,6 +9,7 @@
 import os as _os, sys as _sys; _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..')); import itp_paths  # noqa: E402,F401
 import os, sys
 import nt_lib
+import ext_lib
 from nt_lib import _syms
 from lnl_base import thm
 
@@ -182,9 +183,10 @@ def imo_2019_p1(w):
 STAGES = ('imo_1959_p1', 'sqrt2', 'imo_2019_p1')
 
 
-def build_imo(w=None, stages=STAGES):
-    """the number-theory world (nt_lib), then the problems"""
+def build_imo(w=None, stages=STAGES, ext=True):
+    """the number-theory world (nt_lib), the library extension (ext_lib: the last part of the library), then the problems that start at `imo1959_p1`"""
     if w is None: w = nt_lib.build_nt()
+    if ext: ext_lib.build_ext(w)
     for name in stages: globals()[name](w)
     return w
 

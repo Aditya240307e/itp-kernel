@@ -176,26 +176,6 @@ def _(w, b):
 
 
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ level 2: remainders
-@BANK.problem('square_mod_three', text='The square of every integer is of the form 3k or 3k + 1.', source='folklore', topics=('number-theory', 'modular'), level=2,
-              spec=Spec(('Z',), (), lambda n: any(n * n == 3 * k or n * n == 3 * k + 1 for k in range(0, 40)), windows={'z': 6, 'ex': 40},
-                        body=(('Z',), lambda n, k: n * n == 3 * k or n * n == 3 * k + 1),
-                        atoms=[(lambda n, k: n * n, lambda n, k: 3 * k), (lambda n, k: n * n, lambda n, k: 3 * k + 1)]))
-def _(w, b):
-    s = _syms(w); Z, Eq, Ex, zzero, zlt = s.Z, s.Eq, s.Ex, s.zzero, s.zlt
-    with w.nota.using(Z):
-        lit = w.nota.lit
-        @thm(w, 'square_mod_three', [Z], lambda n: Ex(Z, w.lam(Z, lambda k: Eq(n ** 2, 3 * k) | Eq(n ** 2, 3 * k + 1))))
-        def _(p):
-            p.intro('n')
-            p.have('h3', p.T('', lambda: zlt(zzero, lit(3))), lambda q: q.linarith())
-            destruct(p, ('Z.exists_divmod', lit(3), 'h3', 'n'), ['q', 'r', 'e', 'h0', 'h1'])
-            p.rw('e')
-            p.interval_cases('r', 0, 2)
-            p.rw('r_eq'); p.exists(p.T('q', lambda q: 3 * q ** 2)); p.left(); p.ring()
-            p.rw('r_eq'); p.exists(p.T('q', lambda q: 3 * q ** 2 + 2 * q)); p.right(); p.ring()
-            p.rw('r_eq'); p.exists(p.T('q', lambda q: 3 * q ** 2 + 4 * q + 1)); p.right(); p.ring()
-
-
 @BANK.problem('consecutive_product_even', text='The product of two consecutive integers is even: 2 divides n(n + 1) for every integer n.', source='folklore', topics=('number-theory', 'divisibility', 'parity'), level=2,
               spec=Spec(('Z',), (), lambda n: _dvd(2, n * (n + 1)), atom=(lambda n: 2, lambda n: n * (n + 1)), skip_mutants={'constant 2 -> -2 in (Z.dvd 2': 'a divisor and its negative divide the same integers'}))
 def _(w, b):
@@ -229,25 +209,6 @@ def _(w, b):
             p.rw('r_eq'); p.exists(p.T('q', lambda q: q * (3 * q + 1) * (3 * q + 2))); p.ring()
             p.rw('r_eq'); p.exists(p.T('q', lambda q: (3 * q + 1) * (3 * q + 2) * (q + 1))); p.ring()
             p.rw('r_eq'); p.exists(p.T('q', lambda q: (3 * q + 2) * (q + 1) * (3 * q + 4))); p.ring()
-
-
-@BANK.problem('five_dvd_fifth_power', text='For every integer n, 5 divides n^5 - n.', source='folklore (Fermat)', topics=('number-theory', 'divisibility', 'modular'), level=2,
-              spec=Spec(('Z',), (), lambda n: _dvd(5, n ** 5 - n), atom=(lambda n: 5, lambda n: n ** 5 - n), skip_mutants={'constant 5 -> -5 in (Z.dvd 5': 'a divisor and its negative divide the same integers'}))
-def _(w, b):
-    s = _syms(w); Z, zzero, zlt, D = s.Z, s.zzero, s.zlt, s.D
-    with w.nota.using(Z):
-        lit = w.nota.lit
-        @thm(w, 'five_dvd_fifth_power', [Z], lambda n: D(lit(5), n ** 5 - n))
-        def _(p):
-            p.intro('n')
-            p.have('h5', p.T('', lambda: zlt(zzero, lit(5))), lambda q: q.linarith())
-            destruct(p, ('Z.exists_divmod', lit(5), 'h5', 'n'), ['q', 'r', 'e', 'h0', 'h1'])
-            p.rw('e')
-            p.interval_cases('r', 0, 4)
-            for k in range(5):                      # (5q + k)^5 - (5q + k) = 5 (625 q^5 + 625 k q^4 + 250 k^2 q^3 + 50 k^3 q^2 + (5 k^4 - 1) q + (k^5 - k) / 5)
-                p.rw('r_eq')
-                p.exists(p.T('q', lambda q, k=k: lit(625) * q ** 5 + lit(625 * k) * q ** 4 + lit(250 * k * k) * q ** 3 + lit(50 * k ** 3) * q ** 2 + lit(5 * k ** 4 - 1) * q + lit((k ** 5 - k) // 5)))
-                p.ring()
 
 
 @BANK.problem('fourth_power_odd_16', text='The fourth power of an odd integer leaves remainder 1 upon division by 16: if n is odd then 16 divides n^4 - 1.', source='folklore', topics=('number-theory', 'divisibility', 'modular', 'parity'), level=2,
@@ -375,22 +336,6 @@ def _(w, b):
             p.have('h1', p.T('a c', lambda a_, c_: zcop(a_ + c_, a_)), lambda q: (q.exists(q.h('y')), q.exists(q.T('x y', lambda x, y: x - y)), q.linear_combination((1, 'hy'))))
             p.have('h2', p.T('a c', lambda a_, c_: zcop(a_ + c_, c_)), lambda q: (q.exists(q.h('x')), q.exists(q.T('x y', lambda x, y: y - x)), q.linear_combination((1, 'hy'))))
             p.apply('Z.is_gcd_one_of_coprime'); p.exact(('Z.coprime_mul_right', p.T('a c', lambda a_, c_: a_ + c_), 'a', 'c', 'h1', 'h2'))
-
-
-@BANK.problem('dvd_coprime_product', text='If a divides c, b divides c and gcd(a, b) = 1, then ab divides c.', source='folklore', topics=('number-theory', 'divisibility', 'gcd'), level=3,
-              spec=Spec(('Z', 'Z', 'Z'), (lambda a, b, c: math.gcd(a, b) == 1, lambda a, b, c: _dvd(a, c), lambda a, b, c: _dvd(b, c)), lambda a, b, c: _dvd(a * b, c), windows={'z': 6}, atom=(lambda a, b, c: a * b, lambda a, b, c: c)))
-def _(w, b):
-    s = _syms(w); Z, Eq, zone, D = s.Z, s.Eq, s.zone, s.D
-    zgcd = w['Z.is_gcd']
-    with w.nota.using(Z):
-        @thm(w, 'dvd_coprime_product', [Z, Z, Z, lambda a, c, d: zgcd(a, c, zone), lambda a, c, d, h: D(a, d), lambda a, c, d, h, h1: D(c, d)], lambda a, c, d, h, h1, h2: D(a * c, d))
-        def _(p):                                                              # c = a m and b | a m with gcd(b, a) = 1 give b | m
-            p.intro('a', 'c', 'd', 'h', 'ha', 'hb')
-            p.cases('ha', names=['m', 'hm'])
-            p.have('hc', p.T('a c', lambda a_, c_: w['Z.coprime'](c_, a_)), lambda q: q.exact(('Z.coprime_symm', 'a', 'c', ('Z.coprime_of_is_gcd_one', 'a', 'c', 'h'))))
-            p.have('hbm', p.T('a c m', lambda a_, c_, m_: D(c_, a_ * m_)), lambda q: (q.rw_at('hb', 'hm'), q.exact('hb')))
-            p.obtain(['n', 'hn'], ('Z.coprime_dvd_mul', 'c', 'a', 'm', 'hc', 'hbm'))
-            p.exists('n'); p.rw('hm'); p.rw('hn'); p.ring()
 
 
 @BANK.problem('square_not_prime', text='A perfect square is never a prime: for every integer n, n^2 is not prime.', source='folklore', topics=('number-theory', 'prime'), level=3,
@@ -608,17 +553,15 @@ def _cauchy_cond(f, W=range(-8, 9)): return all(f(x + y) == f(x) + f(y) for x in
 def _cauchy_sol(f, W=range(-8, 9)): return any(all(f(n) == c * n for n in W) for c in W)
 
 
-@BANK.problem('fe_additive', text='Determine all functions f : Z -> Z such that f(x + y) = f(x) + f(y) for all integers x and y.', source='folklore (Cauchy)', topics=('functional-equation', 'induction'), level=3, kind='answer',
-              answer='f(n) = c n for an integer c', spec=Spec(('fn',), (), (_cauchy_cond, _cauchy_sol)),
-              notes='formalised as an equivalence: f is additive iff f(n) = c n for some integer c; the proof is an induction on n in both directions, with c = f(1)')
-def _(w, b):
+def fe_additive_parts(w):
+    """(the type of the functions, the statement of fe_additive as a function of f, its proof script): shared with the problems that prove the Cauchy equation inline"""
     s = _syms(w); Z, Eq, F, Ex, zzero, zone = s.Z, s.Eq, s.F, s.Ex, s.zzero, s.zone
     fT = w.arrow(Z, Z)
     with w.nota.using(Z):
         def cond(f): return F([Z, Z], lambda x, y: Eq(f(x + y), f(x) + f(y)))
         def sol(f): return Ex(Z, w.lam(Z, lambda c: F([Z], lambda n: Eq(f(n), c * n))))
-        @thm(w, 'fe_additive', [fT], lambda f: w.Iff(cond(f), sol(f)))
-        def _(p):
+        def statement(f): return w.Iff(cond(f), sol(f))
+        def script(p):
             p.intro('f'); p.split()
             p.intro('H')
             p.exists(p.T('f', lambda f_: f_(zone)))
@@ -630,6 +573,15 @@ def _(w, b):
             p.intro('x', 'y')
             p.have('e1', ('hc', p.T('x y', lambda x_, y_: x_ + y_))); p.have('e2', ('hc', 'x')); p.have('e3', ('hc', 'y'))
             p.linear_combination((1, 'e1'), (-1, 'e2'), (-1, 'e3'))
+    return fT, statement, script
+
+
+@BANK.problem('fe_additive', text='Determine all functions f : Z -> Z such that f(x + y) = f(x) + f(y) for all integers x and y.', source='folklore (Cauchy)', topics=('functional-equation', 'induction'), level=3, kind='answer',
+              answer='f(n) = c n for an integer c', spec=Spec(('fn',), (), (_cauchy_cond, _cauchy_sol)),
+              notes='formalised as an equivalence: f is additive iff f(n) = c n for some integer c; the proof is an induction on n in both directions, with c = f(1)')
+def _(w, b):
+    fT, statement, script = fe_additive_parts(w)
+    thm(w, 'fe_additive', [fT], statement)(script)
 
 
 @BANK.problem('no_f_f_succ', text='Prove that there is no function f : Z -> Z with f(f(n)) = n + 1 for all integers n.', source='folklore', topics=('functional-equation', 'induction', 'parity'), level=3,
@@ -852,17 +804,16 @@ def _(w, b):
 def _schur(a, b, c): return a * (a - b) * (a - c) + b * (b - a) * (b - c) + c * (c - a) * (c - b)
 
 
-@BANK.problem('schur_nonneg', text='Schur\'s inequality: for all non-negative integers a, b, c: a(a - b)(a - c) + b(b - a)(b - c) + c(c - a)(c - b) >= 0.', source='folklore (Schur)', topics=('inequality', 'case-analysis'), level=3,
-              helpers=('schur_ordered',),
-              spec=Spec(('Z', 'Z', 'Z'), (lambda a, b, c: a >= 0, lambda a, b, c: b >= 0, lambda a, b, c: c >= 0), lambda a, b, c: _schur(a, b, c) >= 0, windows={'z': 8},
-                        atom=(lambda a, b, c: 0, lambda a, b, c: _schur(a, b, c)), hatoms=[(lambda a, b, c: 0, lambda a, b, c: a), (lambda a, b, c: 0, lambda a, b, c: b), (lambda a, b, c: 0, lambda a, b, c: c)]),
-              notes='for a >= b >= c the expression is (a - b)^2 (a + b - c) + c (a - c)(b - c); the six orders of a, b, c reduce to it because the expression is symmetric')
-def _(w, b):
+def schur_parts(w):
+    """(the types of the binders of schur_ordered and of schur_nonneg, their statements, their proof scripts): shared with the problems that prove Schur's inequality inline"""
     s = _syms(w); Z, zle, zlt, zzero = s.Z, s.zle, s.zlt, s.zzero
     with w.nota.using(Z):
         def schur(a, b, c): return a * (a - b) * (a - c) + b * (b - a) * (b - c) + c * (c - a) * (c - b)
+        ordered_doms = [Z, Z, Z, lambda a, b, c: zle(zzero, c), lambda a, b, c, h: zle(c, b), lambda a, b, c, h, h2: zle(b, a)]
+        ordered_stmt = lambda a, b, c, h1, h2, h3: zle(zzero, schur(a, b, c))
+        main_doms = [Z, Z, Z, lambda a, b, c: zle(zzero, a), lambda a, b, c, h: zle(zzero, b), lambda a, b, c, h, h2: zle(zzero, c)]
+        main_stmt = lambda a, b, c, h1, h2, h3: zle(zzero, schur(a, b, c))
 
-        @thm(w, 'schur_ordered', [Z, Z, Z, lambda a, b, c: zle(zzero, c), lambda a, b, c, h: zle(c, b), lambda a, b, c, h, h2: zle(b, a)], lambda a, b, c, h1, h2, h3: zle(zzero, schur(a, b, c)))
         def ordered_script(p):
             p.intro('a', 'b', 'c', 'hc', 'hcb', 'hba')
             p.have('f1', p.T('a b c', lambda a_, b_, c_: zle(zzero, a_ + b_ - c_)), lambda q: q.linarith())
@@ -873,9 +824,8 @@ def _(w, b):
             p.have('g3', ('Z.mul_nonneg', 'c', p.T('a b c', lambda a_, b_, c_: (a_ - c_) * (b_ - c_)), 'hc', 'g2'))
             p.linarith()
 
-        @thm(w, 'schur_nonneg', [Z, Z, Z, lambda a, b, c: zle(zzero, a), lambda a, b, c, h: zle(zzero, b), lambda a, b, c, h, h2: zle(zzero, c)], lambda a, b, c, h1, h2, h3: zle(zzero, schur(a, b, c)))
-        def _(p):
-            p.have('schur_ordered', w.type_of(w['schur_ordered']), ordered_script)
+        def main_script(p):
+            p.have('schur_ordered', w.type_of(w['schur_ordered']) if 'schur_ordered' in w.gid else w.forall_(ordered_doms, ordered_stmt), ordered_script)
             p.intro('a', 'b', 'c', 'ha', 'hb', 'hc')
             def leaf(q, x, y, z, hz):
                 q.have('o2', q.T(z + ' ' + y, lambda z_, y_: zle(z_, y_)), lambda r: r.linarith())
@@ -892,6 +842,18 @@ def _(w, b):
             leaf(p, 'c', 'a', 'b', 'hb')
             leaf(p, 'a', 'c', 'b', 'hb')
             leaf(p, 'a', 'b', 'c', 'hc')
+    return (ordered_doms, ordered_stmt, ordered_script), (main_doms, main_stmt, main_script)
+
+
+@BANK.problem('schur_nonneg', text='Schur\'s inequality: for all non-negative integers a, b, c: a(a - b)(a - c) + b(b - a)(b - c) + c(c - a)(c - b) >= 0.', source='folklore (Schur)', topics=('inequality', 'case-analysis'), level=3,
+              helpers=('schur_ordered',),
+              spec=Spec(('Z', 'Z', 'Z'), (lambda a, b, c: a >= 0, lambda a, b, c: b >= 0, lambda a, b, c: c >= 0), lambda a, b, c: _schur(a, b, c) >= 0, windows={'z': 8},
+                        atom=(lambda a, b, c: 0, lambda a, b, c: _schur(a, b, c)), hatoms=[(lambda a, b, c: 0, lambda a, b, c: a), (lambda a, b, c: 0, lambda a, b, c: b), (lambda a, b, c: 0, lambda a, b, c: c)]),
+              notes='for a >= b >= c the expression is (a - b)^2 (a + b - c) + c (a - c)(b - c); the six orders of a, b, c reduce to it because the expression is symmetric')
+def _(w, b):
+    (od, ost, osc), (md, mst, msc) = schur_parts(w)
+    thm(w, 'schur_ordered', od, ost)(osc)
+    thm(w, 'schur_nonneg', md, mst)(msc)
 
 
 @BANK.problem('ineq_cauchy_three', text='For all integers a, b, c, x, y, z: (ax + by + cz)^2 <= (a^2 + b^2 + c^2)(x^2 + y^2 + z^2).', source='folklore (Cauchy-Schwarz)', topics=('inequality',), level=2,
@@ -957,6 +919,7 @@ def _(w, b):
             def sadd(q):
                 q.intro('x', 'y'); q.have('e', ('H', 'x', p.T('f y', lambda f_, y_: f_(y_)))); q.rw_at('e', 'h2'); q.exact('e')
             p.have('hadd', p.T('f', lambda f_: F([Z, Z], lambda x, y: Eq(f_(x + y), f_(x) + f_(y)))), sadd)
+            p.have('fe_additive', w.type_of(w['fe_additive']), fe_additive_parts(w)[2])
             p.obtain(['fw', 'bw'], ('fe_additive', 'f'))
             p.obtain(['c', 'hc'], ('fw', 'hadd'))
             p.have('e1', ('h2', zone)); p.have('e2', ('hc', zone)); p.have('e3', ('hc', p.T('f', lambda f_: f_(zone))))
@@ -1169,6 +1132,7 @@ def _(w, b):
             p.have('ha0', p.T('a', lambda a_: zle(zzero, a_)), lambda q: q.linarith())
             p.have('hb0', p.T('b', lambda b_: zle(zzero, b_)), lambda q: q.linarith())
             p.have('hc0', p.T('c', lambda c_: zle(zzero, c_)), lambda q: q.linarith())
+            p.have('schur_nonneg', w.type_of(w['schur_nonneg']), schur_parts(w)[1][2])
             p.linarith(('schur_nonneg', 'a', 'b', 'c', 'ha0', 'hb0', 'hc0'))
 
 

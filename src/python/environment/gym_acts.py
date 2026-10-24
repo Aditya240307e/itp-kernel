@@ -103,7 +103,7 @@ def ref_of(eng, space, code):
         if not 0 <= ident < len(space.ctx): raise ActionError('no hypothesis %r' % (ident,))
         return space.local_head(ident), k.mk_fvar(ident)
     if tag == 'c':
-        if not 0 <= ident < eng.limit: raise ActionError('no global %r' % (ident,))
+        if not eng.sees(ident): raise ActionError('no global %r' % (ident,))
         h = space.table.heads.get(ident)
         if h is None: raise ActionError('the global %r cannot be used in a term' % (ident,))
         return h, k.mk_const(ident)
@@ -332,7 +332,7 @@ def injectivity_lemmas(eng, ty):
     if sides is None: return []
     a, b = head_const(eng, sides[1]), head_const(eng, sides[2])
     if a is None or a != b: return []
-    return [gid for gid in eng.inj_index.get(a[0], ()) if gid < eng.limit]
+    return [gid for gid in eng.inj_index.get(a[0], ()) if eng.sees(gid)]
 
 
 def inject_facts(eng, space, h):
@@ -536,7 +536,7 @@ def _induct_actions(eng, space, g):
         if not ok or sort == space.prop: continue                                                      # a variable of a data type
         if not any(mentions(eng, t, x) for t in [g.target] + list(g.hyp_types[x + 1:])): continue
         for gid in sorted(eng.principles):
-            if gid >= eng.limit: continue
+            if not eng.sees(gid): continue
             pr = eng.principles[gid]
             binding = {}
             if not match_any(k, pr.T, g.hyp_types[x], binding, conv) or any(HOLE + j not in binding for j in pr.auto): continue
@@ -586,7 +586,7 @@ def _forward_actions(eng, space, g):
     for h in range(g.n_hyps): sources.append((('v', h, 0), space.local_head(h)))
     for name in eng.inst_lemmas:
         gid = w.gid.get(name)
-        if gid is not None and gid < eng.limit and gid in space.table.heads: sources.append((('c', gid, 0), space.table.heads[gid]))
+        if gid is not None and eng.sees(gid) and gid in space.table.heads: sources.append((('c', gid, 0), space.table.heads[gid]))
     for tok, head in sources:
         if len(out) >= MAX_FORWARD: break
         n = head.arity
@@ -628,7 +628,7 @@ def _forward_actions(eng, space, g):
 
 
 def _rewrite_at_actions(eng, space, g):
-    out = []; k = eng.k; limit = eng.limit; shim = G._MatchShim(k)
+    out = []; k = eng.k; shim = G._MatchShim(k)
     for x in range(g.n_hyps):
         ok, sort = k.infer_open(g.hyp_types[x], g.hyp_types[:x])
         if not ok or sort != space.prop: continue
@@ -638,7 +638,7 @@ def _rewrite_at_actions(eng, space, g):
         t_consts = G.atoms_of(k, g.hyp_types[x])[0]
         for head in sorted(t_consts):
             for gid, rev, pat in eng._rw_index.get(head, ()):
-                if gid >= limit or not occurs(head, pat): continue
+                if not eng.sees(gid) or not occurs(head, pat): continue
                 if len(out) >= MAX_REWRITE_AT: return out
                 out.append(Action(Kind.REWRITE_AT, 1 if rev else 0, (), ((('c', gid, 0),),), (x,)))
         for h in range(g.n_hyps):

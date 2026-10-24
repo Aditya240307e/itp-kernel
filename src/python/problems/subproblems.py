@@ -102,7 +102,7 @@ def build_records(bk, eng, data, progress=None):
     """(annotations document, subproblems document) for the problems of `data` (bank.json); every sub-theorem verified"""
     say = progress or (lambda *a: None)
     names = data['globals']; probs = {r['name']: r for r in data['problems']}
-    order = [r['name'] for s in SPLIT_ORDER for r in data['problems'] if r['split'] == s]
+    order = [r['name'] for s in SPLIT_ORDER for r in data['problems'] if r['split'] == s and 'demonstration' in r]          # (a statement-only problem has no proof to take sub-theorems from)
     ann = {}; examples = []; seen = {}; total = collections.Counter(); per_split = collections.Counter()
     for i, name in enumerate(order):
         rec = probs[name]; ep = replay_tree(bk, eng, name, rec['demonstration']['steps'])
@@ -112,7 +112,7 @@ def build_records(bk, eng, data, progress=None):
         kept = collections.Counter(); dup = 0
         for ex in exs:
             r = example_record(rec, ex)
-            key = (r['statement_digest'], r['premises'])
+            key = (r['statement_digest'], json.dumps(r['premises'], sort_keys=True))
             if key in seen:
                 seen[key]['also_in'].append(name); dup += 1; continue
             r['also_in'] = []; seen[key] = r; examples.append(r); kept[ex.kind] += 1; per_split[(rec['split'], ex.kind)] += 1
@@ -126,7 +126,7 @@ def build_records(bk, eng, data, progress=None):
         say('%d/%d %s: %d actions, %d solved + %d derived' % (i + 1, len(order), name, info['actions'], kept['solved'], kept['derived']))
     counts = {'problems': len(order), 'actions': sum(a['actions'] for a in ann.values()), 'solved': total['solved'], 'derived': total['derived'], 'duplicates_in_dataset': total['duplicates_in_dataset'],
               'by_split': {s: {k: per_split[(s, k)] for k in ('solved', 'derived')} for s in SPLIT_ORDER}}
-    bank_order = [r['name'] for r in data['problems']]
+    bank_order = [r['name'] for r in data['problems'] if r['name'] in ann]
     ann_doc = {'format': FORMAT, 'world_digest': data['world_digest'], 'directions': list(T.DIRECTIONS), 'problems': {n: ann[n] for n in bank_order}}
     sub_doc = {'format': FORMAT, 'world_digest': data['world_digest'], 'max_len': MAX_LEN, 'counts': counts, 'examples': examples}
     return ann_doc, sub_doc
@@ -204,6 +204,7 @@ def verify(dataset_dir, progress=None):
         raise RuntimeError('the world built now is not the world of the dataset')
     eng = G.Engine(bk.w, kinds=set(G.Kind), strict=True); fresh = G.Engine(bk.w)
     for rec in data['problems']:
+        if 'demonstration' not in rec: continue
         ep = replay_tree(bk, eng, rec['name'], rec['demonstration']['steps'])
         if action_rows(ep.tree) != ann['problems'][rec['name']]['rows']: raise RuntimeError('the labels of %s are not those of its proof' % rec['name'])
     n = 0

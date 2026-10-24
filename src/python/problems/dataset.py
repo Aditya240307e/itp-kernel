@@ -20,7 +20,7 @@ The files (all JSON, deterministic: two builds of the same sources give the same
 import os as _os, sys as _sys; _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..')); import itp_paths  # noqa: E402,F401
 import os, sys, json, hashlib, collections, time
 import bank as B, bank_all, bank_split, lib_corpus, recorder as REC
-import gym_env as G, gym_acts as A
+import gym_env as G, gym_acts as A, gym_premises as PM
 
 VERSION = bank_split.DATASET_VERSION
 
@@ -39,45 +39,60 @@ def splits_doc(names, lemma_names=()):
             'problems': {s: list(ns) for s, ns in sp.items()}, 'lemmas': {s: [n for n in lemma_names if bank_split.lemma_split(n) == s] for s, _ in bank_split.FRACTIONS}}
 
 
+def source_class(source):
+    """the contest family of a source string: IMO, ISL (shortlist), AIME, AMC, folklore or other"""
+    for pre, cls in (('IMO', 'IMO'), ('ISL', 'ISL'), ('AIME', 'AIME'), ('AMC', 'AMC'), ('folklore', 'folklore')):
+        if source.startswith(pre): return cls
+    return 'other'
+
+
 def card(data, splits, library=None, extra=None):
     """the dataset card (markdown) from the bank's JSON, the splits document and (optionally) the library corpus; deterministic. `extra`: lines to add before the list of files (subproblems.summary_lines)"""
     probs = data['problems']; P = {p['name']: p for p in probs}
     L = []; add = L.append
     add('# Olympiad problem bank -- dataset version %d' % VERSION)
     add('')
-    add('Formal olympiad problems over the integers and naturals, stated in the hybrid kernel, each with a **kernel-checked reference proof written as a sequence of actions** of the gym action language '
-        '(no text interface: the learner sees a goal and chooses actions).  %d problems, %d of them with a second, self-contained proof for the *strict* regime.' % (len(probs), sum(1 for p in probs if 'demonstration_strict' in p)))
+    add('Formal olympiad problems over the integers and naturals, stated in the hybrid kernel (no text interface: the learner sees a goal and chooses actions).  %d problems in two tiers: '
+        '**%d proved** -- each with a **kernel-checked reference proof written as a sequence of actions** of the gym action language (%d of them with a second, self-contained proof for the *strict* regime) -- '
+        'and **%d statement-only** -- the formal statement and its checked meaning, without a proof (a task all the same: whatever an agent proves is checked by the kernel).'
+        % (len(probs), sum(1 for p in probs if p.get('proved', True)), sum(1 for p in probs if 'demonstration_strict' in p), sum(1 for p in probs if not p.get('proved', True))))
     add('')
     lv = collections.Counter(p['level'] for p in probs); kd = collections.Counter(p['kind'] for p in probs); tp = collections.Counter(t for p in probs for t in p['topics'])
-    src = collections.Counter('IMO' if p['source'].startswith('IMO') else 'folklore' if p['source'].startswith('folklore') else 'other' for p in probs)
+    src = collections.Counter(source_class(p['source']) for p in probs)
+    org = collections.Counter(p.get('origin', 'contest') for p in probs); ver = collections.Counter(p.get('verified', 'none') for p in probs)
     add('## Contents')
     add('')
-    add('| level | problems | meaning |'); add('|---|---|---|')
-    for l in sorted(B.LEVELS): add('| %d | %d | %s |' % (l, lv[l], B.LEVELS[l]))
+    add('| level | problems | proved | meaning |'); add('|---|---|---|---|')
+    for l in sorted(B.LEVELS): add('| %d | %d | %d | %s |' % (l, lv[l], sum(1 for p in probs if p['level'] == l and p.get('proved', True)), B.LEVELS[l]))
     add('')
     add('kinds: ' + ', '.join('%s %d' % (k, kd[k]) for k in sorted(kd)) + '.  sources: ' + ', '.join('%s %d' % kv for kv in sorted(src.items())) + '.')
     add('')
+    add('origin: ' + ', '.join('%s %d' % kv for kv in sorted(org.items())) + ' (contest: a problem of a named contest, paraphrased; adapted: a named problem changed to fit the vocabulary; style: written for the bank in the manner of a contest; '
+        'folklore: a classical fact).  Source check: ' + ', '.join('%s %d' % kv for kv in sorted(ver.items())) + ' (answer-checked: the formal statement\'s answer agrees with the contest\'s published answer; recalled: the source is from memory and has not been compared with the official statement).')
+    add('')
     add('topics: ' + ', '.join('%s %d' % kv for kv in sorted(tp.items())) + '.')
     add('')
-    imo = sorted((p['year'] or 0, p['name'], p['source']) for p in probs if p['source'].startswith('IMO'))
-    add('IMO problems (%d): ' % len(imo) + ', '.join('%s (%s)' % (n, s) for _, n, s in imo) + '.')
-    add('')
+    for cls in ('IMO', 'ISL', 'AIME', 'AMC'):
+        lst = sorted((p['year'] or 0, p['name'], p['source']) for p in probs if source_class(p['source']) == cls)
+        if lst: add('%s problems (%d): ' % (cls, len(lst)) + ', '.join('%s (%s)' % (n, s) for _, n, s in lst) + '.'); add('')
     add('## Splits')
     add('')
     add('Splits are by **family** (the two parts of one olympiad problem, a statement in other clothes, an argument with another constant stay together) and are a pure function of the family key '
         '(`bank_split.py`, salt number %d, fractions %s): a later version of the bank never moves an existing problem from one split to another.' % (splits['salt_number'], ', '.join('%s %d%%' % kv for kv in splits['fractions'].items())))
     add('')
-    add('| split | problems | by level | IMO | demonstration steps |'); add('|---|---|---|---|---|')
+    add('| split | problems | proved | by level | IMO/ISL | AIME/AMC | demonstration steps |'); add('|---|---|---|---|---|---|---|')
     for s, ns in splits['problems'].items():
         l2 = collections.Counter(P[n]['level'] for n in ns)
-        add('| %s | %d | %s | %d | %d |' % (s, len(ns), ' '.join('L%d:%d' % (k, l2[k]) for k in sorted(l2)), sum(1 for n in ns if P[n]['source'].startswith('IMO')), sum(P[n]['demonstration']['length'] for n in ns if 'demonstration' in P[n])))
+        add('| %s | %d | %d | %s | %d | %d | %d |' % (s, len(ns), sum(1 for n in ns if P[n].get('proved', True)), ' '.join('L%d:%d' % (k, l2[k]) for k in sorted(l2)), sum(1 for n in ns if source_class(P[n]['source']) in ('IMO', 'ISL')),
+                                                      sum(1 for n in ns if source_class(P[n]['source']) in ('AIME', 'AMC')), sum(P[n]['demonstration']['length'] for n in ns if 'demonstration' in P[n])))
     add('')
     for s, ns in splits['problems'].items(): add('* **%s**: %s' % (s, ', '.join('`%s`' % n for n in ns)))
     add('')
     add('## Regimes')
     add('')
-    add('A problem is attacked in the world in which the library precedes it.  In the **prefix** regime every global before the theorem is a premise (the lemmas written for the problem included); in the '
-        '**strict** regime the lemmas written for the problem are hidden, so the agent must find the ideas.  `premises.prefix` / `premises.strict` of a problem is the number of globals the engine offers.')
+    add('Every problem is attacked with the **same library** (every global below `%s`, the library the synthetic theorems are generated from) and its own block, and with nothing of the other problems: '
+        'the theorems and helper lemmas of other problems are never offered.  In the **prefix** regime the problem\'s own helper lemmas are offered too; in the **strict** regime they are hidden, so the agent must find '
+        'the ideas.  `premises.prefix` / `premises.strict` of a problem say what the engine offers: an integer n (the globals below n) or `{upto, hidden}` (the globals below `upto` except the id ranges in `hidden`).' % B.LIBRARY_LIMIT)
     add('')
     add('## Reference proofs')
     add('')
@@ -117,6 +132,7 @@ def build(out_dir, library=True, hindsight=True, progress=None):
     eng = G.Engine(w2, kinds=set(G.Kind), strict=True)
     demos = {}; strict = {}
     for i, (n, pl) in enumerate(bk.placed.items()):
+        if not pl.proved: continue                                  # a statement-only problem has no reference proof
         demos[n] = bk.demonstrate(n, engine=eng)
         if not demos[n].ok: raise RuntimeError('the reference proof of %s does not replay: %s' % (n, demos[n].gap))
         if pl.problem.strict and pl.premises('strict') != pl.premises('prefix'):
@@ -160,9 +176,12 @@ def verify(out_dir, progress=None):
     for rec in data['problems']:
         pl = bk.placed[rec['name']]
         if B.statement_digest(bk.w, pl.stmt) != rec['statement_digest']: raise RuntimeError('the statement of %s changed' % rec['name'])
+        if pl.proved != rec.get('proved', True): raise RuntimeError('%s: the tier of the problem changed' % rec['name'])
+        for regime in ('prefix', 'strict'):
+            if PM.of(rec['premises'][regime]) != pl.premises(regime): raise RuntimeError('%s: the premises of the %s regime changed' % (rec['name'], regime))
         for key, regime in (('demonstration', 'prefix'), ('demonstration_strict', 'strict')):
             if key in rec:
-                A.replay_portable(eng, pl.stmt, rec[key]['steps'], pl.premises(regime)); n += 1
+                A.replay_portable(eng, pl.stmt, rec[key]['steps'], PM.of(rec['premises'][regime])); n += 1
         say('verified %s' % rec['name'])
     if 'subproblems.json' in man['files']:
         import subproblems as SP
