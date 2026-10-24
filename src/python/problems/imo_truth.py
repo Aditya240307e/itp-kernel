@@ -426,6 +426,245 @@ def _():
     return all(not norwegian(n) for n in range(1, 1344)) and norwegian(1344) and 6 + 672 + 1344 == 2022
 
 
+# ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ classical results
+def _mr(n):
+    """Miller-Rabin with the first twelve primes as bases (deterministic below 3.3e24; above, a composite is never called prime unless it is a strong pseudoprime to all twelve bases)"""
+    if n < 2: return False
+    ps = (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37)
+    for q in ps:
+        if n % q == 0: return n == q
+    d, r = n - 1, 0
+    while d % 2 == 0: d //= 2; r += 1
+    for a in ps:
+        x = pow(a, d, n)
+        if x in (1, n - 1): continue
+        for _ in range(r - 1):
+            x = x * x % n
+            if x == n - 1: break
+        else: return False
+    return True
+
+
+def _sieve(n):
+    s = bytearray([1]) * (n + 1); s[0:2] = b'\x00\x00'
+    for i in range(2, isqrt(n) + 1):
+        if s[i]: s[i * i::i] = bytearray(len(s[i * i::i]))
+    return s
+
+
+@claim('classic_fermat_little', 'primes p < 400, |a| <= 60')
+def _():
+    return all((pow(a, p, p) - a) % p == 0 for p in range(2, 400) if is_prime(p) for a in range(-60, 61))
+
+
+@claim('classic_wilson', 'primes p < 120')
+def _():
+    return all((factorial(p - 1) + 1) % p == 0 for p in range(2, 120) if is_prime(p))
+
+
+@claim('classic_wilson_converse', '2 <= n < 600: n divides (n - 1)! + 1 exactly when n is prime')
+def _():
+    f = 1; ok = True
+    for n in range(2, 600):
+        f = f * (n - 1) % n if False else factorial(n - 1) % n
+        if ((f + 1) % n == 0) != is_prime(n): ok = False
+    return ok
+
+
+@claim('classic_two_squares', 'primes p = 1 mod 4, p < 20000')
+def _():
+    for p in range(5, 20000, 4):
+        if is_prime(p) and not any(sq(p - x * x) for x in range(1, isqrt(p) + 1)): return False
+    return True
+
+
+@claim('classic_four_squares', 'n <= 3000')
+def _():
+    N = 3000
+    two = [False] * (N + 1)
+    for a in range(0, isqrt(N) + 1):
+        for b in range(a, isqrt(N) + 1):
+            if a * a + b * b <= N: two[a * a + b * b] = True
+    sums2 = [i for i in range(N + 1) if two[i]]
+    for n in range(N + 1):
+        if not any(two[n - t] for t in sums2 if t <= n): return False
+    return True
+
+
+@claim('classic_gcd_pow2', 'm, n <= 80')
+def _():
+    return all(gcd(2 ** m - 1, 2 ** n - 1) == 2 ** gcd(m, n) - 1 for m in range(1, 81) for n in range(1, 81))
+
+
+@claim('classic_pythagorean', 'a, b < 1500 (all primitive triples with b even)')
+def _():
+    n_t = 0
+    for a in range(1, 1500):
+        for b in range(2, 1500, 2):
+            c2 = a * a + b * b; c = isqrt(c2)
+            if c * c != c2 or gcd(a, b) != 1: continue
+            n_t += 1
+            m = isqrt((c + a) // 2); n = isqrt((c - a) // 2)
+            if not (0 < n < m and gcd(m, n) == 1 and a == m * m - n * n and b == 2 * m * n and c == m * m + n * n): return False
+    return n_t > 100
+
+
+@claim('classic_2n_not_div', '2 <= n < 300000')
+def _():
+    return all(pow(2, n, n) != 1 for n in range(2, 300000))
+
+
+@claim('classic_xy_yx', 'x, y <= 400')
+def _():
+    return {(x, y) for x in range(1, 401) for y in range(1, 401) if x ** y == y ** x} == {(x, x) for x in range(1, 401)} | {(2, 4), (4, 2)}
+
+
+@claim('classic_pq_qp', 'primes p, q < 60 (Miller-Rabin)')
+def _():
+    ps = [p for p in range(2, 60) if is_prime(p)]
+    return {(p, q) for p in ps for q in ps if _mr(p ** q + q ** p)} == {(2, 3), (3, 2)}
+
+
+@claim('classic_fact_composite', '5 <= n < 3000 composite')
+def _():
+    return all(factorial(n - 1) % n == 0 for n in range(5, 3000) if not is_prime(n))
+
+
+@claim('classic_bertrand', 'n < 200000')
+def _():
+    N = 400001; s = _sieve(N)
+    nxt = [0] * (N + 2); last = 0
+    for i in range(N, -1, -1):
+        if s[i]: last = i
+        nxt[i] = last
+    return all(0 < nxt[n + 1] <= 2 * n for n in range(1, 200000))
+
+
+@claim('classic_primes_3mod4', 'for every n < 100000 a prime 3 mod 4 in (n, 2n + 10]')
+def _():
+    N = 200100; s = _sieve(N)
+    nxt = [0] * (N + 2); last = 0
+    for i in range(N, -1, -1):
+        if s[i] and i % 4 == 3: last = i
+        nxt[i] = last
+    return all(0 < nxt[n + 1] <= 2 * n + 10 for n in range(0, 100000))
+
+
+@claim('classic_pyth_60', 'a, b < 800 with a^2 + b^2 a square')
+def _():
+    n_t = 0
+    for a in range(0, 800):
+        for b in range(0, 800):
+            c2 = a * a + b * b; c = isqrt(c2)
+            if c * c == c2:
+                n_t += 1
+                if (a * b * c) % 60: return False
+    return n_t > 200
+
+
+@claim('classic_consecutive_product', 'm <= 80, n <= 40')
+def _():
+    return all(math.prod(m + i for i in range(n)) % factorial(n) == 0 for m in range(0, 81) for n in range(0, 41))
+
+
+@claim('classic_fermat_coprime', 'F_0 .. F_10 pairwise')
+def _():
+    F = [2 ** (2 ** k) + 1 for k in range(11)]
+    return all(gcd(F[i], F[j]) == 1 for i in range(11) for j in range(i))
+
+
+@claim('classic_3x_2y', 'x <= 150, y <= 250')
+def _():
+    return {(x, y) for x in range(1, 151) for y in range(1, 251) if 3 ** x - 2 ** y == 1} == {(1, 1), (2, 3)}
+
+
+@claim('classic_2x1_3y', 'x <= 250, y <= 150')
+def _():
+    return {(x, y) for x in range(1, 251) for y in range(1, 151) if 2 ** x + 1 == 3 ** y} == {(1, 1), (3, 2)}
+
+
+@claim('classic_2x_3y_square', 'x <= 120, y <= 80')
+def _():
+    return {(x, y, isqrt(2 ** x + 3 ** y)) for x in range(0, 121) for y in range(0, 81) if sq(2 ** x + 3 ** y)} == {(0, 1, 2), (3, 0, 3), (4, 2, 5)}
+
+
+@claim('classic_fact_product_sum', 'a, b <= 14, c <= 25')
+def _():
+    return {(a, b, c) for a in range(1, 15) for b in range(1, 15) for c in range(1, 26) if factorial(a) * factorial(b) == factorial(a) + factorial(b) + factorial(c)} == {(3, 3, 4)}
+
+
+@claim('classic_fact_sum_fact', 'a, b <= 14, c <= 25')
+def _():
+    return {(a, b, c) for a in range(1, 15) for b in range(1, 15) for c in range(1, 26) if factorial(a) + factorial(b) == factorial(c)} == {(1, 1, 2)}
+
+
+@claim('classic_x2_y3_1', 'y < 2000000')
+def _():
+    return [(isqrt(y ** 3 + 1), y) for y in range(1, 2000000) if sq(y ** 3 + 1)] == [(3, 2)]
+
+
+@claim('classic_y2_x3_2', 'x < 2000000')
+def _():
+    return [(x, isqrt(x ** 3 - 2)) for x in range(2, 2000000) if sq(x ** 3 - 2)] == [(3, 5)]
+
+
+@claim('classic_2p1_cube', 'n < 20000: p = (n^3 - 1)/2 prime')
+def _():
+    return [n for n in range(3, 20000, 2) if _mr((n ** 3 - 1) // 2)] == [3]
+
+
+@claim('classic_fe_n2_1', '|n| <= 14: the recurrences from m = 1 and m = -1, f(1) = t, |t| <= 80', 'search')
+def _():
+    K = 14; sols = []
+    for t in range(-80, 81):
+        f = {0: 1, -1: 2, 1: t}
+        for k in range(1, K): f[k + 1] = t * f[k] + 2 - f[k - 1]
+        for n in range(0, K): f[-n - 1] = 2 * f[n] + 2 - f[n - 1]
+        if all(f[m + n] + f[m * n - 1] == f[m] * f[n] + 2 for m in range(-K, K + 1) for n in range(-K, K + 1) if abs(m + n) <= K and abs(m * n - 1) <= K):
+            sols.append((t, tuple(f[k] for k in range(-K, K + 1))))
+    return len(sols) == 1 and sols[0][1] == tuple(k * k + 1 for k in range(-K, K + 1))
+
+
+@claim('classic_fe_sum_prod', '|n| <= 14: the recurrence f(y + 1) = (f(1) - 1) f(y) + 1, |f(1)| <= 80', 'search')
+def _():
+    K = 14; sols = []
+    for t in range(-80, 81):
+        f = {0: 1, 1: t}
+        for y in range(1, K): f[y + 1] = (t - 1) * f[y] + 1
+        if t != 1:
+            ok = True
+            for y in range(-1, -K - 1, -1):
+                num = f[y + 1] - 1
+                if num % (t - 1): ok = False; break
+                f[y] = num // (t - 1)
+            if not ok: continue
+        else:
+            for y in range(-K, 0): f[y] = 1
+        if all(f[x + y] + f[x * y] == f[x] * f[y] + 1 for x in range(-K, K + 1) for y in range(-K, K + 1) if abs(x + y) <= K and abs(x * y) <= K):
+            sols.append(tuple(f[k] for k in range(-K, K + 1)))
+    want = {tuple(1 for k in range(-K, K + 1)), tuple(k + 1 for k in range(-K, K + 1)), tuple(1 if k % 2 == 0 else 0 for k in range(-K, K + 1))}
+    return set(sols) == want and len(sols) == 3
+
+
+@claim('classic_fe_sum_squares', 'f(k) = k for k <= 14 and every sum of two squares <= 400 is forced by f(0) = 0, f(1) = 1', 'reduction')
+def _():
+    K = 400; f = {0: 0, 1: 1}; changed = True
+    while changed:
+        changed = False
+        for m in range(0, 21):
+            for n in range(m, 21):
+                N = m * m + n * n
+                if N > K: continue
+                if m in f and n in f and N not in f: f[N] = f[m] ** 2 + f[n] ** 2; changed = True
+                elif N in f and n in f and m not in f:
+                    d = f[N] - f[n] ** 2
+                    if d >= 0 and sq(d): f[m] = isqrt(d); changed = True
+                elif N in f and m in f and n not in f:
+                    d = f[N] - f[m] ** 2
+                    if d >= 0 and sq(d): f[n] = isqrt(d); changed = True
+    return all(f[k] == k for k in f) and all(k in f for k in range(0, 15))
+
+
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ driver
 def run(names=None, out=print):
     names = list(names) if names else list(CLAIMS)
