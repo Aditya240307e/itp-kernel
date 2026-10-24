@@ -503,7 +503,7 @@ class Spec:
 
 
 class Report:
-    def __init__(self): self.errors = []; self.points = 0; self.nonvacuous = 0; self.mutants = 0; self.caught = 0; self.survivors = []; self.shape_caught = 0; self.equivalent = 0; self.unevaluable = 0
+    def __init__(self): self.errors = []; self.points = 0; self.nonvacuous = 0; self.mutants = 0; self.caught = 0; self.survivors = []; self.shape_caught = 0; self.equivalent = 0; self.unevaluable = 0; self.counterexamples = []; self.n_counter = 0
     @property
     def ok(self): return not self.errors
     def __repr__(self): return 'Report(ok=%s points=%d nonvacuous=%d mutants=%d caught=%d equivalent=%d survivors=%d errors=%s)' % (
@@ -734,6 +734,9 @@ def check_spec(sem, ast, spec, mutate=True, seed=1, strict=True):
         hy = [tabs['hyp%d' % i] for i in range(len(hyps))]
         rep.nonvacuous = sum(1 for j in range(len(pts)) if all(h[j] for h in hy))
         if rep.nonvacuous == 0: rep.errors.append('no point satisfies the hypotheses: the problem is vacuous on this box')
+        if concl[0] == 'iff': bad_pts = [j for j in range(len(pts)) if all(h[j] for h in hy) and tabs['lhs'][j] != tabs['rhs'][j]]
+        else: bad_pts = [j for j in range(len(pts)) if all(h[j] for h in hy) and not tabs['concl'][j]]
+        rep.counterexamples = [pts[j] for j in bad_pts[:5]]; rep.n_counter = len(bad_pts)          # the statement is FALSE at these points of the box (for a statement without a proof: an error, see bank.check)
         if concl[0] == 'iff':
             for side in ('lhs', 'rhs'):
                 if not any(tabs[side]): rep.errors.append('the %s of the equivalence is never true on the box: add test points / functions' % side)

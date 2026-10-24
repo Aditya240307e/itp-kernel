@@ -249,6 +249,7 @@ class LoadedBank:
         if semantics and pl.problem.spec is not None:
             rep.semantics = self.check_semantics(name)
             if not rep.semantics.ok: rep.errors.extend('semantics: ' + e for e in rep.semantics.errors)
+            elif not pl.proved and rep.semantics.n_counter: rep.errors.append('the statement has no proof and is FALSE at %d points of the box, e.g. %s' % (rep.semantics.n_counter, SEM._showpt(rep.semantics.counterexamples[0])))
         if code:
             rep.code = self.statement_code(name)
             if rep.code is None: rep.errors.append('the statement is not sayable in the typed term builder')

@@ -31,6 +31,12 @@ def theorem(w, name, kinds, hyps, concl):
     return thm(w, name, list(kinds) + [(lambda *a, h=h: h(*a[:n])) for h in hyps], lambda *a: concl(*a[:n]))
 
 
+def statement(w, kinds, hyps, concl):
+    """the proposition  forall (v1 : k1) .. (vn : kn), H1 -> .. -> Hm -> C  of a STATEMENT-ONLY problem (`Bank.statement`): the same arguments as `theorem`, without a proof"""
+    n = len(kinds)
+    return w.forall_(list(kinds) + [(lambda *a, h=h: h(*a[:n])) for h in hyps], lambda *a: concl(*a[:n]))
+
+
 def rw_ring(p, h):
     """rewrite the goal with the equation `h` and close it by `ring` (when the rewriting leaves an equation of numerals; unless the rewriting has closed it by computation already)"""
     n0 = p.n_goals; p.rw(h)
