@@ -14,7 +14,7 @@ formal statement has them (`Z.lt x y` for `x < y`: a statement that says `x > y`
 """
 import os as _os, sys as _sys; _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..')); import itp_paths  # noqa: E402,F401
 import math
-from semantic import Spec
+from semantic import Spec, _is_prime
 
 R = range(-8, 9)
 
@@ -31,12 +31,8 @@ def dvd_(a, b): return b == 0 if a == 0 else b % a == 0
 
 
 def is_prime_(n):
-    if n < 2: return False
-    d = 2
-    while d * d <= n:
-        if n % d == 0: return False
-        d += 1
-    return True
+    """primality of an integer (exact; the Miller-Rabin test of semantic.py, so that powers are no problem)"""
+    return _is_prime(n)
 
 
 class Rel:

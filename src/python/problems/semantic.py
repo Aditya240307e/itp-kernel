@@ -42,12 +42,29 @@ def _prod(f, n):
 def _fact(n):
     if n < 0 or n > 200: raise Unsupported('a factorial out of range')
     return math.factorial(n)
+_MR_BASES = (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41)
+_MR_LIMIT = 3317044064679887385961981                # Miller-Rabin with the first 13 primes as bases is exact below this (Sorenson-Webster)
 def _is_prime(p):
+    """exact: trial division by the small primes, then the deterministic Miller-Rabin test below 3.3e24 (above: trial division, slow)"""
     if p < 2: return False
-    i = 2
+    for q in _MR_BASES:
+        if p % q == 0: return p == q
+    if p < 43 * 43: return True
+    if p < _MR_LIMIT:
+        d = p - 1; s = 0
+        while d % 2 == 0: d //= 2; s += 1
+        for a in _MR_BASES:
+            x = pow(a, d, p)
+            if x == 1 or x == p - 1: continue
+            for _ in range(s - 1):
+                x = x * x % p
+                if x == p - 1: break
+            else: return False
+        return True
+    i = 43
     while i * i <= p:
         if p % i == 0: return False
-        i += 1
+        i += 2
     return True
 
 # (arity, function): values are Python ints (Z and N alike) or callables
