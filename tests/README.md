@@ -4,7 +4,7 @@ A **gate** is a script that exits 0 and prints no `GATE: FAIL` iff the property 
 runs them, `mutants/mutate.py` runs the kernel ones against every mutant of the code. Gates are scripts, not pytest tests: each is a self-contained program with its own fixtures, run from its own directory.
 
 ```
-python3 tests/run_gates.py                        the 46 kernel gates, two at a time (about 10 minutes on two cores)
+python3 tests/run_gates.py                        the 47 kernel gates, two at a time (about 13 minutes on two cores)
 python3 tests/run_gates.py -j 1                   serially (use this when timing matters)
 python3 tests/run_gates.py --ml                   + the learner's gate S44 (needs torch and gymnasium)
 python3 tests/run_gates.py --repo                 + the repository gates S45 (layout) and S46 (examples)
@@ -90,6 +90,7 @@ Times are seconds on the 2-core box with two gates at a time (the last full run,
 |---|---|---|
 | `s40_actions_tests.py` | 70 s | The second action language: the typed term builder (gym_build.py), the actions that say their arguments (gym_acts.py), their portable form, and the recorder (recorder.py) that turns authored proofs into action sequences. |
 | `s42_pins_tests.py` | 4 s | Pins: small direct tests of the corner cases of the typed term builder (gym_build.py) and of the action language (gym_acts.py) that the larger gates (S36, S38, S40) only cross. |
+| `s47_hindsight_tests.py` | 127 s | Hindsight: the proof tree of an episode (gym_tree.py) and the theorems it proved -- exact, replayed in a fresh engine, kernel-checked and judged by the independent checker; tamper tests; the restricted second opinion (recheck.py). |
 | `s36_gym_tests.py` | 27 s | The learner's environment on the hybrid kernel (gym_env.py, gym_search.py), the `clear` tactic and the observation of goals. |
 | `s38_terms_tests.py` | 16 s | The actions that carry terms (INSTANTIATE, USE), the term pool they draw from, probes with a chosen work budget, goal identity up to irrelevant order, and the search on cost. |
 
@@ -110,7 +111,7 @@ Times are seconds on the 2-core box with two gates at a time (the last full run,
 
 | gate | time | what it protects |
 |---|---|---|
-| `s44_ml_tests.py` | 68 s | The learner's machinery -- features, the policy network, the search it guides, the Gymnasium environment and the policy-gradient bookkeeping. |
+| `s44_ml_tests.py` | 105 s | The learner's machinery -- features, the policy network, the search it guides, the Gymnasium environment (budget, goal-conditioned reset, achieved goals) and the policy-gradient bookkeeping. |
 
 ### The repository (`tests/repo`; `run_gates.py --repo`)
 

@@ -1,7 +1,7 @@
 """dataset.py -- the dataset: the problem bank with its reference proofs, the splits, the library corpus and the card that says what is in them.
 
-    python3 dataset.py OUT_DIR                 build everything into OUT_DIR (a few minutes): bank.json, splits.json, library.json, DATASET_CARD.md, manifest.json
-    python3 dataset.py --verify OUT_DIR        read the files back and replay every demonstration in a fresh engine over a freshly built world
+    python3 dataset.py OUT_DIR                 build everything into OUT_DIR (several minutes): bank.json, splits.json, library.json, annotations.json, subproblems.json, DATASET_CARD.md, manifest.json
+    python3 dataset.py --verify OUT_DIR        read the files back and replay every demonstration and every sub-theorem in a fresh engine over a freshly built world
 
     import dataset
     info = dataset.build(out_dir)              # the files; info: counts and digests
@@ -14,6 +14,7 @@ The files (all JSON, deterministic: two builds of the same sources give the same
                    portable format of gym_acts, for the prefix regime and (when the proof is self-contained) the strict regime
     splits.json    the policy (family key, salt, fractions) and the splits of the problems and of the library lemmas
     library.json   the proofs of the lemmas of the base library as sequences of actions (lib_corpus.py)
+    annotations.json, subproblems.json   the labels of every action of the reference proofs, and the theorems the reference proofs contain, each with its proof (subproblems.py)
     manifest.json  digests of the files
 """
 import os as _os, sys as _sys; _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..')); import itp_paths  # noqa: E402,F401
@@ -38,8 +39,8 @@ def splits_doc(names, lemma_names=()):
             'problems': {s: list(ns) for s, ns in sp.items()}, 'lemmas': {s: [n for n in lemma_names if bank_split.lemma_split(n) == s] for s, _ in bank_split.FRACTIONS}}
 
 
-def card(data, splits, library=None):
-    """the dataset card (markdown) from the bank's JSON, the splits document and (optionally) the library corpus; deterministic"""
+def card(data, splits, library=None, extra=None):
+    """the dataset card (markdown) from the bank's JSON, the splits document and (optionally) the library corpus; deterministic. `extra`: lines to add before the list of files (subproblems.summary_lines)"""
     probs = data['problems']; P = {p['name']: p for p in probs}
     L = []; add = L.append
     add('# Olympiad problem bank -- dataset version %d' % VERSION)
@@ -100,14 +101,16 @@ def card(data, splits, library=None):
         add('`library.json`: the proofs of the %d lemmas of the base library (%d actions) as action sequences, split by lemma name (%s).  %d lemma(s) have the statement of a bank problem and are marked `bank_duplicate`.' % (
             len(library['lemmas']), sum(l['length'] for l in library['lemmas']), ', '.join('%s %d' % (k, ls[k]) for k in ('train', 'dev', 'test')), sum(1 for l in library['lemmas'] if l['bank_duplicate'])))
         add('')
+    if extra:
+        for line in extra: add(line)
     add('## Files')
     add('')
-    add('`bank.json` (problems and demonstrations), `splits.json`, `library.json`, `manifest.json` (digests).  World digest of the bank: `%s`.' % data['world_digest'])
+    add('`bank.json` (problems and demonstrations), `splits.json`, `library.json`, %s`manifest.json` (digests).  World digest of the bank: `%s`.' % ('`annotations.json`, `subproblems.json`, ' if extra else '', data['world_digest']))
     add('')
     return '\n'.join(L)
 
 
-def build(out_dir, library=True, progress=None):
+def build(out_dir, library=True, hindsight=True, progress=None):
     t0 = time.time(); say = progress or (lambda *a: None)
     os.makedirs(out_dir, exist_ok=True)
     bk = bank_all.load(); w2, recs = bk.recordings()
@@ -132,8 +135,13 @@ def build(out_dir, library=True, progress=None):
         lib_corpus.write(lib, os.path.join(out_dir, 'library.json'))
     sp = splits_doc([r['name'] for r in data['problems']], [l['name'] for l in lib['lemmas']] if lib else ())
     with open(os.path.join(out_dir, 'splits.json'), 'w') as f: json.dump(sp, f, indent=1)
-    with open(os.path.join(out_dir, 'DATASET_CARD.md'), 'w') as f: f.write(card(data, sp, lib))
-    man = {'dataset_version': VERSION, 'files': {fn: file_digest(os.path.join(out_dir, fn)) for fn in ('bank.json', 'splits.json', 'DATASET_CARD.md') + (('library.json',) if lib else ())}}
+    sub = None
+    if hindsight:                                                  # the labels of every action and the theorems the reference proofs contain (subproblems.py)
+        import subproblems as SP
+        ann, sub = SP.build_records(bk, G.Engine(bk.w, kinds=set(G.Kind), strict=True), data, progress=say)
+        SP.dump(os.path.join(out_dir, 'annotations.json'), ann, 'problems'); SP.dump(os.path.join(out_dir, 'subproblems.json'), sub, 'examples')
+    with open(os.path.join(out_dir, 'DATASET_CARD.md'), 'w') as f: f.write(card(data, sp, lib, extra=SP.summary_lines(sub) if sub else None))
+    man = {'dataset_version': VERSION, 'files': {fn: file_digest(os.path.join(out_dir, fn)) for fn in ('bank.json', 'splits.json', 'DATASET_CARD.md') + (('library.json',) if lib else ()) + (('annotations.json', 'subproblems.json') if sub else ())}}
     with open(os.path.join(out_dir, 'manifest.json'), 'w') as f: json.dump(man, f, indent=1)
     return {'problems': len(data['problems']), 'demonstrations': len(demos), 'strict_demonstrations': len(strict), 'actions': sum(len(r.portable) for r in demos.values()),
             'lemmas': len(lib['lemmas']) if lib else 0, 'seconds': round(time.time() - t0, 1), 'manifest': man}
@@ -156,6 +164,9 @@ def verify(out_dir, progress=None):
             if key in rec:
                 A.replay_portable(eng, pl.stmt, rec[key]['steps'], pl.premises(regime)); n += 1
         say('verified %s' % rec['name'])
+    if 'subproblems.json' in man['files']:
+        import subproblems as SP
+        n += SP.verify(out_dir, progress=say)
     return n
 
 

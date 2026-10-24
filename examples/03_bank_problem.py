@@ -1,6 +1,6 @@
 """03 -- a problem of the bank: what it says, whether the formalisation says that, and its recorded proof.
 
-    python3 examples/03_bank_problem.py [problem_name]        (about a minute: the bank's world of ~580 globals is built from scripts; default problem: imo1959_p1)
+    python3 examples/03_bank_problem.py [problem_name]        (about 40 s: the bank's world of ~580 globals is built from scripts; default problem: imo1959_p1)
 
 The bank (src/python/problems/) holds formal olympiad problems.  Each one is a theorem statement in a library world, together with
 
@@ -57,7 +57,7 @@ print('premises: %d globals in the prefix regime (the library before the problem
       % (placed.premises('prefix'), placed.premises('strict')))
 
 # ---------------------------------------------------------------------------------------------------------------------------------------- the second opinion
-ok, message = recheck.SecondOpinion(bank.k).accepts(proof, placed.stmt)
+ok, message = recheck.SecondOpinion(bank.k, needed_by=[proof, placed.stmt]).accepts(proof, placed.stmt)        # (an environment of only the globals that the proof needs: seconds, not the minute that the bank's whole world costs)
 print('independent checker on the same term:', 'accepts' if ok else 'REJECTS (%s)' % message)
 assert ok
 print('EXAMPLE OK')

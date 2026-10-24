@@ -14,6 +14,8 @@ differently when it samples and when it learns, or whose environment hands out a
      proof solves the problem in each of the six cases; a library lemma can be played like a problem.
   E. THE RL LOOP.  The log-probabilities recorded while a rollout samples are the ones the batched network gives to the same decisions (so a policy-gradient step differentiates what was sampled from); a
      greedy rollout is deterministic.
+  F. GOALS, BUDGET, HINDSIGHT.  The environment starts on ANY closed statement given as data (`reset(options={'goal': ...})`: the dict of a hindsight example is one) and the episode is solved by the example's
+     own proof; the step budget is observed and enforced; a tracked episode reports what each action achieved and returns the theorems it proved, finished or not, kernel-checked; bad data is refused.
 
     python3 s44_ml_tests.py          (S44_ONLY=A,C to select sections; S44_TRACE=1 for timings)
 """
@@ -407,7 +409,128 @@ def sec_E(c):
     expect(float(np.abs(draws - pr).max()) < 0.04, 'E3 the policy\'s probabilities are a distribution one can sample (max deviation %.3f)' % float(np.abs(draws - pr).max()))
 
 
-SECTIONS = [('A', sec_A), ('B', sec_B), ('C', sec_C), ('D', sec_D), ('E', sec_E)]
+# ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ F. goals, budget, hindsight
+def decide(env, info, steps):
+    """answer the engine's questions with the decisions that say the portable `steps`, one action after the other. Returns (total reward, decisions, last observation, last info, terminated, truncated)"""
+    eng = env.eng; total = 0.0; nd = 0; term = trunc = False; obs = None
+    for st in steps:
+        if env.choice is None: break
+        g = env.ep.goal(); m = env.ep.menu()
+        a = ACTS.from_portable(eng, m if st['kind'] in ACTS.MENU_KINDS else ACTS.NO_MENU, st)
+        for ch, i in P.decompose(eng, g, m, a):
+            obs, r, term, trunc, info = env.step(i); total += r; nd += 1
+    return total, nd, obs, info, term, trunc
+
+
+def sec_F(c):
+    import json
+    import gym_tree as GTR
+    fx = c['fx']; ctx = fx.ctx; eng = fx.eng; bk = fx.bk; w = fx.w
+    data = {p['name']: p for p in json.load(open(os.path.join(__import__('itp_paths').ROOT, 'data', 'dataset_v1', 'bank.json')))['problems']}
+    mk = lambda **kw: BE.BankEnv(bk, names=['imo1959_p1', 'sum_squares_zero'], ctx=ctx, engine=eng, max_actions=60, max_decisions=900, **kw)
+    steps4 = data['imo1959_p1']['demonstration']['steps']; steps13 = data['sum_squares_zero']['demonstration']['steps']
+    expect(len(steps4) == 4 and len(steps13) == 13, 'F0 (the two proofs the section plays: %d and %d actions)' % (len(steps4), len(steps13)))
+    # ---- F1. the budget is observed and counts the actions
+    env = mk()
+    obs, info = env.reset(options={'problem': 'imo1959_p1'})
+    expect(env.observation_space.contains(obs) and int(obs['budget']) == 60 == info['remaining'], 'F1 the default budget is max_actions, and it is in the observation (%s)' % (obs['budget'],))
+    obs, info = env.reset(options={'problem': 'imo1959_p1', 'budget': 5})
+    expect(env.observation_space.contains(obs) and int(obs['budget']) == 5 == info['remaining'] == env.budget, 'F1 an episode can have a budget of its own')
+    total, nd, obs, info, term, trunc = decide(env, info, steps4[:2])
+    expect(info['actions'] == 2 and info['remaining'] == 3 and int(obs['budget']) == 3 and not term and not trunc, 'F1 two actions taken: three left (%s)' % ({k: info[k] for k in ('actions', 'refused', 'remaining')},))
+    total, nd, obs, info, term, trunc = decide(env, info, steps4[2:])
+    expect(term and env.solved and info['remaining'] == 1 and total == 1.0, 'F1 the proof of four actions ends the episode with the reward and one action of the budget left (%s)' % (info['remaining'],))
+    # ---- F2. the budget is enforced
+    obs, info = env.reset(options={'problem': 'imo1959_p1', 'budget': 2})
+    total, nd, obs, info, term, trunc = decide(env, info, steps4)
+    expect(trunc and not term and not env.solved and info['remaining'] == 0 and info['actions'] == 2 and int(obs['budget']) == 0, 'F2 a budget of 2 truncates the episode after two actions (%s)' % ({k: info[k] for k in ('actions', 'refused', 'remaining')},))
+    raises('F2 a truncated episode takes no more steps', lambda: env.step(0), RuntimeError)
+    # refused actions count too: always answering with option 0 either proves something or is refused, and the budget is spent
+    env0 = BE.BankEnv(bk, names=['coprime_consecutive'], ctx=ctx, engine=eng, max_actions=60, max_decisions=400)
+    obs, info = env0.reset(options={'problem': 'coprime_consecutive', 'budget': 3}); end = None
+    for _ in range(400):
+        if info.get('choice') is None: break
+        obs, r, term, trunc, info = env0.step(0)
+        if term or trunc: break
+    expect(info['actions'] + info['refused'] <= 3 and info['remaining'] == max(0, 3 - info['actions'] - info['refused']) and (env0.solved or info['remaining'] == 0 or info['decisions'] >= 400), 'F2 the budget counts the actions taken and refused (%s)' % ({k: info[k] for k in ('actions', 'refused', 'remaining')},))
+    # ---- F3. bad budgets
+    for b in (0, -1, 2.5, True, '3', [1]):
+        raises('F3 a budget of %r is refused' % (b,), lambda b=b: env.reset(options={'problem': 'imo1959_p1', 'budget': b}), ValueError)
+    obs, info = env.reset(options={'problem': 'imo1959_p1', 'budget': np.int64(7)}); expect(info['remaining'] == 7, 'F3 a numpy integer is a budget')
+    # ---- F4. without tracking
+    env = mk()
+    obs, info = env.reset(options={'problem': 'imo1959_p1'})
+    expect('achieved' not in info and env.ep.tree is None, 'F4 an environment made without track has no `achieved` and no tree')
+    raises('F4 ... and no hindsight', lambda: env.hindsight(), RuntimeError)
+    decide(env, info, steps4)
+    rec = env.episode_record()
+    expect(json.loads(json.dumps(rec)) == rec and rec['solved'] and rec['actions'] == 4 and 'steps' not in rec and rec['problem'] == 'imo1959_p1', 'F4 the episode record is plain data (%s)' % (sorted(rec),))
+    raises('F4 hindsight before any episode', lambda: mk(track=True).hindsight(), RuntimeError)
+    # ---- F5. tracked: what each action achieved
+    env = mk(track=True)
+    obs, info = env.reset(options={'problem': 'sum_squares_zero'})
+    expect(info['achieved'] == [], 'F5 nothing is achieved before the first action')
+    solved = []; derived = []; per_step = []
+    for st in steps13:
+        total, nd, obs, info, term, trunc = decide(env, info, [st])
+        per_step.append(info['achieved'])
+        for a in info['achieved']:
+            (solved if a['kind'] == 'solved' else derived).append(a)
+    expect(len(solved) == 13 and len(derived) == 6 and {a['node'] for a in solved} == set(range(13)), 'F5 over the proof: every node is solved once (%d), six facts are derived (%d)' % (len(solved), len(derived)))
+    expect(all(set(a) == {'kind', 'node', 'step', 'depth', 'length'} for a in solved + derived), 'F5 an achievement has kind, node, step, depth, length')
+    last = per_step[-1]
+    expect(last and last[-1]['node'] == 0 and last[-1]['depth'] == 0 and last[-1]['length'] == 13 and last[-1]['step'] == 0, 'F5 the last action completes the root: the whole proof, 13 actions (%s)' % (last[-1:],))
+    expect(all(a['length'] == 1 for a in derived), 'F5 a derived fact is one action')
+    expect(term and env.solved, 'F5 (the proof is finished)')
+    # ---- F6. hindsight of an unfinished episode
+    obs, info = env.reset(options={'problem': 'sum_squares_zero'})
+    total, nd, obs, info, term, trunc = decide(env, info, steps13[:7])
+    expect(not term and not env.solved and info['actions'] == 7, 'F6 seven of thirteen actions')
+    part = env.hindsight(); keys_part = {e.key for e in part}
+    expect(len(part) > 0 and all(e.verified and e.proof is not None for e in part), 'F6 an unfinished episode already proved %d theorems, each verified' % len(part))
+    short = env.hindsight(max_len=1)
+    expect(all(e.length <= 1 for e in short) and len(short) <= len(part), 'F6 the keywords of `examples` pass through (max_len=1: %d)' % len(short))
+    rec = env.episode_record()
+    expect(json.loads(json.dumps(rec)) == rec and rec['actions'] == 7 and len(rec['steps']) == 7 and rec['steps'] == steps13[:7] and not rec['solved'], 'F6 the tracked record has the portable steps taken')
+    obs, info = env.reset(options={'problem': 'sum_squares_zero'})
+    total, nd, obs, info, term, trunc = decide(env, info, steps13)
+    full = env.hindsight(); keys_full = {e.key for e in full}
+    expect(term and keys_part <= keys_full and len(full) == 18, 'F6 ... and they are among the %d theorems of the whole proof' % len(full))
+    # ---- F7. goals given as data: every example is solved from its own data
+    n_ok = 0; bad = []
+    for i, ex in enumerate(full):
+        d = json.loads(json.dumps(ex.to_dict()))
+        obs, info = env.reset(options={'goal': d, 'budget': 20})
+        expect_ok = env.observation_space.contains(obs) and info['problem'].startswith('goal:') and int(obs['budget']) == 20
+        total, nd, obs, info, term, trunc = decide(env, info, d['steps'])
+        if not (expect_ok and term and env.solved and total == 1.0 and info['actions'] == len(d['steps'])): bad.append((i, ex.kind, info.get('problem'), total)); continue
+        try: w.check(env.term, env.ep.stmt)
+        except Exception as e: bad.append((i, 'term refused by the kernel', str(e)[:60])); continue
+        n_ok += 1
+    expect(n_ok == len(full) and not bad, 'F7 all %d hindsight examples of sum_squares_zero are solved through the environment from their own data, with a term the kernel accepts (%s)' % (len(full), bad[:3]))
+    d = full[0].to_dict()
+    obs, info = env.reset(options={'goal': d, 'name': 'mine'}); expect(env.name == 'mine' and info['problem'] == 'mine', 'F7 the goal can be given a name')
+    obs, info = env.reset(options={'goal': dict(d, name='theirs')}); expect(info['problem'] == 'theirs', 'F7 ... or brings its own')
+    obs, info = env.reset(seed=3)
+    expect(info['problem'] in ('imo1959_p1', 'sum_squares_zero') and env.ep.tree is not None and len(env.ep.tree.nodes) == 1 and info['actions'] == 0, 'F7 reset without options is back to the bank, with a fresh tree')
+    expect(not env.ep.tree.by_step and info['achieved'] == [], 'F7 ... which has recorded nothing')
+    # a statement of this world, with its premises
+    pl = bk.placed['imo1959_p1']
+    obs, info = env.reset(options={'statement': pl.stmt, 'premises': pl.premises('prefix')})
+    total, nd, obs, info, term, trunc = decide(env, info, steps4)
+    expect(term and env.solved and info['problem'] == 'statement', 'F7 a statement given as a term is played like a problem')
+    # ---- F8. bad data
+    for what, goal in (('not a dict', 5), ('no code', {'statement_code': None, 'premises': 0}), ('no code key', {'premises': 0}), ('an unknown token', {'statement_code': [['zzz']], 'premises': 0}),
+                       ('a code that says no closed statement', {'statement_code': [['n', 1]], 'premises': 0}), ('an empty code', {'statement_code': [], 'premises': 0})):
+        raises('F8 a goal that is %s is refused' % what, lambda goal=goal: env.reset(options={'goal': goal}), ValueError)
+    # the engine closes `forall n, n = n` before the agent can act
+    with w.nota.using(w['Z']):
+        triv = w.forall_([w['Z']], lambda n: w.Eq(n, n))
+    raises('F8 a statement the engine closes at once is refused (nothing to prove)', lambda: env.reset(options={'statement': triv, 'premises': None}), ValueError)
+    obs, info = env.reset(options={'problem': 'imo1959_p1'}); expect(info['problem'] == 'imo1959_p1', 'F8 ... and the environment is still usable after a refused reset')
+
+
+SECTIONS = [('A', sec_A), ('B', sec_B), ('C', sec_C), ('D', sec_D), ('E', sec_E), ('F', sec_F)]
 
 
 def main():

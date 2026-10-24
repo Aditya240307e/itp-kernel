@@ -19,7 +19,7 @@ GATE_CMDS = (['kernel/s2_tests.py', '1500'], ['kernel/s26_memo_tests.py'], ['ker
              ['kernel/s7_param_tests.py', '150', '600'], ['kernel/s8_indep_tests.py', '100'], ['kernel/s9_strong_tests.py'],
              ['kernel/s10_noconf_tests.py'], ['kernel/s11_eqgen_tests.py'], ['kernel/s12_probe_eq_tests.py', '150'],
              ['kernel/s13_prop_tests.py'], ['kernel/s14_prop_world_tests.py', '600'], ['kernel/s15_classical_tests.py', '300'],
-             ['kernel/oracle_gate.py'])
+             ['environment/s47_hindsight_tests.py'], ['kernel/oracle_gate.py'])
 # the gates of the LEARNER's machinery (features, network, search, Gymnasium environment): they need torch and gymnasium, which the kernel and its tactics do not, and a mutant of the kernel is caught by the
 # gates above long before these would matter, so the mutation driver does not run them; `run_gates.py --ml` does
 ML_GATE_CMDS = (['learner/s44_ml_tests.py'],)

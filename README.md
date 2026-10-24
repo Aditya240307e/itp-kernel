@@ -14,10 +14,10 @@ Targets: IMO-level algebra and number theory first (the problem bank is the begi
 | Checkers | the kernel; `indep_checker.py`, a second implementation of the typing rules written separately; both must accept a proof |
 | Libraries | unary and binary naturals, the integers as a quotient of `N x N`, ordered ring laws, number theory (divisibility, Bezout, gcd, primes); built by tactic scripts, no axioms (four classical axioms are an optional layer) |
 | Decision procedures | `ring` (naturals, binary naturals, integers), `linarith`, `nlinarith`, `linear_combination`, `interval_cases` -- each produces a certificate the kernel checks |
-| Problem bank | 82 formal problems (9 IMO), levels 1-5, each with its text, a checked-faithful formal statement, and kernel-checked reference proofs as sequences of actions; dataset v1 in `data/dataset_v1` |
-| Environment | `gym_env` / `gym_acts`: goals as data, menus of legal actions, actions that *say* their term arguments, atomic probes; `learner/bank_env.py` is a Gymnasium environment (`ITPBank-v0`) |
+| Problem bank | 82 formal problems (9 IMO), levels 1-5, each with its text, a checked-faithful formal statement, and kernel-checked reference proofs as sequences of actions; dataset v1 in `data/dataset_v1`, with a label for every action (direction, depth, size of the subtree) and the 1 800-odd theorems that the reference proofs contain, each with its own proof |
+| Environment | `gym_env` / `gym_acts`: goals as data, menus of legal actions, actions that *say* their term arguments, atomic probes; `gym_tree`: the proof tree of an episode and the theorems it proved (hindsight); `learner/bank_env.py` is a Gymnasium environment (`ITPBank-v0`) that starts on any goal given as data, has a step budget and reports what each action achieved |
 | Learner | features, a transformer + GRU policy network over *options*, behaviour cloning, policy-guided IDA\* search, REINFORCE / filtered-BC loops. A baseline, not a result: see `docs/TRAINING.md` |
-| Tests | 46 kernel / tactic / environment / bank gates, the learner's gate S44, the repository gates S45-S46; 1615 mutants of the code to prove the gates bite |
+| Tests | 47 kernel / tactic / environment / bank gates, the learner's gate S44, the repository gates S45-S46; 1615 mutants of the code to prove the gates bite |
 
 ## Quick start
 
@@ -26,7 +26,7 @@ Requirements: a C++23 compiler (g++ 13 or recent clang), Python 3.13 with `pip i
 ```
 make kernel                              # builds build/itp_env_lnl*.so (the kernel) and build/itp_env_ref*.so (the oracle)   [python3 src/python/build_kernel.py]
 python3 examples/01_prove_with_tactics.py
-python3 tests/run_gates.py -j 2          # the 46 kernel gates, about 10 minutes on two cores
+python3 tests/run_gates.py -j 2          # the 47 kernel gates, about 13 minutes on two cores
 ```
 
 Every script finds the repository through its own location (`src/python/itp_paths.py`), so it works from any directory; `ITP_BUILD_DIR` selects another build directory.
@@ -42,6 +42,7 @@ Every script finds the repository through its own location (`src/python/itp_path
 | `05_blind_search.py` | the blind search baseline and what it cannot do |
 | `06_gymnasium_env.py` | the Gymnasium environment: a recorded proof played decision by decision |
 | `07_read_dataset.py` | the dataset on disk: shape, splits, digests |
+| `08_hindsight.py` | an attempt that stops half-way: what each action achieved, the theorems it proved, one of them proved again from its data and judged by the independent checker |
 
 ## Layout
 

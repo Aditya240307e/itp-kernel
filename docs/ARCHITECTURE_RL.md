@@ -1,6 +1,6 @@
 # ARCHITECTURE_RL.md -- from imitation to a manager/worker learner (design note)
 
-Status: **design, not a result**. Nothing in this file has been trained at scale; the numbers quoted are measurements of the dataset and of the first small experiments (TRAINING.md). The note answers one
+Status: **design, not a result** (the environment features E1-E3 and the hindsight extraction of section 3.3 are implemented and gated: `gym_tree.py`, S47, S44 section F; section 5 marks them). Nothing in this file has been trained at scale; the numbers quoted are measurements of the dataset and of the first small experiments (TRAINING.md). The note answers one
 question: *how should the learner be structured so that it can eventually prove olympiad algebra and number theory, given what the kernel, the environment and the data are today?*
 
 ## 0. Summary
@@ -21,7 +21,7 @@ question: *how should the learner be structured so that it can eventually prove 
 
 | | |
 |---|---|
-| Kernel | hybrid kernel (`src/c++/hybrid`), 46 gates + the learner's gate S44 + the repository gates S45-S46; every proof the agent finishes is re-checked by the kernel (and can be re-checked by the independent checker: `recheck.SecondOpinion`) |
+| Kernel | hybrid kernel (`src/c++/hybrid`), 47 gates + the learner's gate S44 + the repository gates S45-S46; every proof the agent finishes is re-checked by the kernel (and can be re-checked by the independent checker: `recheck.SecondOpinion`) |
 | Environment | `gym_env` (menu actions) and `gym_acts` (actions that *say* terms: CLAIM, FORWARD, REFINE, USE, ...); `gym_policy.Assembler` turns an action into a sequence of discrete **decisions**; `bank_env.BankEnv` is a Gymnasium env at the decision level (no text anywhere) |
 | Bank | 82 problems (9 IMO), levels 1-5, splits by family: train 56 / dev 10 / test 16; 8 problems are strict-regime tasks (self-contained reference proofs) |
 | Demonstrations | 1 816 actions in 82 proofs: **mean 22.1, median 11, max 197 actions per proof**; library: 398 lemma proofs, 1 978 actions, mean 5.0, max 56 |
@@ -144,13 +144,13 @@ hindsight data, and by keeping a flat baseline at every stage.
 
 | id | feature | why | sketch | stage |
 |---|---|---|---|---|
-| E1 P0 | **goal-conditioned reset**: start an episode from an arbitrary (context, statement) | worker training on claims, relabelled goals, synthetic goals | `reset(options={'goal': GoalSpec(hyps=[(name, code)], target=code)})`; `tactics.Proof.from_goal` already builds the state | S2 |
-| E2 P0 | **achieved goals in `info`**: statements (typed-builder codes + context id) of hypotheses derived and goals closed at each step | hindsight rules 1-4 | `info['achieved'] = [(kind, code, ctx_id), ...]` | S1 |
-| E3 P0 | **budget** in the observation and in `info` | worker conditioning, options | `obs['budget']`, `info['remaining']`; truncation by the budget | S2 |
+| E1 P0 (done) | **goal-conditioned reset**: start an episode from an arbitrary (context, statement) | worker training on claims, relabelled goals, synthetic goals | `reset(options={'goal': GoalSpec(hyps=[(name, code)], target=code)})`; `tactics.Proof.from_goal` already builds the state | S2 |
+| E2 P0 (done) | **achieved goals in `info`**: statements (typed-builder codes + context id) of hypotheses derived and goals closed at each step | hindsight rules 1-4 | `info['achieved'] = [(kind, code, ctx_id), ...]` | S1 |
+| E3 P0 (done) | **budget** in the observation and in `info` | worker conditioning, options | `obs['budget']`, `info['remaining']`; truncation by the budget | S2 |
 | E4 P0 | **synthetic goal generators** (ring identities, linear-arithmetic implications, divisibility, one-step lemma applications, mutated library lemmas) with the decision procedure's own proof as reference | worker data at scale | `synth.py` producing `(statement, portable proof)` pairs, kernel-checked at generation time | S2 |
 | E5 P1 | **option wrapper**: manager actions = (claim, hand over); the worker runs inside as a callback | manager/worker training and evaluation | `OptionEnv(bank_env, worker=policy, budget=b)` | S3 |
 | E6 P1 | **curriculum sampler**: prioritised by recent success rate in [0.1, 0.9], stratified by level and family | efficient use of 56 train problems | `CurriculumSampler(names, window)` | S1 |
-| E7 P1 | **episode records**: every episode as portable actions + decisions + outcome (JSONL), appendable to the dataset | expert iteration, reproducibility | `dataset.append_proofs` | S1 |
+| E7 P1 (partly: `BankEnv.episode_record()`) | **episode records**: every episode as portable actions + decisions + outcome (JSONL), appendable to the dataset | expert iteration, reproducibility | `dataset.append_proofs` | S1 |
 | E8 P1 | **vector env**: one world per process, shared dataset directory, deterministic seeds | throughput on bigger machines | `make_vector(n)` over `AsyncVectorEnv` | S1 |
 | E9 P2 | **richer observations**: term-DAG structure (tree depth / binder positions as features), history of kinds in this branch, summary of sibling goals | long goals, manager context | extra arrays, behind flags | S2 |
 | E10 P2 | **lookahead features**: per option, the result of its probe (closes / opens n goals / fails) | much better ranking, at probe cost (~40x) | `lookahead=True`, off by default | S2 |
@@ -191,8 +191,8 @@ Existing safeguards to keep: refused actions are free of side effects (atomic pr
 
 ## 9. Next steps that need no large run
 
-1. E1-E3 in `bank_env` with tests in S44 (goal-conditioned reset, `achieved`, budget).
-2. Claim segmentation and direction labels as fields of `bank.json` / `library.json` (analysis only).
+1. ~~E1-E3 in `bank_env` with tests in S44~~ (done: S44 section F, S47).
+2. ~~Claim segmentation and direction labels~~ (done: `annotations.json`, `subproblems.json`; measured yields: 1678 solved + 189 derived sub-theorems from the 82 reference proofs, 91 sub-proofs longer than 30 actions, 50 candidates dropped because the action changed the context (REWRITE_AT), 7 closed by the engine's settling, the bank proofs use 15 of the 21 action kinds).
 3. `synth.py`: generators for ring / linarith / divisibility goals with their kernel-checked proofs.
 4. S0 regularisation sweep on small models (minutes each), early stopping on dev probes-to-solve; evaluate `bc1.pt` guided vs blind on dev at 1 000 probes.
 5. Re-target the value head (closed within b actions) and test it as a pruning signal in `PolicySearcher`.

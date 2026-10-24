@@ -50,6 +50,20 @@ A kernel-checked proof proves the *formal* statement, not the problem.  Every st
 
 `library.json`: the proofs of the 398 lemmas of the base library (1978 actions) as action sequences, split by lemma name (train 282, dev 38, test 78).  3 lemma(s) have the statement of a bank problem and are marked `bank_duplicate`.
 
+## Annotations and sub-theorems (hindsight)
+
+`annotations.json`: for every action of every reference proof its **direction** (CLOSE / BACKWARD / FORWARD / SPLIT / CLAIM), the depth of its goal in the proof tree, the number of actions that close that goal (`subtree`), the goals it leaves, the goals open after it; per problem the techniques, the lemmas used, the CLAIMs (statement and size of their proofs), depth and width of the tree.  These are the labels for a manager that chooses the macro step and a worker that proves the pieces.
+
+`subproblems.json`: the **theorems that the reference proofs contain**, each a problem of its own with a kernel-checked proof: 1678 closed subtrees (`solved`: a goal, closed over its hypotheses, with the actions that closed it) and 189 facts a single action derived (`derived`), 1816 actions in 82 proofs.  Every one was replayed in a fresh proof state and checked by the kernel when the file was made, and `subproblems.py --verify` does it again.  A sub-theorem belongs to the first of train, dev, test whose problem contains it (0 occurrences in later problems are recorded in `also_in`).  
+
+| split | solved | derived |
+|---|---|---|
+| train | 1121 | 160 |
+| dev | 256 | 14 |
+| test | 301 | 15 |
+
+Use: hindsight relabelling (a failed attempt that proved a piece is turned into successes), goal-conditioned warm-up for the worker, a curriculum by `length`.  Train only on the `train` split.
+
 ## Files
 
-`bank.json` (problems and demonstrations), `splits.json`, `library.json`, `manifest.json` (digests).  World digest of the bank: `8eaef730fd209a69f35a75ddaa4858997acc54b40a801dbea6036427052222ca`.
+`bank.json` (problems and demonstrations), `splits.json`, `library.json`, `annotations.json`, `subproblems.json`, `manifest.json` (digests).  World digest of the bank: `8eaef730fd209a69f35a75ddaa4858997acc54b40a801dbea6036427052222ca`.

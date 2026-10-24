@@ -1055,14 +1055,19 @@ class Episode:
     """one proof attempt as a game for an agent that acts step by step: the state is a proof, the agent acts on its first open goal.
     `step` is atomic: an action is probed first, so one that fails changes nothing."""
     _KEEP = object()
-    def __init__(self, engine, stmt, name=None, premises=_KEEP):
+    def __init__(self, engine, stmt, name=None, premises=_KEEP, track=False):
         """`premises`: the number of globals the agent may use in this episode (None: all); it is set on the engine before every operation of the episode, so that episodes with different premises can be
-        interleaved on one engine. Default: whatever the engine has now, and it stays."""
-        self.eng = engine
+        interleaved on one engine. Default: whatever the engine has now, and it stays.
+        `track`: keep the proof tree (gym_tree.ProofTree: `self.tree`, and `self.events` for what the last step achieved) from which the theorems the episode proved can be read, finished or not."""
+        self.eng = engine; self.name = name
         self.premises = engine.premises if premises is Episode._KEEP else premises
         self._sync()
         self.stmt = engine.w.term(stmt, 'statement'); self.p = engine.start(self.stmt, name)
         self.steps = []; self._menu = None; self._goal = None
+        self.tree = None; self.events = []
+        if track:
+            import gym_tree
+            self.tree = gym_tree.ProofTree(self)
     def _sync(self): self.eng.premises = self.premises
     @property
     def done(self): return self.p.done and self.p.ps.is_complete()
@@ -1078,8 +1083,9 @@ class Episode:
     def step(self, action):
         self._sync(); menu = self.menu(); g = self.goal()
         if self.eng.probe(g, action, menu) is None: raise ActionError('the action %r does not apply' % (action,))
-        self.eng.replay(self.p, action, menu)
+        made = self.eng.replay(self.p, action, menu)
         self.steps.append(action); self._menu = None; self._goal = None
+        if self.tree is not None: self.events = self.tree.record(g, menu, action, made, len(self.steps) - 1)
         return self.p.n_goals
     def finish(self):
         if not self.done: raise ActionError('the proof is not finished')
