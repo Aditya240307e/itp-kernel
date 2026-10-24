@@ -388,3 +388,79 @@ def _(w, b):
             p.have('d', ('D', p.T('n', lambda n: n + 1), 'm1', p.T('f n', lambda f, n: f(n)), 'm2'))
             p.have('s', ('h2', 'n', 'hn'))
             p.exfalso(); p.linarith()
+
+
+# ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ ISL 2005 N3 and a cyclic inequality
+_D05 = (0, 1, 2, 3, 4)
+_S05 = lambda a, b, c, d, e, f: a + b + c + d + e + f
+
+
+@problem('isl2005_n3', text='Let a, b, c, d, e, f be positive integers and let S = a + b + c + d + e + f. Suppose that S divides abc + def and ab + bc + ca - de - ef - fd. Prove that S is composite.', source='ISL 2005 N3', year=2005,
+         topics=('number-theory', 'divisibility', 'prime', 'identity'), level=4, origin='contest', verified='recalled',
+         spec=spec(('Z',) * 6, [LT(0, X(i)) for i in range(6)] + [DVD(_S05, lambda a, b, c, d, e, f: a * b * c + d * e * f), DVD(_S05, lambda a, b, c, d, e, f: a * b + b * c + c * a - d * e - e * f - f * d)],
+                   lambda a, b, c, d, e, f: not is_prime_(_S05(a, b, c, d, e, f)), atoms=[(_S05,)], domains=(_D05,) * 6, points=16000),
+         notes='S divides P(x) = (x + a)(x + b)(x + c) - (x - d)(x - e)(x - f) = S x^2 + (ab + bc + ca - de - ef - fd) x + (abc + def) for every integer x; at x = d the second product vanishes, so a prime S would divide (a + d)(b + d)(c + d) and hence one of the '
+               'factors, but each of them lies strictly between 0 and S. "Composite" is "not a prime" (S >= 6). The source label (Mongolia, ISL 2005) is from the shortlist; the exact wording of the second divisibility condition is from memory '
+               '(it is the one for which the polynomial identity above works)')
+def _(w, b):
+    v = K.Vocab(w); Eq = v.Eq; P = w['Z.prime']
+    with v.ints():
+        S6 = _S05
+        @K.theorem(w, 'isl2005_n3', [v.Z] * 6, [lambda a, b_, c, d, e, f: v.pos(a), lambda a, b_, c, d, e, f: v.pos(b_), lambda a, b_, c, d, e, f: v.pos(c), lambda a, b_, c, d, e, f: v.pos(d), lambda a, b_, c, d, e, f: v.pos(e), lambda a, b_, c, d, e, f: v.pos(f),
+                                                lambda a, b_, c, d, e, f: v.dvd(S6(a, b_, c, d, e, f), a * b_ * c + d * e * f),
+                                                lambda a, b_, c, d, e, f: v.dvd(S6(a, b_, c, d, e, f), a * b_ + b_ * c + c * a - d * e - e * f - f * d)],
+                   lambda a, b_, c, d, e, f: v.Not(P(S6(a, b_, c, d, e, f))))
+        def _(p):
+            p.intro('a', 'b', 'c', 'd', 'e', 'f', 'ha', 'hb', 'hc', 'hd', 'he', 'hf', 'h1', 'h2', 'hp')
+            p.obtain(['k1', 'hk1'], 'h1')
+            p.obtain(['k2', 'hk2'], 'h2')
+            p.have('key', p.T('a b c d e f k1 k2', lambda a, b_, c, d, e, f, k1, k2: Eq((a + d) * (b_ + d) * (c + d), S6(a, b_, c, d, e, f) * (d * d + k2 * d + k1))),
+                   lambda q: q.linear_combination((q.h('d'), 'hk2'), (1, 'hk1')))
+            p.have('dv', p.T('a b c d e f', lambda a, b_, c, d, e, f: v.dvd(S6(a, b_, c, d, e, f), (a + d) * (b_ + d) * (c + d))), lambda q: (q.exists(q.T('d k1 k2', lambda d, k1, k2: d * d + k2 * d + k1)), q.exact('key')))
+            Sx = lambda a, b_, c, d, e, f: S6(a, b_, c, d, e, f)
+
+            def close(hyp, X):                                                          # hyp : S | X  with 0 < X < S: False
+                p.have('px', p.T('a b c d', lambda a, b_, c, d: v.pos(X(a, b_, c, d))), lambda q: q.linarith())
+                p.have('lx', p.T('a b c d e f', lambda a, b_, c, d, e, f: v.le(S6(a, b_, c, d, e, f), X(a, b_, c, d))), lambda q: q.exact(('Z.le_of_dvd', p.T('a b c d e f', Sx), p.T('a b c d', X), 'px', hyp)))
+                p.linarith()
+            p.obtain(['u', 'u'], ('Z.prime_dvd_mul', p.T('a b c d e f', Sx), 'hp', p.T('a b d', lambda a, b_, d: (a + d) * (b_ + d)), p.T('c d', lambda c, d: c + d), 'dv'))
+            p.obtain(['t', 't'], ('Z.prime_dvd_mul', p.T('a b c d e f', Sx), 'hp', p.T('a d', lambda a, d: a + d), p.T('b d', lambda b_, d: b_ + d), 'u'))
+            close('t', lambda a, b_, c, d: a + d)
+            close('t', lambda a, b_, c, d: b_ + d)
+            close('u', lambda a, b_, c, d: c + d)
+
+
+@problem('ineq_cyclic_27_4', text='For all non-negative integers a, b, c:  27 (a^2 b + b^2 c + c^2 a + a b c) <= 4 (a + b + c)^3.', source='folklore', origin='folklore', topics=('inequality', 'algebra', 'case-analysis'), level=4,
+         spec=spec(('Z', 'Z', 'Z'), [LE(0, X(0)), LE(0, X(1)), LE(0, X(2))], LE(lambda a, b, c: 27 * (a * a * b + b * b * c + c * c * a + a * b * c), lambda a, b, c: 4 * (a + b + c) ** 3), domains=(range(-3, 7), range(-3, 7), range(-3, 7))),
+         notes='the expression is cyclic, so one may rotate the variables until y is the middle one of x, y, z; then 4 (x + y + z)^3 - 27 (x^2 y + y^2 z + z^2 x + x y z) = (x + z - 2y)^2 (4 (x + z) + y) + 27 z (x - y)(y - z), and both terms are non-negative. '
+               'Equality holds for a = b = c and for (a, b, c) = (2, 1, 0) and its rotations')
+def _(w, b):
+    v = K.Vocab(w)
+    with v.ints():
+        @K.theorem(w, 'ineq_cyclic_27_4', [v.Z, v.Z, v.Z], [lambda a, b_, c: v.nonneg(a), lambda a, b_, c: v.nonneg(b_), lambda a, b_, c: v.nonneg(c)],
+                   lambda a, b_, c: v.le(27 * (a * a * b_ + b_ * b_ * c + c * c * a + a * b_ * c), 4 * (a + b_ + c) ** 3))
+        def _(p):
+            p.intro('a', 'b', 'c', 'ha', 'hb', 'hc')
+
+            def leaf(x, y, z, asc):                                                    # y is the middle one of x, y, z (x <= y <= z if asc, else x >= y >= z), the triple is a rotation of (a, b, c)
+                d1 = (lambda X_, Y_: Y_ - X_) if asc else (lambda X_, Y_: X_ - Y_)
+                d2 = (lambda Y_, Z_: Z_ - Y_) if asc else (lambda Y_, Z_: Y_ - Z_)
+                p.have('d1', p.T(x + ' ' + y, lambda X_, Y_: v.nonneg(d1(X_, Y_))), lambda q: q.linarith())
+                p.have('d2', p.T(y + ' ' + z, lambda Y_, Z_: v.nonneg(d2(Y_, Z_))), lambda q: q.linarith())
+                p.have('m', ('Z.mul_nonneg', p.T(x + ' ' + y, d1), p.T(y + ' ' + z, d2), 'd1', 'd2'))
+                p.have('f2', ('Z.mul_nonneg', z, p.T(x + ' ' + y + ' ' + z, lambda X_, Y_, Z_: d1(X_, Y_) * d2(Y_, Z_)), 'h' + z, 'm'))
+                p.have('lin', p.T(x + ' ' + y + ' ' + z, lambda X_, Y_, Z_: v.nonneg(4 * (X_ + Z_) + Y_)), lambda q: q.linarith())
+                p.have('f1', ('Z.mul_nonneg', p.T(x + ' ' + y + ' ' + z, lambda X_, Y_, Z_: (X_ + Z_ - 2 * Y_) * (X_ + Z_ - 2 * Y_)), p.T(x + ' ' + y + ' ' + z, lambda X_, Y_, Z_: 4 * (X_ + Z_) + Y_),
+                              ('Z.sq_nonneg', p.T(x + ' ' + y + ' ' + z, lambda X_, Y_, Z_: X_ + Z_ - 2 * Y_)), 'lin'))
+                p.linarith()
+            p.obtain(['s1', 's1'], ('Z.le_or_lt', 'a', 'b'))
+            p.obtain(['s2', 's2'], ('Z.le_or_lt', 'b', 'c'))
+            leaf('a', 'b', 'c', True)                                                  # a <= b <= c
+            p.obtain(['s3', 's3'], ('Z.le_or_lt', 'a', 'c'))
+            leaf('b', 'c', 'a', False)                                                 # a <= c < b: b >= c >= a
+            leaf('c', 'a', 'b', True)                                                  # c < a <= b: c <= a <= b
+            p.obtain(['s2', 's2'], ('Z.le_or_lt', 'b', 'c'))
+            p.obtain(['s3', 's3'], ('Z.le_or_lt', 'a', 'c'))
+            leaf('c', 'a', 'b', False)                                                 # b < a <= c: c >= a >= b
+            leaf('b', 'c', 'a', True)                                                  # b <= c < a: b <= c <= a
+            leaf('a', 'b', 'c', False)                                                 # c < b < a
