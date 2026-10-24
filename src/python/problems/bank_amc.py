@@ -766,7 +766,10 @@ _F1988 = [_lcm2, lambda x, y: math.gcd(x, y), lambda x, y: x * y, lambda x, y: m
          topics=('functional-equation', 'arithmetic', 'case-analysis'), level=3, kind='answer', answer='f(14, 52) = 364', origin='adapted', verified='answer-checked',
          spec=spec(('fn',), [lambda f: all(f(x, x) == x for x in _W8 if x > 0), lambda f: all(f(x, y) == f(y, x) for x in _W8 for y in _W8 if x > 0 and y > 0),
                              lambda f: all((x + y) * f(x, y) == y * f(x, x + y) for x in _W8 for y in _W8 if x > 0 and y > 0)], EQ(lambda f: f(14, 52), 364), hatoms=False, fns=_F1988,
-                   skip_mutants=['constant 0 -> 1 in (Z.lt 0 x2)', 'constant 0 -> 1 in (Z.lt 0 x3)', 'Z.lt -> Z.le in (Z.lt 0 x3)', 'constant 0 -> -1 in (Z.lt 0 x3)']),
+                   skip_mutants={'constant 0 -> 1 in (Z.lt 0 x2)': 'the guard x > 1 of the symmetry: the instance (1, y) of f(x, y) = f(y, x) is the instance (y, 1), which the guard y > 0 keeps',
+                                 'constant 0 -> 1 in (Z.lt 0 x3)': 'the guard y > 1 of the symmetry (the same equation as for x), and the guard x > 1 of the third property (tested apart, by a function that fails at x = 1 only: the mutant is caught there, the description is shared)',
+                                 'Z.lt -> Z.le in (Z.lt 0 x3)': 'the guard x >= 0 of the third property: at x = 0 it reads (0 + y) f(0, y) = y f(0, 0 + y), a tautology',
+                                 'constant 0 -> -1 in (Z.lt 0 x3)': 'the guard x >= 0 of the third property again'}),
          notes='adapted: f is a function Z x Z -> Z whose three properties are asked for positive arguments only (the guards x > 1 / y > 1 of the symmetry property, and x >= 0 of the third, change nothing: the instance (1, y) of the symmetry is the instance (y, 1), and at x = 0 the third property reads (0 + y) f(0, y) = y f(0, 0 + y), a tautology). The function is lcm; the chain (14, 52) <- (14, 38) <- (14, 24) <- (14, 10) = (10, 14) <- (10, 4) = (4, 10) <- (4, 6) <- (4, 2) = (2, 4) <- (2, 2) computes it')
 def _(w, b):
     v = K.Vocab(w); Eq = v.Eq; f2 = w.arrow(v.Z, w.arrow(v.Z, v.Z))

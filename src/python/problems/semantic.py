@@ -27,7 +27,7 @@ class Unsupported(Exception):
 def _zdvd(a, b): return b == 0 if a == 0 else b % a == 0
 def _zgcd(a, b): return math.gcd(a, b)
 def _pow(a, n):
-    if n < 0 or n > 200 or (abs(a) > 1 and n * max(1, abs(a).bit_length()) > 4000): raise Unsupported('power out of range')
+    if n < 0 or n > 5000 or (abs(a) > 1 and n * max(1, abs(a).bit_length()) > 40000): raise Unsupported('power out of range')
     return a ** n
 def _sum(f, n):
     if n < 0 or n > 3000: raise Unsupported('a sum over a range outside the window')

@@ -42,7 +42,8 @@ def no_multiple(p, term, m, c):
     lit = p.w.nota.lit
     q = c // m
     assert c % m != 0
-    p.exfalso(); p.obtain(['_c', '_c'], ('Z.le_or_lt', term, lit(q) if q != 0 else p.w['Z.zero'])); p.linarith(); p.linarith()
+    if p.goal().target.n != p.w['False'].n: p.exfalso()                     # (exfalso on the goal False would be a step that changes nothing)
+    p.obtain(['_c', '_c'], ('Z.le_or_lt', term, lit(q) if q != 0 else p.w['Z.zero'])); p.linarith(); p.linarith()
 
 
 def let(p, name, names, f):

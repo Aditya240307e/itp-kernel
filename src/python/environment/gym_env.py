@@ -864,7 +864,10 @@ class Engine:
                 try: A, a, b = w.eq_parts(w.T(target))
                 except AuthorError: return False
                 if a == b or self._conv(a.n, b.n, n):
-                    r = w.app(w['refl'], A, a); ps.exact(r.n, meta); p.trace.append(('exact', r.n)); return True
+                    k.set_fuel(SETTLE_FUEL)                                 # (the check above has used part of the budget, and `exact` checks the same conversion once more)
+                    try: r = w.app(w['refl'], A, a); ps.exact(r.n, meta)
+                    except E.FuelExhausted: return False                    # (convertible, but not within the budget of a settle: the goal stays open)
+                    p.trace.append(('exact', r.n)); return True
         finally: k.set_fuel(saved)
         return False
 
