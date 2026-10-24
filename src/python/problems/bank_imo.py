@@ -362,3 +362,174 @@ def _(w, b):
     with v.ints():
         lit = v.lit
         return K.statement(w, [fZ], [lambda f: v.forall(lambda n: v.nonneg(n) >> v.nonneg(f(n))), lambda f: v.forall(lambda n: v.nonneg(n) >> Eq(f(f(n)), n + lit(1987)))], lambda f: v.False_)
+
+
+# ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ the second batch (1962 - 1996)
+fact = math.factorial
+
+
+@statement('imo1962_p1', text='Find the smallest positive integer n with these properties: (a) its decimal representation ends in the digit 6; (b) if this last digit 6 is erased and placed in front of the remaining digits, the resulting number is four times n.',
+           source='IMO 1962 P1', year=1962, topics=('number-theory', 'digits'), level=3, kind='answer', answer='153846', origin='contest', verified='answer-checked',
+           spec=spec(('Z', 'N'), [LT(0, X(0)), LE(lambda m, k: 10 ** k, lambda m, k: 10 * m), LT(lambda m, k: 10 * m, lambda m, k: 10 ** (k + 1)), EQ(lambda m, k: 4 * (10 * m + 6), lambda m, k: 6 * 10 ** k + m)],
+                     [LE(153846, lambda m, k: 10 * m + 6), LE(10 ** 5, 153840), LT(153840, 10 ** 6), EQ(4 * 153846, 6 * 10 ** 5 + 15384)], domains=([0, 1, 2, 20, 15383, 15384, 15385], range(0, 8))),
+           notes='n = 10 m + 6, where m (with k digits, 10^k <= 10 m < 10^(k+1)) is the number left when the 6 is erased; moving the 6 to the front gives 6 * 10^k + m. The statement says that every such n is at least 153846, and that 153846 is one '
+                 '(m = 15384, k = 5: 4 * 153846 = 615384 = 6 * 10^5 + 15384)')
+def _(w, b):
+    v = K.Vocab(w); Eq = v.Eq
+    with v.ints():
+        lit = v.lit; p = lambda k: lit(10) ** k
+        return K.statement(w, [v.Z, v.N], [lambda m, k: v.pos(m), lambda m, k: v.le(p(k), 10 * m), lambda m, k: v.lt(10 * m, p(w['N.succ'](k))), lambda m, k: Eq(4 * (10 * m + 6), 6 * p(k) + m)],
+                           lambda m, k: AND(v.le(lit(153846), 10 * m + 6), v.le(p(v.nlit(5)), lit(153840)), v.lt(lit(153840), p(v.nlit(6))), Eq(4 * lit(153846), 6 * p(v.nlit(5)) + lit(15384))))
+
+
+@statement('imo1972_p3', text='Let m and n be arbitrary non-negative integers. Prove that (2m)! (2n)! / (m! n! (m + n)!) is an integer.', source='IMO 1972 P3', year=1972, topics=('number-theory', 'product', 'divisibility'), level=4, kind='prove',
+           origin='contest', verified='answer-checked',
+           spec=spec(('N', 'N'), [], DVD(lambda m, n: fact(m) * fact(n) * fact(m + n), lambda m, n: fact(2 * m) * fact(2 * n)), domains=(range(0, 13), range(0, 13))),
+           notes='the quotient is an integer exactly when the denominator divides the numerator; checked for m, n <= 12 here and by imo_truth.py for m, n <= 60')
+def _(w, b):
+    v = K.Vocab(w); f = w['Z.fact']; add = w['N.add']; dbl = w['N.double']
+    with v.ints():
+        return K.statement(w, [v.N, v.N], [], lambda m, n: v.dvd(f(m) * f(n) * f(add(m, n)), f(dbl(m)) * f(dbl(n))))
+
+
+@statement('imo1978_p1', text='Let m and n be natural numbers with 1 <= m < n. The last three digits of 1978^m are the same as the last three digits of 1978^n. Find m and n for which m + n is as small as possible.', source='IMO 1978 P1', year=1978,
+           topics=('number-theory', 'modular', 'bounding'), level=4, kind='answer', answer='m = 3, n = 103', origin='contest', verified='answer-checked',
+           spec=spec(('N', 'N'), [LE(1, X(0)), LT(X(0), X(1)), DVD(1000, lambda m, n: 1978 ** n - 1978 ** m)], [LE(106, lambda m, n: m + n), DVD(1000, 1978 ** 103 - 1978 ** 3)],
+                     domains=(range(0, 6), [0, 1, 2, 3, 4, 50, 100, 101, 102, 103, 104, 105, 106])),
+           notes='"the last three digits agree" is 1000 | 1978^n - 1978^m. The statement says that every such pair has m + n >= 106, and that (3, 103) is a pair (m + n = 106)')
+def _(w, b):
+    v = K.Vocab(w); ofN = w['Z.of_N']
+    with v.ints():
+        lit = v.lit
+        return K.statement(w, [v.N, v.N], [lambda m, n: w['N.le'](v.nlit(1), m), lambda m, n: w['N.lt'](m, n), lambda m, n: v.dvd(lit(1000), lit(1978) ** n - lit(1978) ** m)],
+                           lambda m, n: AND(v.le(lit(106), ofN(m) + ofN(n)), v.dvd(lit(1000), lit(1978) ** v.nlit(103) - lit(1978) ** v.nlit(3))))
+
+
+def _F82(x, y): return x ** 3 - 3 * x * y * y + y ** 3
+
+
+@statement('imo1982_p4a', text='Prove that if a positive integer n can be written as n = x^3 - 3 x y^2 + y^3 with integers x and y, then it has at least three such representations (three different pairs (x, y)).', source='IMO 1982 P4 (a)', year=1982,
+           topics=('number-theory', 'diophantine', 'identity'), level=4, kind='prove', origin='contest', verified='answer-checked',
+           spec=spec(('Z', 'Z', 'Z'), [LT(0, X(2)), EQ(lambda x, y, n: _F82(x, y), X(2))],
+                     lambda x, y, n: (_F82(y - x, -x) == n and _F82(-y, x - y) == n and not (x == y - x and y == -x) and not (x == -y and y == x - y) and not (y - x == -y and -x == x - y)),
+                     atoms=[(lambda x, y, n: _F82(y - x, -x), X(2)), (lambda x, y, n: _F82(-y, x - y), X(2)), (X(0), lambda x, y, n: y - x), (X(1), lambda x, y, n: -x), (X(0), lambda x, y, n: -y), (X(1), lambda x, y, n: x - y),
+                            (lambda x, y, n: y - x, lambda x, y, n: -y), (lambda x, y, n: -x, lambda x, y, n: x - y)],
+                     domains=(range(-4, 5), range(-4, 5), [-9, -2, -1, 0, 1, 2, 3, 5, 9, 25]),
+                     skip_mutants={'and -> or in (~((x0 = (Z.sub x1 x0)) /\\ (x1 = (Z.neg x0))) /\\ (~(': 'each of the three pairs equals another one only at the origin: the three non-equalities are equivalent',
+                                   'and -> or in (~((x0 = (Z.neg x1)) /\\ (x1 = (Z.sub x0 x1))) /\\ ~(': 'the same: the last two non-equalities are equivalent'}),
+           notes='the pairs (x, y), (y - x, -x), (-y, x - y) all represent n, and they are pairwise different when n > 0 (a repeated pair would be a fixed point of the map (x, y) -> (y - x, -x), whose only fixed point is the origin)')
+def _(w, b):
+    v = K.Vocab(w); Eq = v.Eq
+    with v.ints():
+        F = lambda x, y: x ** 3 - 3 * x * y ** 2 + y ** 3
+        ne = lambda a1, b1, a2, b2: v.Not(AND(Eq(a1, a2), Eq(b1, b2)))
+        return K.statement(w, [v.Z] * 3, [lambda x, y, n: v.pos(n), lambda x, y, n: Eq(F(x, y), n)],
+                           lambda x, y, n: AND(Eq(F(y - x, -x), n), Eq(F(-y, x - y), n), ne(x, y, y - x, -x), ne(x, y, -y, x - y), ne(y - x, -x, -y, x - y)))
+
+
+@statement('imo1982_p4b', text='Show that the equation x^3 - 3 x y^2 + y^3 = 2891 has no solution in integers x, y.', source='IMO 1982 P4 (b)', year=1982, topics=('number-theory', 'diophantine', 'modular'), level=4, kind='prove',
+           origin='contest', verified='recalled',
+           spec=spec(('Z', 'Z'), [], lambda x, y: _F82(x, y) != 2891, atoms=[(lambda x, y: _F82(x, y), C(2891))], domains=(range(-9, 10), range(-9, 10))),
+           notes='no integer pair gives 2891 in the box and in the range checked by imo_truth.py (|x|, |y| <= 400); the proof is a computation modulo 9')
+def _(w, b):
+    v = K.Vocab(w); Eq = v.Eq
+    with v.ints():
+        return K.statement(w, [v.Z] * 2, [], lambda x, y: v.Not(Eq(x ** 3 - 3 * x * y ** 2 + y ** 3, v.lit(2891))))
+
+
+@statement('imo1984_p6', text='Let a, b, c, d be odd positive integers with a < b < c < d and ad = bc. Suppose that a + d = 2^k and b + c = 2^m for some integers k and m. Prove that a = 1.', source='IMO 1984 P6', year=1984,
+           topics=('number-theory', 'diophantine', 'bounding'), level=5, kind='prove', origin='adapted', verified='answer-checked',
+           spec=spec(('Z', 'Z', 'Z', 'Z', 'N', 'N'), [LE(0, X(0)), LT(X(0), X(1)), LT(X(1), X(2)), LT(X(2), X(3)), EQ(lambda x, y, z, t, k, m: (2 * x + 1) * (2 * t + 1), lambda x, y, z, t, k, m: (2 * y + 1) * (2 * z + 1)),
+                                                 EQ(lambda x, y, z, t, k, m: 2 * x + 2 * t + 2, lambda x, y, z, t, k, m: 2 ** k), EQ(lambda x, y, z, t, k, m: 2 * y + 2 * z + 2, lambda x, y, z, t, k, m: 2 ** m)],
+                     EQ(X(0), 0), domains=([-1, 0, 1, 2], [0, 1, 2, 3], [1, 2, 3, 4], [2, 3, 7, 8], [3, 4, 5], [2, 3, 4]), points=3000),
+           notes='the odd numbers are written a = 2x + 1, b = 2y + 1, c = 2z + 1, d = 2t + 1 with x, y, z, t >= 0 (so a < b is x < y, and a = 1 is x = 0); a + d = 2x + 2t + 2 and b + c = 2y + 2z + 2')
+def _(w, b):
+    v = K.Vocab(w); Eq = v.Eq
+    with v.ints():
+        lit = v.lit
+        return K.statement(w, [v.Z] * 4 + [v.N] * 2,
+                           [lambda x, y, z, t, k, m: v.nonneg(x), lambda x, y, z, t, k, m: v.lt(x, y), lambda x, y, z, t, k, m: v.lt(y, z), lambda x, y, z, t, k, m: v.lt(z, t),
+                            lambda x, y, z, t, k, m: Eq((2 * x + 1) * (2 * t + 1), (2 * y + 1) * (2 * z + 1)), lambda x, y, z, t, k, m: Eq(2 * x + 2 * t + 2, lit(2) ** k),
+                            lambda x, y, z, t, k, m: Eq(2 * y + 2 * z + 2, lit(2) ** m)], lambda x, y, z, t, k, m: Eq(x, v.zero))
+
+
+@statement('imo1996_p4', text='The positive integers a and b are such that the numbers 15a + 16b and 16a - 15b are both squares of positive integers. What is the least possible value of the smaller of these two squares?', source='IMO 1996 P4', year=1996,
+           topics=('number-theory', 'diophantine', 'bounding'), level=5, kind='answer', answer='481^2 = 231361', origin='contest', verified='answer-checked',
+           spec=spec(('Z', 'Z', 'Z', 'Z'), [LT(0, X(0)), LT(0, X(1)), LT(0, X(2)), LT(0, X(3)), EQ(lambda a, b, r, s: 15 * a + 16 * b, lambda a, b, r, s: r * r), EQ(lambda a, b, r, s: 16 * a - 15 * b, lambda a, b, r, s: s * s)],
+                     [LE(481, X(2)), LE(481, X(3)), EQ(15 * 14911 + 16 * 481, 481 * 481), EQ(16 * 14911 - 15 * 481, 481 * 481)],
+                     domains=([0, 1, 3, 14910, 14911, 14912], [0, 1, 3, 480, 481, 482], [0, 1, 480, 481, 482], [0, 1, 480, 481, 482]), points=2000),
+           notes='the two squares are r^2 and s^2; the statement says that r and s are both at least 481 (so the smaller square is at least 481^2), and that a = 14911, b = 481 make both squares equal to 481^2')
+def _(w, b):
+    v = K.Vocab(w); Eq = v.Eq
+    with v.ints():
+        lit = v.lit
+        return K.statement(w, [v.Z] * 4, [lambda a, b_, r, s: v.pos(a), lambda a, b_, r, s: v.pos(b_), lambda a, b_, r, s: v.pos(r), lambda a, b_, r, s: v.pos(s),
+                                        lambda a, b_, r, s: Eq(15 * a + 16 * b_, r * r), lambda a, b_, r, s: Eq(16 * a - 15 * b_, s * s)],
+                           lambda a, b_, r, s: AND(v.le(lit(481), r), v.le(lit(481), s), Eq(15 * lit(14911) + 16 * lit(481), lit(481) * lit(481)), Eq(16 * lit(14911) - 15 * lit(481), lit(481) * lit(481))))
+
+
+@statement('imo1989_p5', text='Prove that for each positive integer n there exist n consecutive positive integers none of which is a prime or a prime power.', source='IMO 1989 P5', year=1989, topics=('number-theory', 'prime', 'construction'), level=4,
+           kind='prove', origin='adapted', verified='answer-checked',
+           spec=spec(('Z',), [LT(0, X(0))], lambda n: any(m > 0 and all(any(a > 1 and b > 1 and math.gcd(a, b) == 1 and a * b == m + i for a in range(-40, 41) for b in range(-40, 41)) for i in range(1, n + 1)) for m in range(-40, 41)),
+                     atoms=[(C(0), lambda n, m: m), (C(1), lambda n, m, i: i), (lambda n, m, i: i, lambda n, m, i: n), (C(1), lambda n, m, i, a, b: a), (C(1), lambda n, m, i, a, b: b),
+                            (lambda n, m, i, a, b: a, lambda n, m, i, a, b: b), (lambda n, m, i, a, b: a * b, lambda n, m, i, a, b: m + i)], domains=([0, 1, 2, 3],), windows={'ex': 40},
+                     body=(('Z',), lambda n, m: m > 0 and all(any(a > 1 and b > 1 and math.gcd(a, b) == 1 and a * b == m + i for a in range(-40, 41) for b in range(-40, 41)) for i in range(1, n + 1)))),
+           notes='"neither a prime nor a prime power" for a number m + i >= 2 means that it has two different prime divisors, i.e. it is a product a b of two coprime numbers a, b > 1. The test range is n <= 3 (the first three consecutive numbers '
+                 'of this kind are 20, 21, 22); imo_truth.py finds them for every n <= 7')
+def _(w, b):
+    v = K.Vocab(w); Eq = v.Eq
+    with v.ints():
+        lit = v.lit
+        return K.statement(w, [v.Z], [lambda n: v.pos(n)],
+                           lambda n: v.exists(lambda m: v.pos(m) & v.forall(lambda i: (v.le(lit(1), i) & v.le(i, n)) >> v.exists(lambda a: v.exists(lambda b_: AND(v.lt(lit(1), a), v.lt(lit(1), b_), w['Z.coprime'](a, b_), Eq(a * b_, m + i)))))))
+
+
+def _fam1(k): return lambda x: k * x * x
+def _fam2(k): return lambda x: 0 if x % 2 == 0 else k
+def _fam3(k): return lambda x: 0 if x % 4 == 0 else (k if x % 2 else 4 * k)
+
+
+def _lhs2012(f): return all(f(a) ** 2 + f(b) ** 2 + f(-a - b) ** 2 == 2 * f(a) * f(b) + 2 * f(b) * f(-a - b) + 2 * f(-a - b) * f(a) for a in range(-8, 9) for b in range(-8, 9) if abs(a + b) <= 8)
+
+
+def _rhs2012(f):
+    k = f(1)
+    return all(f(x) == k * x * x for x in range(-8, 9)) or all(f(x) == (0 if x % 2 == 0 else k) for x in range(-8, 9)) or all(f(x) == (0 if x % 4 == 0 else (k if x % 2 else 4 * k)) for x in range(-8, 9))
+
+
+@statement('imo2012_p4', text='Find all functions f from the integers to the integers such that, for all integers a, b, c with a + b + c = 0, f(a)^2 + f(b)^2 + f(c)^2 = 2 f(a) f(b) + 2 f(b) f(c) + 2 f(c) f(a).', source='IMO 2012 P4', year=2012,
+           topics=('functional-equation', 'number-theory'), level=5, kind='answer',
+           answer='f(x) = k x^2; f(x) = k for odd x and 0 for even x; f(x) = 0 for x = 0 mod 4, k for odd x, 4k for x = 2 mod 4 (k any integer)', origin='contest', verified='answer-checked',
+           spec=spec(('fn',), [], (_lhs2012, _rhs2012),
+                     atoms=[(lambda f, a, b, c: a + b + c, C(0)), (lambda f, a, b, c: f(a) ** 2 + f(b) ** 2 + f(c) ** 2, lambda f, a, b, c: 2 * f(a) * f(b) + 2 * f(b) * f(c) + 2 * f(c) * f(a)),
+                            (lambda f, x: f(x), lambda f, x: f(1) * x * x),
+                            (C(2), lambda f, x: x), (lambda f, x: f(x), C(0)), (C(2), lambda f, x: x), (lambda f, x: f(x), lambda f, x: f(1)),
+                            (C(4), lambda f, x: x), (lambda f, x: f(x), C(0)), (C(2), lambda f, x: x), (lambda f, x: f(x), lambda f, x: f(1)), (C(2), lambda f, x: x), (C(4), lambda f, x: x), (lambda f, x: f(x), lambda f, x: 4 * f(1))],
+                     extra_fns=[g(k) for k in (-3, -2, -1, 1, 2, 3) for g in (_fam1, _fam2, _fam3)] + [lambda x: x % 4]),
+           notes='the three families of solutions, written with k = f(1) (in every family f(1) = k; k = 0 is the zero function in all three); the test functions of the box include members of each family. imo_truth.py solves the equation on |x| <= 16 by exhaustive search and finds exactly these')
+def _(w, b):
+    v = K.Vocab(w); Eq = v.Eq; fZ = w.arrow(v.Z, v.Z)
+    with v.ints():
+        lit = v.lit; two = lit(2); four = lit(4); z0 = v.zero
+        def lhs(f): return v.F([v.Z, v.Z, v.Z], lambda a, b_, c: Eq(a + b_ + c, z0) >> Eq(f(a) ** 2 + f(b_) ** 2 + f(c) ** 2, 2 * f(a) * f(b_) + 2 * f(b_) * f(c) + 2 * f(c) * f(a)))
+        def fam1(f, k): return v.forall(lambda x: Eq(f(x), k * x ** 2))
+        def fam2(f, k): return v.forall(lambda x: AND(v.dvd(two, x) >> Eq(f(x), z0), v.Not(v.dvd(two, x)) >> Eq(f(x), k)))
+        def fam3(f, k): return v.forall(lambda x: AND(v.dvd(four, x) >> Eq(f(x), z0), v.Not(v.dvd(two, x)) >> Eq(f(x), k), AND(v.dvd(two, x), v.Not(v.dvd(four, x))) >> Eq(f(x), 4 * k)))
+        return K.statement(w, [fZ], [], lambda f: v.Iff(lhs(f), OR(fam1(f, f(lit(1))), fam2(f, f(lit(1))), fam3(f, f(lit(1))))))
+
+
+def _tri2009(f): return all(a < f(b) + f(b + f(a) - 1) and f(b) < a + f(b + f(a) - 1) and f(b + f(a) - 1) < a + f(b) for a in range(1, 9) for b in range(1, 9))
+
+
+@statement('imo2009_p5', text='Determine all functions f from the positive integers to the positive integers such that, for all positive integers a and b, there is a non-degenerate triangle with sides of lengths a, f(b) and f(b + f(a) - 1).', source='IMO 2009 P5',
+           year=2009, topics=('functional-equation', 'inequality'), level=5, kind='answer', answer='f(n) = n', origin='contest', verified='recalled',
+           spec=spec(('fn',), [lambda f: all(f(n) > 0 for n in range(1, 9))], (_tri2009, lambda f: all(f(n) == n for n in range(1, 9))), hatoms=False,
+                     atoms=[(C(0), lambda f, a, b: a), (C(0), lambda f, a, b: b), (lambda f, a, b: a, lambda f, a, b: f(b) + f(b + f(a) - 1)), (lambda f, a, b: f(b), lambda f, a, b: a + f(b + f(a) - 1)),
+                            (lambda f, a, b: f(b + f(a) - 1), lambda f, a, b: a + f(b)), (C(0), lambda f, n: n), (lambda f, n: f(n), lambda f, n: n)]),
+           notes='f is a function on the integers whose values at the positive integers are positive; "non-degenerate triangle" means the three strict triangle inequalities. The answer is the identity (the published answer; the box only sees f(n) = n for n <= 8)')
+def _(w, b):
+    v = K.Vocab(w); Eq = v.Eq; fZ = w.arrow(v.Z, v.Z)
+    with v.ints():
+        lit = v.lit
+        def tri(f): return v.F([v.Z, v.Z], lambda a, b_: v.pos(a) >> (v.pos(b_) >> AND(v.lt(a, f(b_) + f(b_ + f(a) - 1)), v.lt(f(b_), a + f(b_ + f(a) - 1)), v.lt(f(b_ + f(a) - 1), a + f(b_)))))
+        return K.statement(w, [fZ], [lambda f: v.forall(lambda n: v.pos(n) >> v.pos(f(n)))], lambda f: v.Iff(tri(f), v.forall(lambda n: v.pos(n) >> Eq(f(n), n))))
