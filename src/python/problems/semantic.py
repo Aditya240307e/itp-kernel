@@ -360,6 +360,20 @@ def reindex(a, delta, depth=0):
 RELATIONS = frozenset(PROP_PRIMS)
 
 
+def _dvd_sign_equivalent(i, x, m):
+    """a mutation of an argument of Z.dvd that cannot change its meaning: the sign of the divisor, the order of the terms of a difference that is the divisor or the dividend"""
+    if i == 0 and x[0] == 'int' and m == ('int', -x[1]): return True
+    return x[0] == 'prim' and x[1] == 'Z.sub' and len(x[2]) == 2 and m == ('prim', 'Z.sub', (x[2][1], x[2][0]))
+
+
+def _even_power_equivalent(a, x, m):
+    """a mutation of the BASE of an even power (an exponent that is a numeral) that only changes its sign: the negated constant, the swapped difference"""
+    e = a[2][1]
+    if not (e[0] == 'int' and e[1] % 2 == 0): return False
+    if x[0] == 'int' and m == ('int', -x[1]): return True
+    return x[0] == 'prim' and x[1] == 'Z.sub' and len(x[2]) == 2 and m == ('prim', 'Z.sub', (x[2][1], x[2][0]))
+
+
 def _mut(a, names, ctx):
     t = a[0]
     if t == 'int':
@@ -382,7 +396,10 @@ def _mut(a, names, ctx):
                 yield _in('index of %s + 1' % a[1], here), ('prim', a[1], (('lam', f[1], reindex(f[2], 1)), n))
                 yield _in('index of %s - 1' % a[1], here), ('prim', a[1], (('lam', f[1], reindex(f[2], -1)), n))
         for i, x in enumerate(a[2]):
-            for d, m in _mut(x, names, here): yield d, ('prim', a[1], a[2][:i] + (m,) + a[2][i + 1:])
+            for d, m in _mut(x, names, here):
+                if a[1] == 'Z.dvd' and _dvd_sign_equivalent(i, x, m): continue                 # d | x and -d | x, d | x and d | -x are the same statement: not a slip
+                if a[1] == 'Z.pow' and i == 0 and _even_power_equivalent(a, x, m): continue     # (-t)^2 = t^2
+                yield d, ('prim', a[1], a[2][:i] + (m,) + a[2][i + 1:])
         return
     if t == 'call':
         for i, x in enumerate(a[2]):
@@ -490,16 +507,19 @@ class Spec:
     witnesses (`pred(*params, a, b)`).  A closed existential is true as soon as ONE witness works, so the truth tables above do not see whether a connective or an inequality inside the body is the right way round
     (a body with `or` for `and` has more witnesses, and still has the one that the problem needs); the body is compared at every combination of a point and the witnesses of the window `windows['ex']` (a sample when
     that is a lot), and so are the bodies of the mutants.
+    `vacuous=True`: the problem is an impossibility ("no such function exists"): the hypotheses are satisfied by no object, and the box must not be required to have a point that satisfies them. (With a function among the parameters,
+    test functions that satisfy the hypotheses on the WINDOW only are wanted: they tell the quantifiers of the hypotheses from their slips, and are not counted as counterexamples.)
     `hatoms`: the same for the relation atoms of the HYPOTHESES (all of them, in the order they are written; no quantifier inside a hypothesis): the numbers of  x^2 + y^2 = 3 z^2  are
     `(lambda x, y, z: x * x + y * y, lambda x, y, z: 3 * z * z)`.  A truth table does not see a slip in a hypothesis that has the same solutions (`-3 z^2` for `3 z^2` over the integers: both have only the
     origin), and a Diophantine hypothesis is the usual case."""
-    def __init__(self, params, hyps=(), concl=None, windows=None, fns=None, points=1200, skip_mutants=None, max_mutants=120, note='', atom=None, atoms=None, extra_fns=(), body=None, hatoms=None, domains=None):
+    def __init__(self, params, hyps=(), concl=None, windows=None, fns=None, points=1200, skip_mutants=None, max_mutants=120, note='', atom=None, atoms=None, extra_fns=(), body=None, hatoms=None, domains=None, vacuous=False):
         self.domains = None if domains is None else tuple(None if d is None else tuple(d) for d in domains)
         self.params = tuple(params); self.hyps = tuple(hyps); self.concl = concl; self.windows = windows or {}; self.fns = fns; self.points = points; self.extra_fns = tuple(extra_fns)
         self.hatoms = None if hatoms is None else [tuple(a) for a in hatoms]
         self.skip_mutants = skip_mutants or {}; self.max_mutants = max_mutants; self.note = note
         self.atoms = None if atoms is None and atom is None else ([tuple(atom)] if atom is not None else [tuple(a) for a in atoms])
         self.body = None if body is None else (tuple(body[0]), body[1])
+        self.vacuous = vacuous                              # the statement says that NO object has the properties of the hypotheses (an impossibility): no point of the box satisfies them, by design
 
 
 class Report:
@@ -733,10 +753,11 @@ def check_spec(sem, ast, spec, mutate=True, seed=1, strict=True):
                         i, kind, len(bad), len(pts), _showpt(pts[bad[0]]), tabs[nm][bad[0]][1:], want_h[bad[0]][1:]))
         hy = [tabs['hyp%d' % i] for i in range(len(hyps))]
         rep.nonvacuous = sum(1 for j in range(len(pts)) if all(h[j] for h in hy))
-        if rep.nonvacuous == 0: rep.errors.append('no point satisfies the hypotheses: the problem is vacuous on this box')
+        if rep.nonvacuous == 0 and not spec.vacuous: rep.errors.append('no point satisfies the hypotheses: the problem is vacuous on this box')
         if concl[0] == 'iff': bad_pts = [j for j in range(len(pts)) if all(h[j] for h in hy) and tabs['lhs'][j] != tabs['rhs'][j]]
         else: bad_pts = [j for j in range(len(pts)) if all(h[j] for h in hy) and not tabs['concl'][j]]
         rep.counterexamples = [pts[j] for j in bad_pts[:5]]; rep.n_counter = len(bad_pts)          # the statement is FALSE at these points of the box (for a statement without a proof: an error, see bank.check)
+        if spec.vacuous and 'fn' in spec.params: rep.counterexamples = []; rep.n_counter = 0    # (an impossibility about functions: a test function can satisfy the hypotheses on the window of the box without being a solution, see Spec)
         if concl[0] == 'iff':
             for side in ('lhs', 'rhs'):
                 if not any(tabs[side]): rep.errors.append('the %s of the equivalence is never true on the box: add test points / functions' % side)
