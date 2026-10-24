@@ -5,8 +5,9 @@
     python3 tests/run_gates.py -j 1                  serial (use this when timing matters)
     python3 tests/run_gates.py --ml                  + the learner's gate (s44; needs torch and gymnasium)
     python3 tests/run_gates.py --repo                + the repository gates (s45 layout, s46 examples)
+    python3 tests/run_gates.py --synth               + the gate of the synthetic theorem generator (s48)
     python3 tests/run_gates.py --all                 every gate
-    python3 tests/run_gates.py s14_prop_world_tests.py s15_classical_tests.py       only these (by file name; the learner's and the repository's gates are found by name too)
+    python3 tests/run_gates.py s14_prop_world_tests.py s15_classical_tests.py       only these (by file name; the learner's, the repository's and the generator's gates are found by name too)
 
 The gate list lives in gate_registry.py, the one place to add a gate.  A gate passes iff it exits 0 and prints no "GATE: FAIL".  Exit status is 0 iff every selected gate passed.
 """
@@ -40,9 +41,10 @@ def main(argv):
         elif a == '--timeout': timeout = int(next(it))
         elif a == '--ml': extra += list(REG.ML_GATE_CMDS)
         elif a == '--repo': extra += list(REG.REPO_GATE_CMDS)
-        elif a == '--all': extra += list(REG.ML_GATE_CMDS) + list(REG.REPO_GATE_CMDS)
+        elif a == '--synth': extra += list(REG.SYNTH_GATE_CMDS)
+        elif a == '--all': extra += list(REG.ML_GATE_CMDS) + list(REG.REPO_GATE_CMDS) + list(REG.SYNTH_GATE_CMDS)
         else: names.append(a)
-    everything = list(REG.GATE_CMDS) + list(REG.ML_GATE_CMDS) + list(REG.REPO_GATE_CMDS)
+    everything = list(REG.GATE_CMDS) + list(REG.ML_GATE_CMDS) + list(REG.REPO_GATE_CMDS) + list(REG.SYNTH_GATE_CMDS)
     base = [os.path.basename(c[0]) for c in everything]
     unknown = set(names) - set(base)
     if unknown:

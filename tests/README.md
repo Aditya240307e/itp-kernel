@@ -8,6 +8,7 @@ python3 tests/run_gates.py                        the 47 kernel gates, two at a 
 python3 tests/run_gates.py -j 1                   serially (use this when timing matters)
 python3 tests/run_gates.py --ml                   + the learner's gate S44 (needs torch and gymnasium)
 python3 tests/run_gates.py --repo                 + the repository gates S45 (layout) and S46 (examples)
+python3 tests/run_gates.py --synth                + the synthetic theorem generator's gate S48 (about 70 seconds)
 python3 tests/run_gates.py --all                  everything
 python3 tests/run_gates.py s23_ring_tests.py s31_linarith_tests.py       only these, by file name (wherever they are registered)
 ITP_VERIFY_MEMO=1 python3 tests/run_gates.py      the same, with the kernel re-deciding every answer it took from a sharing table (about twice as slow)
@@ -24,10 +25,11 @@ A gate can also be run by hand, from anywhere: `python3 tests/library/s23_ring_t
 | `environment/` | the learner's engine: observation, menus, probes, the action language, the typed term builder, the recorder |
 | `problems/` | the problem bank: faithfulness of statements, reference proofs, dataset |
 | `learner/` | features, policy network, search, Gymnasium environment, RL bookkeeping |
+| `synth/` | the synthetic theorem generator (`src/python/synth`) and the datasets it writes: determinism, records replayed from their data, tamper tests, merge and splits, the command line |
 | `repo/` | the repository itself: layout, registry, imports, documents, examples |
 | `support/` | modules shared by gates (the differential harness, the self-consistency oracle, the soundness canaries, a Prop-world builder); `harness.py` is also a gate |
 | `fuzz/`, `bench/` | the environment fuzzer and the kernel micro-benchmarks (not gates) |
-| `golden/` | pinned data of S40, S41, S43 (statements and action sequences; `S40_UPDATE_GOLDEN=1` etc. rewrite them when a change is intended) |
+| `golden/` | pinned data of S40, S41, S43, S48 (statements, action sequences, generated digests; `S40_UPDATE_GOLDEN=1` etc. rewrite them when a change is intended) |
 
 Modules are imported by plain name from anywhere in `src/python` and `tests` (see `src/python/itp_paths.py`), so a gate can `import gym_env` or `import harness` without a path.
 
@@ -112,6 +114,12 @@ Times are seconds on the 2-core box with two gates at a time (the last full run,
 | gate | time | what it protects |
 |---|---|---|
 | `s44_ml_tests.py` | 105 s | The learner's machinery -- features, the policy network, the search it guides, the Gymnasium environment (budget, goal-conditioned reset, achieved goals) and the policy-gradient bookkeeping. |
+
+### The synthetic theorem generator (`tests/synth`; `run_gates.py --synth`)
+
+| gate | time | what it protects |
+|---|---|---|
+| `s48_synth_tests.py` | 70 s | The synthetic theorem generator (`src/python/synth`, `docs/GENERATOR.md`) and its datasets -- the polynomial normal form behind "tidy"; records that are a function of (configuration, index) in any order, in a new generator and in other processes with other hash seeds; every record replayed from its own data in a fresh engine and judged by the independent checker; about thirty tamper cases; merge, splits (no recipe of `test_comp` elsewhere), exclusion of library lemmas, bank problems and sub-theorems; the command line end to end. |
 
 ### The repository (`tests/repo`; `run_gates.py --repo`)
 

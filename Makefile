@@ -2,13 +2,14 @@
 PY ?= python3
 J  ?= 2
 
-.PHONY: help kernel gates gates-ml gates-repo gates-all dataset-verify examples mutants-check sanitize dist clean
+.PHONY: help kernel gates gates-ml gates-repo gates-synth gates-all dataset-verify examples mutants-check sanitize dist clean
 
 help:
 	@echo "make kernel          build the hybrid kernel and the frozen reference kernel into build/"
 	@echo "make gates           the 47 kernel / tactic / environment / bank gates (about 10 minutes on two cores)"
 	@echo "make gates-ml        the learner's gate S44 (needs torch and gymnasium)"
 	@echo "make gates-repo      the repository gates: S45 layout, S46 examples"
+	@echo "make gates-synth     the synthetic theorem generator's gate S48"
 	@echo "make gates-all       every gate"
 	@echo "make dataset-verify  replay every recorded proof of data/dataset_v1 in a fresh engine (about 1 minute)"
 	@echo "make examples        run the examples"
@@ -28,6 +29,9 @@ gates-ml: kernel
 
 gates-repo: kernel
 	$(PY) tests/run_gates.py -j 1 s45_layout_tests.py s46_examples_tests.py
+
+gates-synth: kernel
+	$(PY) tests/run_gates.py s48_synth_tests.py
 
 gates-all: kernel
 	$(PY) tests/run_gates.py -j $(J) --all

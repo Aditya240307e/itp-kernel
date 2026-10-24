@@ -17,7 +17,8 @@ Targets: IMO-level algebra and number theory first (the problem bank is the begi
 | Problem bank | 82 formal problems (9 IMO), levels 1-5, each with its text, a checked-faithful formal statement, and kernel-checked reference proofs as sequences of actions; dataset v1 in `data/dataset_v1`, with a label for every action (direction, depth, size of the subtree) and the 1 800-odd theorems that the reference proofs contain, each with its own proof |
 | Environment | `gym_env` / `gym_acts`: goals as data, menus of legal actions, actions that *say* their term arguments, atomic probes; `gym_tree`: the proof tree of an episode and the theorems it proved (hindsight); `learner/bank_env.py` is a Gymnasium environment (`ITPBank-v0`) that starts on any goal given as data, has a step budget and reports what each action achieved |
 | Learner | features, a transformer + GRU policy network over *options*, behaviour cloning, policy-guided IDA\* search, REINFORCE / filtered-BC loops. A baseline, not a result: see `docs/TRAINING.md` |
-| Tests | 47 kernel / tactic / environment / bank gates, the learner's gate S44, the repository gates S45-S46; 1615 mutants of the code to prove the gates bite |
+| Synthetic data | `src/python/synth`: a generator of kernel-checked theorems (proof trees grown backwards from the library's lemmas, labelled by depth, lemmas and hypotheses; reproducible from a seed and an index; verified from the data alone), shards, splits and a dataset card; see `docs/GENERATOR.md` |
+| Tests | 47 kernel / tactic / environment / bank gates, the learner's gate S44, the repository gates S45-S46, the generator's gate S48; 1615 mutants of the code (kernel and tools; none yet for `synth`) to prove the gates bite |
 
 ## Quick start
 
@@ -57,11 +58,12 @@ src/python/library/        the libraries, built by tactic scripts: naturals, bin
 src/python/environment/    the gym: engine, action language, typed term builder, policy assembler, search, recorder
 src/python/problems/       the problem bank, faithfulness checks, splits, the dataset builder
 src/python/learner/        features, network, training, guided search, RL, the Gymnasium environment
-tests/                     the gates by role (kernel, library, environment, problems, learner, repo), shared modules (support), fuzzers, benchmarks, golden files
+src/python/synth/          the synthetic theorem generator: lemma pool, proof trees grown backwards, records, shards, merge and splits, verification from the data alone (docs/GENERATOR.md)
+tests/                     the gates by role (kernel, library, environment, problems, learner, synth, repo), shared modules (support), fuzzers, benchmarks, golden files
 mutants/                   the mutation catalogue (1615 mutants) and its driver
 examples/                  runnable examples; examples/repros holds scripts that reproduce fixed defects
 data/dataset_v1/           the dataset (JSON + card + manifest);  data/results/ the result files of the baseline runs
-docs/                      FINDINGS (the tracker), ROADMAP, KERNEL_DESIGN, ACTIONS, BANK, ARCHITECTURE_RL, TRAINING
+docs/                      FINDINGS (the tracker), ROADMAP, KERNEL_DESIGN, ACTIONS, BANK, ARCHITECTURE_RL, TRAINING, GENERATOR
 legacy/                    the previous generation's modules, tests and notes (some gates import curriculum / hypergraph from here)
 tools/                     sanitizer run, release archive
 ```
@@ -74,6 +76,7 @@ Modules are imported by their plain names (`import gym_env`); the names are uniq
 * `docs/FINDINGS.md` -- every defect and design decision found so far, with the test that pins it.
 * `docs/BANK.md`, `docs/ACTIONS.md` -- the problem bank (what makes a formal statement *the* problem) and the action language.
 * `docs/ARCHITECTURE_RL.md` -- how a learner should be structured to climb from imitation to a manager/worker design; `docs/TRAINING.md` -- what exists and what it achieves (little, honestly).
+* `docs/GENERATOR.md` -- the synthetic theorem generator: how a theorem and its proof are grown, what is rejected and why, how the data are reproduced and verified, what they do not show.
 * `docs/ROADMAP.md` -- what is missing for IMO-level and undergraduate mathematics, and a calibrated plan.
 * `tests/README.md` (the gates), `mutants/README.md` (mutation testing), `legacy/README.md`.
 

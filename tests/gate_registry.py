@@ -25,3 +25,5 @@ GATE_CMDS = (['kernel/s2_tests.py', '1500'], ['kernel/s26_memo_tests.py'], ['ker
 ML_GATE_CMDS = (['learner/s44_ml_tests.py'],)
 # the gates of the repository itself (its layout, its examples); `run_gates.py --repo`
 REPO_GATE_CMDS = (['repo/s45_layout_tests.py'], ['repo/s46_examples_tests.py'])
+# the gate of the SYNTHETIC THEOREM GENERATOR and the datasets it writes (src/python/synth); `run_gates.py --synth`. It needs neither torch nor a mutant run: a mutant of the kernel is caught by the gates above.
+SYNTH_GATE_CMDS = (['synth/s48_synth_tests.py'],)

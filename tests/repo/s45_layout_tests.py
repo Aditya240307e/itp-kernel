@@ -1,6 +1,6 @@
 """S45 gate: the repository's layout is the layout the documentation describes, and stays so.
 
-The project is organised by ROLE (src/c++ and src/python/{authoring,checker,library,environment,problems,learner}; tests/{kernel,library,environment,problems,learner,repo,support};
+The project is organised by ROLE (src/c++ and src/python/{authoring,checker,library,environment,problems,learner,synth}; tests/{kernel,library,environment,problems,learner,synth,repo,support};
 mutants; examples; docs; data; legacy), while every module is imported by its plain name -- `import gym_env` -- because src/python/itp_paths.py puts each directory on sys.path.  That is convenient
 and fragile in exactly the ways this gate watches:
 
@@ -50,13 +50,13 @@ def walk(top=ROOT):
         for f in sorted(files): yield os.path.join(d, f)
 
 
-GATE_DIRS = ('kernel', 'library', 'environment', 'problems', 'learner', 'repo')
+GATE_DIRS = ('kernel', 'library', 'environment', 'problems', 'learner', 'synth', 'repo')
 NOT_GATES = ('bench', 'fuzz', 'support')                        # scripts and helper modules under tests/ that are not gates
 
 
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ A. the registry
 def sec_A():
-    cmds = list(REG.GATE_CMDS) + list(REG.ML_GATE_CMDS) + list(REG.REPO_GATE_CMDS)
+    cmds = list(REG.GATE_CMDS) + list(REG.ML_GATE_CMDS) + list(REG.REPO_GATE_CMDS) + list(REG.SYNTH_GATE_CMDS)
     paths = [c[0] for c in cmds]
     for c in cmds: expect(os.path.isfile(os.path.join(itp_paths.TESTS, c[0])), 'A  registered gate %s does not exist' % c[0])
     expect(len(paths) == len(set(paths)), 'A  a gate is registered twice: %s' % sorted(p for p, n in collections.Counter(paths).items() if n > 1))
@@ -99,7 +99,7 @@ def sec_B():
 
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ C. bootstrap line
 def sec_C():
-    files = python_files('src/python/*/*.py', 'tests/kernel/*.py', 'tests/library/*.py', 'tests/environment/*.py', 'tests/problems/*.py', 'tests/learner/*.py', 'tests/repo/*.py',
+    files = python_files('src/python/*/*.py', 'tests/kernel/*.py', 'tests/library/*.py', 'tests/environment/*.py', 'tests/problems/*.py', 'tests/learner/*.py', 'tests/synth/*.py', 'tests/repo/*.py',
                          'tests/support/*.py', 'tests/fuzz/*.py', 'tests/bench/*.py', 'examples/*.py', 'examples/*/*.py')
     missing = [rel(p) for p in files if 'import itp_paths' not in read(p)]
     expect(not missing, 'C  files without the bootstrap line (import itp_paths): %s' % missing[:8])
@@ -181,10 +181,10 @@ REQUIRED_FILES = ['README.md', 'Makefile', 'requirements.txt', '.gitignore',
                   'src/c++/hybrid/itp_kernel.hpp', 'src/c++/hybrid/itp_bindings.cpp', 'src/c++/reference/itp_kernel.hpp', 'src/c++/reference/itp_bindings.cpp', 'src/c++/reference/README.md',
                   'src/python/itp_paths.py', 'src/python/build_kernel.py',
                   'tests/README.md', 'tests/run_gates.py', 'tests/gate_registry.py', 'mutants/README.md', 'mutants/mutate.py', 'mutants/catalogue.py', 'legacy/README.md', 'tools/sanitize.py',
-                  'docs/FINDINGS.md', 'docs/ROADMAP.md', 'docs/BANK.md', 'docs/ACTIONS.md', 'docs/KERNEL_DESIGN.md', 'docs/ARCHITECTURE_RL.md', 'docs/TRAINING.md',
+                  'docs/FINDINGS.md', 'docs/ROADMAP.md', 'docs/BANK.md', 'docs/ACTIONS.md', 'docs/KERNEL_DESIGN.md', 'docs/ARCHITECTURE_RL.md', 'docs/TRAINING.md', 'docs/GENERATOR.md',
                   'data/dataset_v1/bank.json', 'data/dataset_v1/splits.json', 'data/dataset_v1/library.json', 'data/dataset_v1/manifest.json', 'data/dataset_v1/DATASET_CARD.md']
-REQUIRED_DIRS = ['src/python/authoring', 'src/python/checker', 'src/python/library', 'src/python/environment', 'src/python/problems', 'src/python/learner',
-                 'tests/kernel', 'tests/library', 'tests/environment', 'tests/problems', 'tests/learner', 'tests/repo', 'tests/support', 'tests/golden', 'examples', 'data/results']
+REQUIRED_DIRS = ['src/python/authoring', 'src/python/checker', 'src/python/library', 'src/python/environment', 'src/python/problems', 'src/python/learner', 'src/python/synth',
+                 'tests/kernel', 'tests/library', 'tests/environment', 'tests/problems', 'tests/learner', 'tests/synth', 'tests/repo', 'tests/support', 'tests/golden', 'examples', 'data/results']
 TOP_LEVEL = {'README.md', 'Makefile', 'requirements.txt', '.gitignore', '.git', 'build', 'dist', 'artifacts', 'src', 'tests', 'mutants', 'examples', 'docs', 'data', 'legacy', 'tools', '.venv',
              'MANIFEST.sha256', 'RELEASE.txt'}                      # (the last two: what tools/make_dist.py adds to a release archive, hence present in an extracted one)
 
@@ -205,7 +205,7 @@ def sec_H():
 def sec_I():
     text = read(os.path.join(ROOT, 'Makefile'))
     targets = re.findall(r'^([a-z][a-z0-9_-]*):', text, flags=re.M)
-    wanted = {'help', 'kernel', 'gates', 'gates-ml', 'gates-repo', 'dataset-verify', 'examples', 'mutants-check', 'dist', 'clean'}
+    wanted = {'help', 'kernel', 'gates', 'gates-ml', 'gates-repo', 'gates-synth', 'dataset-verify', 'examples', 'mutants-check', 'dist', 'clean'}
     expect(wanted <= set(targets), 'I  the Makefile lacks targets %s' % sorted(wanted - set(targets)))
     if shutil.which('make') is None: return
     for t in targets:
