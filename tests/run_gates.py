@@ -35,7 +35,7 @@ def run_one(cmd, timeout):
 
 
 def main(argv):
-    jobs, timeout, names, extra = 2, 1800, [], []
+    jobs, timeout, names, extra = 2, 5400, [], []                   # (a gate that runs longer than this is hung: S50 takes about half an hour, S43 and S46 up to ten minutes)
     it = iter(argv)
     for a in it:
         if a == '-j': jobs = int(next(it))
