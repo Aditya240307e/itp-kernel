@@ -19,7 +19,7 @@ contest tiers (the 72 graded problems are pinned by S41/S43) are kernel-checked 
                            the proofs one after the other grew past 5 GB, the limit of a run on the reference machine is 5.8 GB, and the kernel killed it: finding F86.)
 
 Environment: S50_TRACE=1 prints timings and memory, S50_ONLY=A,B selects sections, S50_LIMIT=n restricts D and E to the first n proved contest problems (a quick run; the gate itself runs them all), S50_E=i/n or
-S50_E=all selects the proofs E judges (default 0/8), S50_E_MEM=n the megabytes one independent check may use (default 2000).
+S50_E=all selects the proofs E judges (default 0/8), S50_E_MEM=n the megabytes one independent check may use (default 1500: the gate itself holds about 3 GB and a run is limited to 5.8 GB on the reference machine).
 """
 import os as _os, sys as _sys; _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', '..', 'src', 'python')); import itp_paths  # noqa: E402,F401
 import os, sys, time, json, random, collections, traceback, gc
@@ -39,7 +39,7 @@ ONLY = set(os.environ['S50_ONLY'].split(',')) if os.environ.get('S50_ONLY') else
 LIMIT = int(os.environ['S50_LIMIT']) if os.environ.get('S50_LIMIT') else None
 E_SPEC = os.environ.get('S50_E', '0/8')                          # which proofs the independent checker judges (section E): 'i/n' = the proofs number i, i+n, i+2n, ... of the list ('0/8': every eighth, a sample); 'all'
 E_I, E_N = (0, 1) if E_SPEC == 'all' else tuple(int(x) for x in E_SPEC.split('/'))
-E_MEM = int(os.environ.get('S50_E_MEM', '2000'))                       # MB of memory one independent check (a process of its own) may use beyond what it inherits from the gate (section E)
+E_MEM = int(os.environ.get('S50_E_MEM', '1500'))                       # MB of memory one independent check (a process of its own) may use beyond what it inherits from the gate (section E)
 
 
 def rss_mb():
@@ -447,7 +447,7 @@ def sec_E(c):
     errors = [(n, v[1][:80]) for n, v in verdicts.items() if v[0] == 'error']
     no_verdict = [(n, v[0]) for n, v in verdicts.items() if v[0] in ('memory', 'timeout', 'killed')]
     # (a proof can be more than a Python program that walks it can hold: the checker works on terms with named variables and shares nothing, so a proof by computation with big numerals -- aime1983_p6 -- needs
-    # several GB. Such a proof gets no verdict, which is said; a REJECTION or an error fails the gate, and so does a sample in which fewer than three of five proofs are judged.)
+    # more than 1.5 GB. Such a proof gets no verdict, which is said; a REJECTION or an error fails the gate, and so does a sample in which fewer than three of five proofs are judged.)
     expect(judged and not rejected and not errors and len(accepted) * 5 >= len(judged) * 3, 'E1 the independent checker accepts the proofs of the contest problems it is given, for their statements (S50_E=%s: %d of the %d proofs, each in a process of its own, environments of up to %d globals of %d, at most %d MB used by one; accepted %d, rejected %s, errors %s, no verdict within %d MB and the time limit: %s)' % (E_SPEC, len(judged), len(names), env_max, k.num_globals(), mem_max, len(accepted), rejected[:2], errors[:2], E_MEM, no_verdict[:4]))
     trace('E1 %d proofs judged in %.1f s: %d accepted, %d no verdict' % (len(judged), time.time() - t0, len(accepted), len(no_verdict)))
     # ---- E2. negative controls: a proof for the statement of another problem, and a lemma of the library for a problem

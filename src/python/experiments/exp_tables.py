@@ -138,7 +138,10 @@ def strict_table(C, P, variants=('bc_scratch', 'bc', 'ppo', 'ei_her', 'ei_her_bo
     """the problems whose helper lemmas can be hidden: the same models with the helpers on the menu (prefix) and hidden (strict)"""
     S = C.view('strict'); B = P.get('headline')
     names = sorted({r['name'] for r in S.rows if r['group'] == 'main' and r.get('split') in ('dev', 'test')})
-    if not names: return None
+    if not names:                                       # (a world without such problems -- a smoke run -- has no strict task; the table says so, so that the paper's reference to it resolves)
+        return Table('strict', 'Dev and test problems whose helper lemmas can be hidden: there are none in this run.',
+                     ['Method', 'prefix (helpers available)', 'strict (helpers hidden)'], [['--', '--', '--']],
+                     notes=['No dev or test problem of this run has helper lemmas, so the prefix and the strict regime are the same task and there is nothing to compare.'], align='lrr')
     rows = []
     for v in variants:
         if v not in C.variants('main'): continue
