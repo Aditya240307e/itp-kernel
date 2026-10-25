@@ -229,7 +229,9 @@ def fig_solvers(C, P, out, plt):
     groups = [(g, v) for g in ('solvers', 'mw') for v in C.variants(g)]
     budgets = [b for b in P.get('eval_budgets', ()) if b <= P.get('eval_probes', 1e18)]
     if not groups or not budgets: return None
-    fig, axes = plt.subplots(1, len(groups), figsize=(3.4 * len(groups), 2.8), squeeze=False); axes = axes[0]; drawn = 0
+    ncols = min(2, len(groups)); nrows = -(-len(groups) // ncols)                                     # (a grid of at most two columns: a row of four panels is unreadable at the width of a page)
+    fig, axes = plt.subplots(nrows, ncols, figsize=(3.4 * ncols, 2.7 * nrows), squeeze=False); axes = list(axes.ravel()); drawn = 0
+    for ax in axes[len(groups):]: ax.set_visible(False)
     for ax, (g, v) in zip(axes, groups):
         for s in C.solvers(g, v):
             colour, ls, mk, label = SOLVER_STYLE.get(s, (GREY, '-', 'o', s))
@@ -238,7 +240,7 @@ def fig_solvers(C, P, out, plt):
         ax.set_xscale('log'); ax.set_xticks(budgets); ax.set_xticklabels([str(b) for b in budgets], fontsize=6.5); ax.minorticks_off(); ax.set_ylim(bottom=0); pct_axis(ax)
         ax.set_title('%s (test)' % TB.LABELS.get(v, v), fontsize=7.5); ax.set_xlabel('probes per problem (log)')
         ax.legend(frameon=False, loc='upper left', fontsize=6.3)
-    axes[0].set_ylabel('problems solved (%)')
+    for ax in axes[:len(groups):ncols]: ax.set_ylabel('problems solved (%)')
     if not drawn: plt.close(fig); return None
     fig.tight_layout(); return save(plt, fig, out, 'fig_solvers')
 

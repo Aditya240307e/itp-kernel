@@ -43,7 +43,7 @@ make smoke                               # the whole pipeline on a tiny world: d
 PROFILE=small SEEDS=0-2 make experiments        # the shape of every result: the whole bank, 5 000 synthetic train theorems, 3 seeds
 DEVICE=cuda PROFILE=full SEEDS=0-6 make experiments      # the paper: 60 000 synthetic train theorems, 7 seeds (default 5); resumable, `make status` says where it is
 ./scripts/run_all.sh --profile full --seeds 0-6 --device cuda      # the same, as options of the script (every setting is one: `--help`)
-make report ; make paper                 # tables, figures, numbers (paper/generated/); paper/main.pdf (needs latexmk)
+make report ; make paper                 # tables, figures, numbers (paper/generated/); paper/main.pdf (needs latexmk and the Latin Modern fonts, which tmlr.sty loads)
 ```
 
 Every script finds the repository through its own location (`src/python/itp_paths.py`), so it works from any directory; `ITP_BUILD_DIR` selects another build directory.
@@ -77,7 +77,7 @@ src/python/learner/        features, network, training (ml_bc, ml_ei, ml_ppo), p
 src/python/synth/          the synthetic theorem generator: lemma pool, proof trees grown backwards, records, shards, merge and splits, verification from the data alone (docs/GENERATOR.md)
 src/python/experiments/    the experiment graph, scheduler, collector, statistics, tables, figures, throughput benchmarks, report (docs/EXPERIMENTS.md)
 scripts/                   the shell scripts that run the experiments (00_check_env ... 07_report, run_all, smoke_test, status; env.sh and local.env.example hold the settings)
-paper/                     the TMLR paper skeleton (main.tex, bibliography, style) and generated/ (tables and figures from `make report`)
+paper/                     the TMLR paper skeleton (main.tex, bibliography, style) and generated/ (tables and figures from `make report`); a release archive also holds main.pdf as it was before any run (the facts counted from the repository filled in, `??name` where a number needs a run, a box where a table or figure does)
 tests/                     the gates by role (kernel, library, environment, problems, learner, synth, repo), shared modules (support), fuzzers, benchmarks, golden files
 mutants/                   the mutation catalogue (1616 mutants) and its driver
 examples/                  runnable examples; examples/repros holds scripts that reproduce fixed defects

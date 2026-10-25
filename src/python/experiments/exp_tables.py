@@ -50,13 +50,14 @@ class Table:
         w = []
         for k in range(len(self.header)):
             cells = [str(self.header[k])] + [str(r[k]) for r in self.rows if k < len(r)]
-            lo = max((len(t) for c in cells for t in c.split()), default=1); hi = min(max((len(c) for c in cells), default=1), 36)
-            w.append(max(lo + 1.0, 0.5 * hi))
+            words = [c.replace(' ± ', '±') for c in cells]                                    # (a "33.3 ± 0.0" cell is written with ties around the sign: it does not break, so it is one word)
+            lo = max((len(t) for c in words for t in c.split()), default=1); hi = min(max((len(c) for c in cells), default=1), 36)
+            w.append(max(lo + 1.5, 0.5 * hi))
         return w
     def tex(self):
         def esc(s):
-            s = str(s).replace('±', r'$\pm$').replace('Δ', r'$\Delta$').replace('%', r'\%').replace('&', r'\&').replace('_', r'\_').replace('≤', r'$\leq$').replace('×', r'$\times$').replace('~', r'$\sim$').replace('–', '--')
-            return s
+            s = str(s).replace(' ± ', '\x00').replace('±', r'$\pm$').replace('Δ', r'$\Delta$').replace('%', r'\%').replace('&', r'\&').replace('_', r'\_').replace('≤', r'$\leq$').replace('×', r'$\times$').replace('~', r'$\sim$').replace('–', '--')
+            return s.replace('\x00', r'~$\pm$~')                                                      # (a "mean ± half-width" cell is tied around the sign: it never breaks)
         w = self.column_widths(); tot = sum(w);
         size = r'\scriptsize' if tot > 95 else (r'\footnotesize' if tot > 70 else r'\small')
         spec = ''.join((r'>{\raggedright\arraybackslash}' if (a == 'l' or k == 0) else r'>{\raggedleft\arraybackslash}') + r'p{\dimexpr %.4f\linewidth-2\tabcolsep\relax}' % (w[k] / tot)
@@ -220,7 +221,7 @@ def level_table(C, P, variants=('bc_scratch', 'bc', 'ppo', 'ei_her', 'ei_her_boo
     for s in srcs:
         names = [n for n in C.names('test', 'all') if EC.source_class(C.info[n]['source']) == s]
         if names: rows.append([s, len(names)] + [cell(v, names) for v in present])
-    return Table('levels', 'Test problems solved (%%) within %s probes by level of the bank (1 = routine ... 4 = olympiad hard) and by the contest the problem comes from.' % B, ['group', 'problems'] + [LABELS.get(v, v) for v in present], rows,
+    return Table('levels', 'Test problems solved (%%) within %s probes by level of the bank (1 = one routine step ... 5 = a hard olympiad problem) and by the contest the problem comes from.' % B, ['group', 'problems'] + [LABELS.get(v, v) for v in present], rows,
                  notes=['A row with few problems has an interval wider than its entry shows; read it as a profile, not a ranking.'], align='lr' + 'r' * len(present))
 
 

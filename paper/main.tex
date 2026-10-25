@@ -247,7 +247,7 @@ Table~\ref{tab:hyper} (appendix) lists every setting; \todo{machine, from genera
 \item \textbf{Size.} The benchmark has \N{BankProblems} problems and the test split \N{NTest}; intervals over problems are wide, and a few problems decide a percentage point. We report both the interval over seeds and the bootstrap over problems for this reason.
 \item \textbf{Statement-only problems.} \N{BankStatementOnly} problems have no known proof in the library; success rates on them are lower bounds on solvability, and \emph{proved} and \emph{statement-only} are reported separately.
 \item \textbf{Helper lemmas.} In the prefix regime a problem's own helper lemmas are given. We report the helper-free subset and the strict regime for this reason, but the benchmark does not control how much a library lemma gives away.
-\item \textbf{Paraphrased texts.} The problem texts are paraphrases, some from memory (label \code{recalled}), and a part of the ``contest'' items are written in the manner of a contest; the benchmark does not reproduce official problems verbatim and was not checked by the organisers of any competition.
+\item \textbf{Paraphrased texts.} The problem texts are paraphrases, some from memory (label \code{recalled}); the \N{BankAmc} AMC-style problems were written for the bank in the manner of that contest and are not AMC problems; the benchmark does not reproduce official problems verbatim and was not checked by the organisers of any competition.
 \item \textbf{Integers, no reals, no geometry or combinatorics.} Inequalities are over the integers; the library has no real numbers, no abstract algebraic structures (no type classes: groups, rings, fields are not in the library), no geometry and no combinatorics beyond what divisibility and induction give. The benchmark is a slice of olympiad algebra and number theory, not of olympiad mathematics.
 \item \textbf{Synthetic data.} The generator's proofs are backward chains; of the \N{GenKinds} action kinds that occur, a few dominate. Saturation statistics show how much of the skeleton space has been seen, not whether the unseen part matters.
 \item \textbf{Compute parity.} PPO and expert iteration are compared at equal iterations and also by cumulative probes in the logs; they are not tuned to equal wall-clock, and no hyper-parameter was tuned per method.
@@ -277,7 +277,7 @@ The work targets mathematics education and automated reasoning; kernel-checked p
 
 \section{Additional figures}\label{app:figures}
 \genfigure{fig_bc}{0.98}{Behaviour cloning: training loss, held-out loss and held-out action accuracy against the epoch, for pre-training, training from scratch and fine-tuning.}
-\genfigure{fig_levels}{0.9}{Test problems solved (\%) by level and by contest.}
+\genfigure{fig_levels}{0.9}{Test problems solved (\%) by level of the problem (the number of test problems in parentheses); Table~\ref{tab:levels} also gives the contest.}
 
 \section{The problems}\label{app:problems}
 The file \code{problems.csv} in the report lists every problem with its source, level, split, whether it has a reference proof, its origin and verification label, and the length of the proof. The dataset card (\code{DATASET\_CARD.md}) describes the construction, the checks and the exclusions.

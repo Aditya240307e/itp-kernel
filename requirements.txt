@@ -1,5 +1,5 @@
 # Python dependencies.  The lower bounds are the versions this was developed and tested with (Python 3.13, g++ 13); older ones may well work.
-# The kernel, the tactics, the libraries and the 47 kernel gates need only numpy, scipy and nanobind; torch and gymnasium are for the learner (src/python/learner, gates S44 and S51, example 06);
+# The kernel, the tactics, the libraries and the gates of `make gates` need only numpy, scipy and nanobind; torch and gymnasium are for the learner (src/python/learner, gates S44 and S51, example 06);
 # matplotlib draws the figures of the experiment report (src/python/experiments/exp_figures.py; the tables, the numbers and the statistics need only numpy and scipy).
 numpy>=2.5
 scipy>=1.18

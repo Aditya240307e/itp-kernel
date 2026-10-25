@@ -9,7 +9,7 @@ the experiment matrix is a well-formed graph of commands whose products land whe
   B. THE MATRIX.     The run graph of every profile: unique ids, an acyclic graph whose needs exist, the checks every run promises, the closure of a target, the seeds, the overrides (an unknown field is an error), the
                      machine fields, the synthetic-set exclusion and the training commands (no test data in them), the estimator.
   C. THE COLLECTOR.  A runs directory written by hand (3 seeds, 2 learners, baselines) is read back: solved-within-budget matrices, rates with their intervals, comparisons, the strict view, the subsets, the
-                     report and its numbers, the warnings for a missing result, the contest family of a source and the facts of a report made of the dataset alone (what the paper skeleton prints).
+                     report and its numbers, the warnings for a missing result, the contest family of a source, the facts of a report made of the dataset alone (what the paper skeleton prints) and the LaTeX of a table (escapes; a mean ± half-width cell that cannot break).
   D. HINDSIGHT.      On a small world (17 problems, a dataset built by dataset.py --only): what the Harvest keeps is exactly what the proof tree says was proved, every theorem replays in a fresh engine of another
                      configuration and its code builds the statement back; the filters do what they say; corrupted proofs are dropped and counted; claims.
   E. THE LIBRARY.    Lemmas the agent proved become premises: every rule of admission (one test per reason), the kernel's acceptance, the independent checker's acceptance of a proof that cites a lemma, the window of
@@ -353,6 +353,11 @@ def sec_C(c):
         t = TB.Table('demo', 'cap_tion 50%', ['a', 'b_c', 'd%'], [['x', '1.0 ± 2', '50%'], ['y', 'q_r', '–']])
         s = t.tex()
         expect('\\_' in s and '\\%' in s and '--' in s and '–' not in s and '\\begin{tabular}' in s, 'C26 LaTeX output escapes underscores, percent signs and dashes')
+        # a "mean ± half-width" cell never breaks (the first rendering of the paper showed "33.3 ±" and "0.0" on two lines): it is tied around the sign, and its column is as wide as the whole cell
+        t2 = TB.Table('demo2', 'caption', ['method', 'dev'], [['a long method name that may wrap', '33.3 ± 0.0'], ['b', '20.0 ± 10.5']], align='lr')
+        s2, w2 = t2.tex(), t2.column_widths()
+        expect('33.3~$\\pm$~0.0' in s2 and '20.0~$\\pm$~10.5' in s2 and ' $\\pm$ ' not in s2 and '$\\sim$' not in s2, 'C31 a mean +- half-width cell is tied around the sign in LaTeX (it cannot break)')
+        expect(w2[1] >= len('20.0±10.5') + 1, 'C32 the column of such a cell is as wide as the whole cell: %s' % w2)
         # the contest family of a source, and the facts a report can state before any run (the paper's skeleton prints them: system and benchmark sections)
         expect(EC.source_class('original, in the manner of the AMC') == 'AMC' and EC.source_class('AIME 2001 I Problem 3') == 'AIME' and EC.source_class('IMO 1959 Problem 1') == 'IMO' and EC.source_class('folklore') == 'folklore'
                and EC.source_class('classical (Euclid)') == 'other' and EC.source_class(None) == 'other', 'C28 the contest family of a source: the problems written in the manner of the AMC are AMC problems of the bank (not "other")')
