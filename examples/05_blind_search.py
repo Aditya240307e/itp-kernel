@@ -8,7 +8,7 @@ when some action solves all of them.  The order in which actions are tried comes
 
   1. one problem, in detail:  the tree the search finds;
   2. a handful of problems:   how many probes (tried actions) each needs, in the strict regime (the lemmas written for the problem are hidden);
-  3. what the full blind baselines of the dataset looked like (data/results/blind_*.json: 8000 probes per problem).
+  3. what the full blind baselines looked like on the first dataset (v1, 82 problems: data/results/v1/blind_*.json, 8000 probes per problem; a historical record, not a baseline of dataset v2).
 """
 import os as _os, sys as _sys; _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'src', 'python')); import itp_paths  # noqa: E402,F401
 import json, os
@@ -34,8 +34,8 @@ print('\nblind search, strict regime, 1500 probes (what it cannot do -- an inequ
 print(bank_baseline.table(rows))
 
 # ---------------------------------------------------------------------------------------------------------------------------------------- 3. the recorded baselines
-print('\nthe full blind baselines of dataset v1 (8000 probes, both regimes; rows are problem x regime):')
+print('\nthe full blind baselines of dataset v1, the first 82 problems (8000 probes, both regimes; rows are problem x regime; historical: they are not baselines of dataset v2):')
 for split in ('train', 'dev', 'test'):
-    rows = json.load(open(os.path.join(itp_paths.DATA, 'results', 'blind_%s.json' % split)))['rows']
+    rows = json.load(open(os.path.join(itp_paths.DATA, 'results', 'v1', 'blind_%s.json' % split)))['rows']
     print('  %-5s %3d rows, %3d solved' % (split, len(rows), sum(1 for r in rows if r['solved'])))
 print('EXAMPLE OK')

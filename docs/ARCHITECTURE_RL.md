@@ -1,13 +1,13 @@
 # ARCHITECTURE_RL.md -- from imitation to a manager/worker learner (design note)
 
-Status: **design, not a result** (the environment features E1-E3 and the hindsight extraction of section 3.3 are implemented and gated: `gym_tree.py`, S47, S44 section F; section 5 marks them). Nothing in this file has been trained at scale; the numbers quoted are measurements of the dataset and of the first small experiments (TRAINING.md). The note answers one
+Status: **design, partly built, not a result**. The environment features E1-E4 and the hindsight extraction of section 3.3 are implemented and gated (`gym_tree.py`, S47, S44 section F; the generator of synthetic worker data is `src/python/synth`, S48); the stages S0-S2 (search, expert iteration, hindsight, a growing library, synthetic pre-training) and the manager-worker prover of S3 are implemented too (`ml_ei.py`, `ml_ppo.py`, `ml_hier.py`, `ml_mcts.py`, ...: `TRAINING.md` section 5) and are measured by the experiments of `EXPERIMENTS.md`; section 5 marks what exists. Nothing in this file has been trained at scale; the numbers quoted are measurements of the dataset (v2: 268 problems) and of the first small experiments (dataset v1: `TRAINING.md` section 7). The note answers one
 question: *how should the learner be structured so that it can eventually prove olympiad algebra and number theory, given what the kernel, the environment and the data are today?*
 
 ## 0. Summary
 
 1. **The kernel makes every learner safe, so the architecture can be bold.** A finished proof is checked by the kernel; the learner can be wrong in any way it likes and cannot make a false statement provable.
-2. **The bottleneck today is data and generalisation, not the RL algorithm.** 82 problems, 1 816 demonstration actions (56 train problems), 398 library lemma proofs (1 978 actions). Behaviour cloning (BC) overfits after
-   four epochs; blind search solves 1 of 10 dev problems. A hierarchy that needs more data than a flat policy will not help before the data exists.
+2. **The bottleneck today is data and generalisation, not the RL algorithm.** 268 problems, 187 of them with a reference proof (6 033 actions; 132 train proofs with 4 154 actions), 453 library lemma proofs (2 677 actions). On the first 56 training proofs (dataset v1) behaviour cloning (BC) overfitted after
+   four epochs, and blind search solved 1 of 10 dev problems. A hierarchy that needs more data than a flat policy will not help before the data exists.
 3. **Recommended shape: one network, three roles, trained in stages** -- (a) a *worker* that closes a goal in a short, budgeted sequence of actions (the current assembler network), (b) a *critic* that says how likely
    a goal is to be closed within a budget (the value head, re-targeted), (c) a *manager* whose only extra move is **CLAIM** (say a statement, split the goal into "prove the claim" and "use the claim").
    The manager/worker split is justified by a data argument: the worker's task distribution can be **synthesised at scale** (decision procedures, mutated lemmas) while the manager's must come from real mathematics.
@@ -21,27 +21,27 @@ question: *how should the learner be structured so that it can eventually prove 
 
 | | |
 |---|---|
-| Kernel | hybrid kernel (`src/c++/hybrid`), 47 gates + the learner's gate S44 + the repository gates S45-S46; every proof the agent finishes is re-checked by the kernel (and can be re-checked by the independent checker: `recheck.SecondOpinion`) |
+| Kernel | hybrid kernel (`src/c++/hybrid`), 54 gates; every proof the agent finishes is re-checked by the kernel (and can be re-checked by the independent checker: `recheck.SecondOpinion`) |
 | Environment | `gym_env` (menu actions) and `gym_acts` (actions that *say* terms: CLAIM, FORWARD, REFINE, USE, ...); `gym_policy.Assembler` turns an action into a sequence of discrete **decisions**; `bank_env.BankEnv` is a Gymnasium env at the decision level (no text anywhere) |
-| Bank | 82 problems (9 IMO), levels 1-5, splits by family: train 56 / dev 10 / test 16; 8 problems are strict-regime tasks (self-contained reference proofs) |
-| Demonstrations | 1 816 actions in 82 proofs: **mean 22.1, median 11, max 197 actions per proof**; library: 398 lemma proofs, 1 978 actions, mean 5.0, max 56 |
-| Decomposition | 4 223 of 4 319 actions decompose into assembler decisions; about 4 real choices per action |
+| Bank | 268 problems (41 IMO, 18 ISL, 1 APMO, 31 AIME, 72 AMC-style, 105 others), levels 1-5, 187 with a reference proof and 81 statement-only; splits by family: train 190 / dev 20 / test 58; 10 problems have helper lemmas of their own, 8 of them with a self-contained reference proof for the strict regime |
+| Demonstrations | 6 033 actions in 187 proofs: **mean 32.3, median 11, max 466 actions per proof**; library: 453 lemma proofs, 2 677 actions, mean 5.9, max 94 |
+| Decomposition | about 4 real choices per action; on dataset v1, 4 223 of 4 319 actions decomposed into assembler decisions (the others are terms whose heads fit only up to computation, F61) |
 | Model | transformer over the goal's tokens (window 512) + GRU over the decisions of one action + dot-product scoring of the options; value head = log(1 + actions still needed) |
-| BC | best dev loss at epoch 4, later epochs reach ~0.31 action accuracy but are miscalibrated: **severe overfitting** |
-| Search | blind IDA* solves dev 1/10, test 2/19 rows; the policy-guided search is ~40x slower per probe and has not been evaluated yet |
+| BC | (dataset v1) best dev loss at epoch 4, later epochs reach ~0.31 action accuracy but are miscalibrated: **severe overfitting** |
+| Search | (dataset v1) blind IDA* solved dev 1/10, test 2/16 problems; the policy-guided search is ~40x slower per probe; nothing is measured on dataset v2 yet |
 
-Action mix of the bank demonstrations (what a proof is made of):
+Action mix of the bank demonstrations (what a proof is made of; the 187 reference proofs of dataset v2):
 
 | kind | share | proofs using it | | kind | share | proofs using it |
 |---|---|---|---|---|---|---|
-| LINARITH | 24.8 % | 42 | | APPLY | 4.5 % | 29 |
-| CASES | 16.4 % | 48 | | REWRITE | 4.3 % | 21 |
-| FORWARD | 10.9 % | 62 | | RING | 3.4 % | 34 |
-| **CLAIM** | **9.7 %** | **42** | | REWRITE_AT / LINCOMB | 3.0 / 2.8 % | 11 / 21 |
-| USE | 8.8 % | 40 | | NLINARITH / REFINE | 2.3 / 2.2 % | 23 / 15 |
-| APPLY_WITH | 5.2 % | 18 | | INTERVAL_CASES / INDUCT_WITH | 1.0 / 0.8 % | 13 / 14 |
+| LINARITH | 27.3 % | 128 | | APPLY | 5.3 % | 56 |
+| **CLAIM** | **12.6 %** | **109** | | USE | 4.7 % | 78 |
+| CASES | 12.2 % | 107 | | LINCOMB | 2.0 % | 66 |
+| FORWARD | 11.9 % | 135 | | REWRITE | 1.7 % | 29 |
+| REWRITE_AT | 8.6 % | 48 | | NLINARITH / RING | 1.6 / 1.4 % | 48 / 52 |
+| APPLY_WITH | 8.3 % | 72 | | REFINE / INTERVAL_CASES / INDUCT_WITH | 1.1 / 0.8 / 0.5 % | 23 / 35 / 26 |
 
-Half of the proofs (42 of 82) contain claims, and those use **4.2 claims each** on average: the proofs that have structure have a lot of it. The other half are straight-line (arithmetic closing, case analysis, witnesses).
+109 of the 187 proofs (58 %) contain claims (763 CLAIM actions), and those use **7.0 claims each** on average: the proofs that have structure have a lot of it. The other 42 % are straight-line (arithmetic closing, case analysis, witnesses). The reference proofs use 15 of the 21 kinds of `gym_env.Kind`.
 
 ## 2. What the agent decides
 
@@ -118,7 +118,7 @@ checked against usage in the final proof term, and any shaping is potential-base
 | **S0** BC done right | regularise, augment, multi-task | CE on decisions + critic + next-3-kinds + hypothesis relevance; dropout, weight decay, label smoothing, hypothesis-order and name-invariant augmentation; train on bank + library; early-stop on **dev probes-to-solve**, not dev loss | policy-guided search beats blind search on dev at equal probes (blind: 1/10) |
 | **S1** search + expert iteration (flat) | `PolicySearcher` (IDA* on -log p + step cost) on train problems and library lemmas, retrain on what was found | filtered BC on kernel-verified proofs; **keep subtrees** (rule 2); policy distillation of the search | dev solved rises over iterations; new proofs of train problems differ from the references (diversity) |
 | **S2** worker at scale | synthetic goals + hindsight | rules 1-2 data, goals generated by decision procedures and lemma mutation (section 6), critic trained on search outcomes | worker closes the held-out synthetic split, and the dev gain from S1 does not drop (no forgetting) |
-| **S3** manager | claim proposals | BC on the claim segmentation of demonstrations (177 claims), then rules 3-4; `Q` filters; RL (REINFORCE with baseline, KL to the BC manager) with the final proof as reward | beats S1/S2 at **equal probe budget** on dev; otherwise stay flat |
+| **S3** manager | claim proposals | BC on the claim segmentation of demonstrations (763 claims in 109 proofs), then rules 3-4; `Q` filters; RL (REINFORCE with baseline, KL to the BC manager) with the final proof as reward | beats S1/S2 at **equal probe budget** on dev; otherwise stay flat |
 | **S4** self-play (optional) | the manager as *conjecturer* | claims that the worker proves and that are *used* later become library lemmas | new lemmas improve held-out problems |
 
 Policy-gradient RL (the current `ml_rl.py`, REINFORCE with per-problem baseline) is a fine-tuning tool here, always with a KL penalty to the BC policy; with this reward density the main gains are expected from
@@ -147,9 +147,9 @@ hindsight data, and by keeping a flat baseline at every stage.
 | E1 P0 (done) | **goal-conditioned reset**: start an episode from an arbitrary (context, statement) | worker training on claims, relabelled goals, synthetic goals | `reset(options={'goal': GoalSpec(hyps=[(name, code)], target=code)})`; `tactics.Proof.from_goal` already builds the state | S2 |
 | E2 P0 (done) | **achieved goals in `info`**: statements (typed-builder codes + context id) of hypotheses derived and goals closed at each step | hindsight rules 1-4 | `info['achieved'] = [(kind, code, ctx_id), ...]` | S1 |
 | E3 P0 (done) | **budget** in the observation and in `info` | worker conditioning, options | `obs['budget']`, `info['remaining']`; truncation by the budget | S2 |
-| E4 P0 | **synthetic goal generators** (ring identities, linear-arithmetic implications, divisibility, one-step lemma applications, mutated library lemmas) with the decision procedure's own proof as reference | worker data at scale | `synth.py` producing `(statement, portable proof)` pairs, kernel-checked at generation time | S2 |
+| E4 P0 (done: `src/python/synth`, S48) | **synthetic goal generators** (ring identities, linear-arithmetic implications, divisibility, one-step lemma applications, mutated library lemmas) with the decision procedure's own proof as reference | worker data at scale | the generator produces `(statement, portable proof)` pairs, kernel-checked at generation time (`GENERATOR.md`) | S2 |
 | E5 P1 | **option wrapper**: manager actions = (claim, hand over); the worker runs inside as a callback | manager/worker training and evaluation | `OptionEnv(bank_env, worker=policy, budget=b)` | S3 |
-| E6 P1 | **curriculum sampler**: prioritised by recent success rate in [0.1, 0.9], stratified by level and family | efficient use of 56 train problems | `CurriculumSampler(names, window)` | S1 |
+| E6 P1 | **curriculum sampler**: prioritised by recent success rate in [0.1, 0.9], stratified by level and family | efficient use of the 190 train problems | `CurriculumSampler(names, window)` | S1 |
 | E7 P1 (partly: `BankEnv.episode_record()`) | **episode records**: every episode as portable actions + decisions + outcome (JSONL), appendable to the dataset | expert iteration, reproducibility | `dataset.append_proofs` | S1 |
 | E8 P1 | **vector env**: one world per process, shared dataset directory, deterministic seeds | throughput on bigger machines | `make_vector(n)` over `AsyncVectorEnv` | S1 |
 | E9 P2 | **richer observations**: term-DAG structure (tree depth / binder positions as features), history of kinds in this branch, summary of sibling goals | long goals, manager context | extra arrays, behind flags | S2 |
@@ -165,7 +165,7 @@ Existing safeguards to keep: refused actions are free of side effects (atomic pr
 2. **Several proofs per problem.** Found by search and expert iteration, kept when they differ in structure (kind sequence) from the references; stored next to the reference proof.
 3. **Problem mutants** (not kernel mutants): statement variations that preserve provability by construction -- constants changed, hypotheses reordered, variables renamed, a lemma generalised -- each re-proved by the
    reference proof's *script* or by search; marks the family in the split so that no mutant of a test problem is trained on.
-4. **Lemma corpus growth.** Every problem adds helper lemmas; keep them all with their proofs (398 now) and split by name; flag duplicates of bank statements (done: `bank_duplicate`).
+4. **Lemma corpus growth.** Every problem adds helper lemmas; keep them all with their proofs (453 now) and split by name; flag duplicates of bank statements (done: `bank_duplicate`).
 5. **Annotations for the manager**: claim segmentation of every demonstration (claim, its proof, the continuation), the direction of each action, technique tags (induction, descent, parity, bounding, case split, Vieta-style
    substitution). Derived automatically where possible; used for analysis and for conditioning, never required by the worker.
 6. **Negatives for the critic**: goals searched to budget without a proof, with the budget; statements that are *false* (found by the reference semantics) so that the critic learns to give up early.
@@ -178,11 +178,11 @@ Existing safeguards to keep: refused actions are free of side effects (atomic pr
 * Equal-budget comparisons only. A probe is the unit; wall time is reported separately (the policy-guided search is slower per probe).
 * Ablations in order: blind search -> BC policy -> + critic in the search -> + expert iteration -> + subtree hindsight -> + synthetic worker data -> + manager (claims) -> + claim critic.
   Each arrow must pay for itself on dev before the next is built.
-* Seeds: at least three for every learned result; report the spread (56 train problems make the variance large).
+* Seeds: at least three for every learned result; report the spread (few held-out problems make the variance large: dev 20, test 58).
 
 ## 8. Risks and open questions
 
-* **Tiny data.** Everything learned from 56 train problems overfits; the synthetic worker data and the lemma corpus are the main hope, not the algorithm.
+* **Small data.** Everything learned from the 132 train proofs (56 in the first experiments) overfits; the synthetic worker data and the lemma corpus are the main hope, not the algorithm.
 * **Claim space is unbounded.** The manager must be a ranker over claims generated from the typed builder's pool before it is a free generator (S3 starts with ranking).
 * **Non-stationarity** of the manager while the worker changes: mitigated by relabelling (rule 3) and by freezing the worker between manager phases.
 * **Evaluation leakage** through the lemma corpus: lemmas whose statement equals a bank statement are flagged; keep it that way for mutants.
@@ -192,8 +192,8 @@ Existing safeguards to keep: refused actions are free of side effects (atomic pr
 ## 9. Next steps that need no large run
 
 1. ~~E1-E3 in `bank_env` with tests in S44~~ (done: S44 section F, S47).
-2. ~~Claim segmentation and direction labels~~ (done: `annotations.json`, `subproblems.json`; measured yields: 1678 solved + 189 derived sub-theorems from the 82 reference proofs, 91 sub-proofs longer than 30 actions, 50 candidates dropped because the action changed the context (REWRITE_AT), 7 closed by the engine's settling, the bank proofs use 15 of the 21 action kinds).
-3. `synth.py`: generators for ring / linarith / divisibility goals with their kernel-checked proofs.
+2. ~~Claim segmentation and direction labels~~ (done: `annotations.json`, `subproblems.json`; measured yields on dataset v2: 5 649 solved + 702 derived sub-theorems from the 187 reference proofs, 150 of them with proofs longer than 30 actions (the cap is 60); the reference proofs use 15 of the 21 action kinds).
+3. ~~Generators of synthetic goals with their kernel-checked proofs~~ (done: `src/python/synth`, `GENERATOR.md`, S48; backward chains of lemma applications over divisibility, gcd, order, existence and logic -- no ring / linarith goals, no case splits: `GENERATOR.md` section 9).
 4. S0 regularisation sweep on small models (minutes each), early stopping on dev probes-to-solve; evaluate `bc1.pt` guided vs blind on dev at 1 000 probes.
 5. Re-target the value head (closed within b actions) and test it as a pruning signal in `PolicySearcher`.
 

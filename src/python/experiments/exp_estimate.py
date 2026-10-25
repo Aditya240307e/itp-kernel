@@ -17,7 +17,8 @@ import exp_spec as SP, exp_run as RUN
 
 # the reference machine (2 slow cores, no GPU): measured by scripts/06_benchmarks.sh on the smoke world; override with --bench / --train-rate / --probe-rate
 RATES = {'train_steps_per_s': 55.0, 'probes_per_s': {'sample': 30.0, 'greedy': 30.0, 'ida': 18.0, 'mcts': 5.5, 'mw': 12.0, 'blind': 40.0, 'uniform': 60.0}}
-MEAN_SYNTH_STEPS = 4.9                      # steps (actions) per synthetic theorem: the pilot's mean; read from synth stats when the set exists
+MEAN_SYNTH_STEPS = 5.3                      # steps (actions) per synthetic theorem: the mean of the pilot's 6 024 theorems (5.26)
+GEN_ATTEMPTS_PER_S = 12.0                   # generator attempts per second per core, world builds included: the pilot's 30 000 attempts took 2 473 core-seconds
 
 
 def dataset_counts(ddir):
@@ -61,7 +62,7 @@ def estimate(runs, P, counts, rates, train_rate=None, probe_rate=None, synth_mea
     for r in runs.values():
         t = r.tags; st = r.stage
         if st == 'data':
-            if r.id == 'data/synth_gen': add('data', P['synth_attempts'] / 46.0 / P['synth_jobs'], P['synth_jobs'])                           # the pilot: about 46 attempts per second per core
+            if r.id == 'data/synth_gen': add('data', P['synth_attempts'] / GEN_ATTEMPTS_PER_S / P['synth_jobs'], P['synth_jobs'])           # the first round of `grow`; it adds rounds when the train split falls short of its target
             elif r.id in ('data/synth_verify',): add('data', 60.0 + 0.003 * P['synth_target'])
             else: add('data', 60.0)
         elif st == 'pre': add('pre', P['pre_epochs'] * t['n_synth'] * synth_mean / tr)

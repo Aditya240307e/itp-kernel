@@ -110,8 +110,8 @@ another exception. The ids are those of the world: a dataset names its world by 
 premises=None)` pairs the author's goal with the engine's goal after each call (`align`: a monotone pairing of the
 hypotheses by name and type, plus a fallback for variables introduced after a `have`), translates the call into one or
 more candidate plans of actions (`TRANSLATORS`), keeps the first plan whose probe leaves the goals the author's call
-left, and finally has the kernel verify the term. Coverage of the library: **398 of 400** proofs (the two documented
-gaps are the `match` terms). A result carries `actions`, `portable`, `kinds`, `ops`; `demonstrations(results)` gives
+left, and finally has the kernel verify the term. Coverage of the library: **453 of 459** lemmas (gate S40's library is the whole bank world's library; the six that do not replay are listed with their reasons in BANK.md section 7b: two
+terms with a `match` or a proof by computation, two authored inductions whose hypothesis the engine does not have, two `apply`s whose goals the engine settles itself; the gate pins them by name and reason). A result carries `actions`, `portable`, `kinds`, `ops`; `demonstrations(results)` gives
 them as JSON. The reference proofs of the problem bank are replayed the same way (BANK.md), also with the lemmas
 written for the problem hidden (`premises=`).
 
@@ -122,7 +122,7 @@ kernel accepts and every offered choice is legal; every action kind is accepted/
 nothing; the portable form round-trips and malformed data is `ActionError`; probes leave the kernel as it was; menus are
 bounded and deterministic and every action is found again from its signature; the library's proofs replay (also from JSON
 in a fresh engine, also checked by the independent checker); random play on true and false statements never finishes a false
-one. The mutation driver (`mutate.py`, 1615 mutants of the engine/builder/actions/recorder) measures how much of this
+one. The mutation driver (`mutate.py`, 1616 mutants of the engine/builder/actions/recorder) measures how much of this
 the gates actually pin down.
 
 ## 8. Not done yet

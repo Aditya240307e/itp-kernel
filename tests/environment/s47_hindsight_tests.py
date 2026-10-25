@@ -63,12 +63,12 @@ PINS = {
     'sqrt2_irrational':  (14, 13, 2, {}),
     'frobenius_3_5':     (37, 33, 2, {'too_long': 2, 'duplicates': 1}),
     'n4_n2_1_composite': (7, 6, 0, {'context_changed': 1, 'pi_fact': 1}),
-    'fe_f_x_plus_f_y':   (50, 46, 17, {'too_long': 3, 'context_changed': 1, 'settled_at_once_derived': 3}),
+    'fe_f_x_plus_f_y':   (65, 58, 23, {'too_long': 6, 'context_changed': 1, 'settled_at_once_derived': 3}),      # (50 actions before a problem could not see the theorems of the other problems: it proves their lemmas itself)
 }
 # the whole bank, by the tree alone: actions (= nodes = solved events), derived events, and the actions by direction
-BANK_ACTIONS = 1816
-BANK_DERIVED_EVENTS = 247
-BANK_BY_DIRECTION = {'BACKWARD': 453, 'CLAIM': 177, 'CLOSE': 604, 'FORWARD': 252, 'SPLIT': 330}
+BANK_ACTIONS = 6033
+BANK_DERIVED_EVENTS = 1224
+BANK_BY_DIRECTION = {'BACKWARD': 1267, 'CLAIM': 763, 'CLOSE': 1953, 'FORWARD': 1233, 'SPLIT': 817}      # (data/dataset_v2: annotations.json counts the same directions; its hindsight counts 702 kept + 511 + 10 + 1 dropped = 1224 derived facts)
 SMALL = ('imo1959_p1', 'imo2019_p1', 'ineq_am_gm_two', 'two_pow_gt_n', 'quad_form_zero', 'sqrt2_irrational')      # every example of these is judged by the second checker
 JUDGE = []                                  # (what, proof, statement): handed to the independent checker at the end
 
@@ -434,7 +434,7 @@ def sec_E(c):
     # E5. the engine closes some facts at once: no action to learn from
     ep = fx.run('fe_f_x_plus_f_y')[0]
     ex = ep.tree.examples(kinds=('derived',)); st = dict(ep.tree.stats)
-    expect(st.get('settled_at_once_derived') == 3 and len(ex) == 17 and st.get('not_replayed_derived', 0) == 0, 'E5 a fact the engine\'s settling closes (a hypothesis proves it) is counted as such, not as a failure (%s)' % st)
+    expect(st.get('settled_at_once_derived') == 3 and len(ex) == PINS['fe_f_x_plus_f_y'][2] and st.get('not_replayed_derived', 0) == 0, 'E5 a fact the engine\'s settling closes (a hypothesis proves it) is counted as such, not as a failure (%s)' % st)
     # E6. the record of a problem that is NOT tracked
     ep = G.Episode(eng, fx.bk.placed['imo1959_p1'].stmt, 'imo1959_p1', premises=fx.bk.placed['imo1959_p1'].premises('prefix'))
     expect(ep.tree is None and ep.events == [] and ep.name == 'imo1959_p1', 'E6 an episode made without track keeps no tree')

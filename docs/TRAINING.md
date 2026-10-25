@@ -1,38 +1,42 @@
-# TRAINING.md -- learning to prove on the bank: the pipeline, the protocol, the results
+# TRAINING.md -- learning to prove on the bank: the pipeline, the protocol, and what has (not) been shown
 
-This file says how the learner is built, how it is trained and measured, and what it achieves -- including what it does NOT. Every number below comes from a run whose command is given in section 8 (the
-result files are in `data/results/`); every proof that counts as "solved" is a **kernel-checked proof** (the learner can be wrong in any way it likes; it cannot make a false statement provable). The gate
-S44 (`tests/learner/s44_ml_tests.py`) protects the bookkeeping that the results depend on (section 7).
+This file says how the learner is built, how it is trained and measured, and what it achieves -- including what it does NOT. Every proof that counts as "solved" is a **kernel-checked proof** (the learner can
+be wrong in any way it likes; it cannot make a false statement provable). The experiments of the paper, and the scripts that run them, are in `EXPERIMENTS.md`; the data are in `BANK.md` (the problems) and
+`GENERATOR.md` (the synthetic theorems). The gates S44, S47 and S51 protect the bookkeeping that the results depend on (section 9).
 
-**Status in one paragraph.** The pipeline is complete and tested (features, policy network, behaviour cloning, policy-guided search, REINFORCE / filtered-BC loops, a Gymnasium environment). What has been *run*
-is small: one behaviour-cloning run (30 epochs, 1.56 M parameters, about 73 minutes on one CPU thread), the blind baselines on all three splits, and smoke tests of the policy-guided search and of the RL loop. The
-policy-guided search has **not** been evaluated on the dev or test split, and the RL loop has not been run beyond two iterations of a toy network. Nothing here is evidence that the learner can prove olympiad
-problems; it is evidence that the pipeline works and a baseline to beat. The next steps are in `ARCHITECTURE_RL.md`.
+**Status in one paragraph.** The pipeline is complete and tested: features, a policy network, behaviour cloning (also as pre-training on synthetic theorems), four provers that use the network (sampling, policy-guided
+IDA\*, MCTS, a manager-worker design), expert iteration and PPO, **hindsight** (every goal an attempt closes on the way is a theorem with a proof), a **bootstrapped library** (kernel-checked hindsight theorems
+become premises), a Gymnasium environment, and the experiment pipeline that runs, measures and reports all of it (`scripts/`, `src/python/experiments/`). What has been *run* by its author is small: the first
+measurements on dataset v1 (82 problems; section 7, **historical**), pilots of the generator, and smoke runs of the whole pipeline on a mini world. **No large training run has been made, and nothing has been
+measured on dataset v2**: the baselines and the learned results on the 268 problems are for `scripts/` to produce (on a machine with the cores, and a GPU for the networks, the author does not have here). Nothing in
+this repository is evidence that a learner can prove olympiad problems; it is evidence that the machinery is correct, plus a first baseline that was weak (section 7), and a protocol that will say how weak or
+strong the methods are on a larger scale.
 
 ## 1. The task
 
-An **episode** is one proof attempt of one statement of the bank (`bank_env.BankEnv`). The state is a proof; the agent works on its first open goal. The agent has **no text interface**: it sees the goal as integer
-tokens and acts by answering the engine's questions -- *which kind of action? which lemma? which hypothesis? what is the next token of the term I am saying?* -- each among the **options** the engine says are legal at
-that point (`gym_policy.Assembler`). The assembled action is probed; if it applies it is taken. The episode ends when every goal is closed (the term is then checked by the kernel: reward `solve_reward`) or when a
-limit of actions or decisions is reached.
+An **episode** is one proof attempt of one statement (`bank_env.BankEnv`, or `ml_act` / `ml_search` / `ml_mcts` / `ml_hier` for the provers). The state is a proof; the agent works on its first open goal. The
+agent has **no text interface**: it sees the goal as integer tokens and acts by answering the engine's questions -- *which kind of action? which lemma? which hypothesis? what is the next token of the term I am
+saying?* -- each among the **options** the engine says are legal at that point (`gym_policy.Assembler`). The assembled action is probed; if it applies it is taken. The episode ends when every goal is closed (the
+term is then checked by the kernel: reward `solve_reward`) or when a limit of actions or decisions is reached. An episode may **start on any goal given as data** (`reset(options={'goal': ...})`): a sub-theorem,
+a synthetic theorem, a claim (S47).
 
-Two **regimes** (BANK.md section 3): *prefix* -- every global before the theorem is on the menu (the lemmas written for the problem included); *strict* -- the problem's own helper lemmas are hidden. A problem is a
-strict-regime task only if its reference proof proves its lemmas inline (8 problems). **The prefix regime is much easier than the real task**: for several olympiad problems the reference proof in the prefix regime
-is three actions long because the hard work sits in helper lemmas that are on the menu. Report the strict regime (or the prefix regime with the problem's helpers withheld) whenever a claim is about solving a
-problem.
+Two **regimes** (BANK.md section 3): *prefix* -- every global before the theorem is on the menu (the lemmas written for the problem included); *strict* -- the problem's own helper lemmas are hidden. The prefix
+regime is much easier than the real task for the problems that have helper lemmas of their own (10 of the 268; eight of them have a self-contained reference proof for the strict regime): for `imo2019_p1` the
+reference proof in the prefix regime is three actions long because the hard work sits in helper lemmas that are on the menu. For the other 258 problems the two regimes are the same task. Report the strict
+regime, or the problems **without** helper lemmas, whenever a claim is about solving a problem; the experiments do.
 
-## 2. Data (dataset v1, `src/python/problems/dataset.py`; `data/dataset_v1/DATASET_CARD.md`)
+## 2. Data (dataset v2, `src/python/problems/dataset.py`; `data/dataset_v2/DATASET_CARD.md`)
 
-| | problems | demonstration actions | split rule |
+| | count | demonstration actions | split rule |
 |---|---|---|---|
-| bank (82 problems, 9 IMO, levels 1-5) | train 56 / dev 10 / test 16 | 1816 (+ 546 strict-regime) | by FAMILY, frozen salt 25 |
-| library lemmas (the proofs the recorder replays as actions) | 398 (train 282 / dev 38 / test 78; 3 duplicate a bank problem) | 1978 (train 1420) | by lemma name |
+| bank problems (levels 1-5; `BANK.md`) | 268: **187 proved** (a kernel-checked reference proof), 81 statement-only; train 190 / dev 20 / test 58 | 6 033 (mean 32.3, median 11, max 466 per proof) + 538 for the strict regime of 8 problems | by FAMILY, frozen salt 25 |
+| library lemmas (the proofs the recorder replays as actions) | 453 (train 319 / dev 40 / test 94) | 2 677 (train 1 922); mean 5.9, max 94 | by lemma name |
+| sub-theorems (hindsight dataset: the theorems a reference proof proves on the way) | 6 351: 5 649 closed subtrees + 702 facts one action derived (train 3 879 + 527); 26 of them, all of IMO 1983 P6, have no statement code (a statement of 23 to 30 implications is longer than the 400 tokens a code may have) and the learners leave them out | one proof each | the split of the problem they come from |
+| synthetic theorems (`GENERATOR.md`) | generated by the user's run: 60 000 train + the held-out 12% (`full` profile) | ~5.3 actions per theorem | by statement digest and recipe |
 
-A demonstration is decomposed into the **decisions** of the assembler: 4223 of the 4319 actions decompose (96 do not: REFINE 49, USE 18, CLAIM 17, APPLY_WITH 11, FORWARD 1 -- terms whose heads fit only up to
-computation, F61; they are skipped, the proof continues). About 4 real choices per action; 182 tokens per bank goal on average (the longest goals are cut to fit the 512-token window by dropping the OLDEST
-hypotheses, never the target).
-
-Proof lengths: bank mean 22.1 / median 11 / max 197 actions; library mean 5.0 / max 56. The action mix and the argument for the manager/worker split are in `ARCHITECTURE_RL.md` section 1.
+The statement-only problems have no reference proof: they are goals the learner may try (with probability `--p-hard`) and, in dev and test, lower bounds on what is solvable. A demonstration is decomposed into
+the **decisions** of the assembler (`ml_data`); about 4 real choices per action; the longest goals are cut to the 512-token window by dropping the OLDEST hypotheses, never the target. The action mix and the
+argument for the manager/worker split are in `ARCHITECTURE_RL.md` section 1.
 
 ## 3. The model (`ml_model.py`, `ml_features.py`)
 
@@ -41,92 +45,77 @@ Proof lengths: bank mean 22.1 / median 11 / max 197 actions; library mean 5.0 / 
 * **Goal features** (`ml_features`): the goal is a token sequence `[CLS] hyp_1 [SEP] ... [TGT] target`, every term in prefix order with applications flattened (`APP_n head arg_1 .. arg_n`), constants by global id,
   context variables by level, bound variables by de Bruijn index, binders `PI` / `LAM`. Window 512; `GoalFeat` remembers the span of each hypothesis.
 * **Symbol bags** (`GlobalBags`): a global (lemma, constructor, definition) is also described by the symbols of its type and of its conclusion, so that a lemma never used in a training proof can still be scored by
-  what it talks about; `overlap` (the fraction of those symbols the goal mentions) is an input feature of every option.
+  what it talks about; `overlap` (the fraction of those symbols the goal mentions) is an input feature of every option. A lemma added to the library during training (section 5) gets its bags from its own type.
 * **Encoder**: a transformer over the goal's tokens; the `[CLS]` vector is the goal, the mean over a hypothesis' tokens is the hypothesis.
 * **Decoder**: an action is assembled by a sequence of decisions; a recurrent cell (GRU) carries what has been decided so far (the kind, the lemma, the tokens of the term being said). At each decision a query is
   formed from the goal, the recurrent state, the decision's name, the kind of action and the **hole** (the type of the term being said: the mean of its token embeddings), and every **option** is scored by a dot
   product with its embedding. Options are rows `(otype, a, b, flags)`: a global (symbol embedding, symbols of its type, overlap with the goal), a hypothesis (embedding of its type in the goal), a number (its
   value), a kind of action, a structural token, a range, stop / yes / direction. Nothing about the options is learned per problem.
-* **Value head**: predicts `log(1 + actions still needed)` from the goal (trained on demonstrations; the search may use it).
-* The **incremental** decoder (one decision at a time; used by search and rollouts) and the **batched** forward pass (used by training) are tested to give the same log-probabilities (S44 B, E).
+* **Heads**: a *size* head predicts `log(1 + actions still needed)` from the goal (trained on demonstrations; MCTS may use it as a value), a *manager* head predicts P(the next action is a CLAIM) (the
+  manager-worker prover), a *critic* V(goal, fraction of the budget left, open goals) (PPO).
+* The **incremental** decoder (one decision at a time; used by search and rollouts) and the **batched** forward pass (used by training) are tested to give the same log-probabilities (S44 B, E; S51).
 
 ## 4. Protocol
 
-**Splits.** Train on the train split of the bank (prefix regime, plus the strict-regime proofs where there are two) and of the library lemmas. Dev picks the epoch (and nothing else); test is never read by
-training code. Problems of one family are in one split; there is no leakage through variants of a problem. (The library lemma splits are by name; a lemma used inside a dev problem's proof may be a train lemma --
-that is the intended use of a library.)
+**Splits.** Everything that is trained on comes from the *train* split. Dev picks the starting checkpoint (the behaviour-cloning epoch with the lowest dev loss); **test is never read by training code** and is not
+used to choose anything. Problems of one family are in one split, so there is no leakage through variants of a problem. (The library lemma splits are by name; a lemma used inside a dev problem's proof may be a
+train lemma -- that is the intended use of a library.) `EXPERIMENTS.md` section 6 lists what keeps the test split clean, and S51 tests each point of it.
 
-**Behaviour cloning** (`ml_train.py`): loss = cross-entropy over the options of every non-forced decision + 0.2 x the value-head regression; AdamW with a one-cycle schedule (10 % warm-up) to the peak learning rate
-1e-3, weight decay 0.01, gradient clipping at 1.0, batch 32, 30 epochs, seed 0, one thread. Metrics are teacher-forced: decision accuracy, **action accuracy** (all decisions of an action right), value error, reported for dev-bank, dev-library and both.
+**Behaviour cloning** (`ml_bc.py`): loss = cross-entropy over the options of every non-forced decision + 0.2 x the size-head regression (+ the manager head under `--mw`); AdamW with a one-cycle schedule to the
+peak learning rate, weight decay 0.01, gradient clipping at 1.0. Two stages: *pre-training* on the synthetic theorems alone (`--synth DIR --no-bank`: a library-only world, the policy never sees an olympiad
+problem), then *fine-tuning* on the bank's train split and the library lemmas (`--init pre.pt --lr 3e-4`). Metrics are teacher-forced (decision accuracy, **action accuracy**, size error) on every dev set.
+(`ml_train.py` is the first trainer, of dataset v1; `ml_bc.py` replaces it in the experiments.)
 
-**Search evaluation** (`ml_eval.py`): the unit of cost is the **probe** (one tried action), not seconds. A search is deterministic and its budget only truncates it, so one run at the largest budget gives the whole
-curve: a problem is solved at budget B iff its proof was found after at most B probes. Every proof is replayed on a live proof and checked by the kernel. Rows are (problem, regime); a problem whose strict
-regime equals its prefix regime is one proof. The blind baseline is `gym_search.CostSearcher` (IDA* on action costs) with its default costs; the policy-guided search is `ml_search.PolicySearcher` (cost of an action =
-its negative log-probability under the policy + 0.2 per step; candidate actions enumerated best first; at most the 24 best options of a decision are expanded, and an option less probable than e^-9 is not).
+**Measurement** (`ml_protocol.py`, `ml_evaluate.py`): the unit of cost is the **probe** (one tried action), not seconds. A search is deterministic and its budget only truncates it, so one run at the largest
+budget gives the whole curve: a problem is solved at budget B iff its proof was found after at most B probes. A prover that samples is run with a seed: independent episodes on the problem until one finishes the
+proof or the probes are spent. Every proof is replayed on a live proof, checked by the kernel, and (with `--recheck`) by the independent checker `recheck.py`. **An unsolved search reports `probes = budget + 1`**,
+and "solved within B" read off the run with the largest budget equals a run with budget B (S51 tests it). Rows are (problem, regime).
 
-**RL** (`ml_rl.py`): the policy plays `BankEnv` on TRAIN problems only (bank problems in both regimes; library lemmas, a fraction `--lemma-frac`); reward 1 for a kernel-checked proof minus `--len-penalty` per action;
-decisions that assembled a refused action are pushed down (`--refused-weight`); the policy is kept close to the demonstrations by a behaviour-cloning term (`--bc-coef`). Modes: `reinforce` (per-problem moving-average
-baseline) and `filter` (behaviour cloning on the episodes that finished the proof: expert iteration by rollouts). Dev is only used to watch progress, by sampled rollouts at low temperature.
+**The provers** (`ml_agents.py`, one interface; each spends the same probes):
 
-## 5. Results
+| prover | what it is |
+|---|---|
+| `uniform` | actions chosen uniformly at random from the options the engine offers: the weakest baseline |
+| `blind` | iterative deepening on the engine's own action costs (`gym_search.CostSearcher`): no learning, the baseline every learned prover is compared with |
+| `sample` | the network samples its decisions episode after episode (temperature T) until the probes are spent: the "pass@k" agent |
+| `greedy` | the network's most probable decision at every question: one episode |
+| `ida` | IDA\* on the negative log-probabilities of the policy (`ml_search.PolicySearcher`): the policy decides which actions are tried and in which order |
+| `mcts` | PUCT over proof states, by rollouts or by the size head as value (`mcts:value=critic`) (`ml_mcts.py`) |
+| `mw` | the manager-worker prover (`ml_hier.py`): a manager head proposes a CLAIM, a worker proves it in isolation, the proved claim is transferred by replay |
 
-### 5.1 Blind search (no learning): `data/results/blind_{train,dev,test}.json`
+## 5. The training suite
 
-8000 probes, 400 s per problem, both regimes (rows are problems per regime):
+| piece | module | what it is |
+|---|---|---|
+| hindsight | `ml_her.py` | an attempt that fails still proves things: every goal it closed (a subtree of its proof tree, a goal a search closed on the way, a claim a worker proved) is a theorem with a proof; each is **replayed in a fresh proof state and checked by the kernel** before it is kept; the learners call it on TRAIN tasks only |
+| goals | `ml_goals.py` | where RL episodes start: the train problems (proved ones with a reference proof of at most `--max-ref-len` actions; the others with probability `--p-hard`), the sub-theorems of train proofs (`--p-sub`), synthetic train theorems (`--p-synth`); a **budget** per task from the length of the reference proof (`--budget-mult`) |
+| expert iteration | `ml_ei.py` | iterate: tasks -> an actor (any prover) with a probe budget -> the kernel-checked proofs found (+ with `--her` the hindsight theorems) -> gradient steps on a mix of demonstrations, whole-task proofs and hindsight steps |
+| bootstrapped library | `ml_lemmas.py` | with `--bootstrap`, a hindsight theorem is admitted as the global `boot_NNNN` of the world; see below |
+| PPO | `ml_ppo.py` | the clipped surrogate per decision with the advantage (GAE) of the action it belongs to, a critic head, an entropy bonus and a behaviour-cloning term; reward only for a kernel-checked proof, minus small prices per action and per refused action |
+| manager-worker | `ml_hier.py` | `mw_steps` give a proof the masks and labels the agent samples under, so the likelihood a learner maximises is the probability the agent draws from (`ft/bc_mw`, `ei_mw`) |
+| workers | `ml_pool.py` | processes forked from the one that holds the world (a world of the bank is minutes to build and gigabytes of memory); the pool is forked before CUDA is touched; `Pool(0)` runs in-process |
+| synthetic data | `ml_synth.py` | the generator's train theorems as steps (extraction replays every proof in the engine, ~0.05 s a theorem; 60 000 theorems of 5 steps are ~2.5 GB) |
+| the world | `ml_world.py` | loads the world the dataset describes (refuses a world whose digest differs); `--lemmas FILE` adds the lemmas an earlier run proved |
 
-| split | problems | solved, prefix regime | solved, strict regime | what was solved |
-|---|---|---|---|---|
-| train | 56 | 9 | 9 (of 55 rows) | the polynomial identities (`ident_*`, 1 probe each), `sum_squares_zero` (175 probes, 3 actions), `quad_form_zero` (165 probes, 2 actions) |
-| dev | 10 | 1 | 1 | `ident_diff_squares` (1 probe) |
-| test | 16 | 2 | 1 (of 15 rows) | `ident_brahmagupta` (1 probe), `imo1964_p1a` (1 probe, prefix regime only) |
+**Hindsight.** A theorem found on the way is a closed statement (the goal's hypotheses and target, closed over) with the actions that closed it. It becomes (i) a training example for the policy (its steps), (ii) a
+goal for later episodes, and (iii) under `--bootstrap`, a premise. Without `--her` only the proofs of whole tasks are learned from; with `--p-sub 0` the static sub-theorem goals are also off: the ablation of
+the paper.
 
-Everything the blind search proves is closed by `ring`, `nlinarith` or one lemma plus `nlinarith`. It never finds a proof that needs a witness, an induction, a case split with different branches, or a CLAIM. Several
-unsolved rows stop long before the budget (e.g. `sum_two_squares_mod4` after 496 probes, `imo2019_p1` after 3490): the search exhausted the space it can reach with its cost cap, which says that these proofs need
-actions the plain ranking never offers.
-
-### 5.2 Behaviour cloning: `data/results/bc1_history.json`
-
-30 epochs, 4396 s (about 73 minutes, one thread). Teacher-forced metrics on dev:
-
-| epoch | train loss | train acc | dev loss | dev decision acc | dev action acc | dev-bank action acc | dev-library action acc |
-|---|---|---|---|---|---|---|---|
-| 0 | 2.551 | 0.246 | 2.599 | 0.274 | 0.117 | 0.065 | 0.216 |
-| 2 | 1.761 | 0.409 | 2.037 | 0.384 | 0.222 | 0.225 | 0.216 |
-| **4** | 1.444 | 0.499 | **2.008** | 0.416 | 0.217 | 0.177 | 0.294 |
-| 8 | 1.004 | 0.640 | 2.323 | 0.427 | 0.276 | 0.259 | 0.307 |
-| 15 | 0.536 | 0.803 | 3.075 | 0.446 | 0.285 | 0.253 | 0.346 |
-| 29 | 0.255 | 0.906 | 3.931 | 0.452 | 0.314 | 0.290 | 0.359 |
-
-The dev loss is lowest at epoch 4 and rises steadily afterwards (the model memorises the 56 training proofs: train accuracy 0.91 against dev 0.45), while dev *accuracy* keeps creeping up -- the model becomes
-confident and often wrong, i.e. **miscalibrated**. For a search that uses the probabilities as costs, calibration is what matters, so `bc1.pt` is the epoch-4 checkpoint (best dev loss), `bc1_early.pt` the
-epoch-2 checkpoint. Chance level for a decision is far below these numbers (a menu has about 14 kinds, a term token has tens of options), so the model has learned something; with 56 training proofs it cannot be
-expected to generalise to new mathematics.
-
-### 5.3 Policy-guided search: a smoke test only (`data/results/smoke_policy.json`)
-
-`bc1_early.pt`, prefix regime, 500 probes, four hand-picked dev/test problems: solved `ident_diff_squares` (3 probes) and `imo2019_p1` (36 probes; blind search exhausted its space on it after 3490 probes); did
-not solve `not_dvd_between` or `coprime_consecutive`. This is **one data point chosen by hand, in the easy regime**: the reference proof of `imo2019_p1` in the prefix regime is 3 actions because its helper lemmas are
-on the menu. It shows that the policy can steer the search; it does not measure how much. The full dev/test evaluation (`ml_eval.py` with `--model`) costs about 40x more time per probe than the blind search and was
-not run.
-
-### 5.4 RL: a plumbing test only (`data/results/rl_smoke_history.json`)
-
-Two iterations of REINFORCE with a randomly initialised network of 190 k parameters (6 episodes each): the loop runs, the buffers fill, nothing is learned or claimed.
-
-### 5.5 What we do not know yet
-
-* How much the policy-guided search improves on the blind baseline at equal probes, on dev and test, in the strict regime.
-* Whether regularisation (dropout/weight decay sweeps, smaller models, early stopping on action accuracy, data augmentation by synthetic problems) removes the overfitting, or whether the bottleneck is the amount
-  of data (it probably is: see `ARCHITECTURE_RL.md` section 6).
-* Whether RL from the BC policy (REINFORCE, filtered BC) improves the solve rate on held-out problems; the plan and its stopping rules are in `ARCHITECTURE_RL.md` section 3.4.
+**What the bootstrapped library admits** (`LemmaLibrary.add`; every point is a test of S51): a closed statement with a proof the engine can replay *from the library alone* and the lemmas admitted before it
+(nothing of the problem it came from is visible: its helper lemmas, its definitions), which the kernel checks and the world then defines as `boot_NNNN`; never one whose source is not in the train split;
+never a statement the world already has (up to the renaming of variables), a statement of the bank, or one that says the same as a dev or test problem (the same relation atoms on a grid of small values,
+under any order and naming of the parameters, the test of `bank_dups`); a proof of fewer than `--boot-min-len` actions (one lemma application is not a lemma) or more than `--boot-max-len`; at most
+`--boot-max` lemmas (the vocabulary of the policy has room for `ml_features.GMAX` globals). The lemmas are written to `lemmas.json` with a digest; a model trained with them is evaluated with them
+(`ml_evaluate --lemmas auto` reads the file next to the checkpoint and **fails loudly** if it is missing or its digest differs), and the independent checker reads a proof that uses `boot_NNNN` like any other
+dependency. Only the variant `ei_her_boot` does this; `ei_her` and `ppo` use hindsight theorems as goals and data only, so `ei_her_boot` vs `ei_her` measures the library.
 
 ## 6. The Gymnasium environment (`src/python/learner/bank_env.py`; example 06)
 
 ```python
 import bank_all, bank_env as BE
-bank = bank_all.load()                                              # the world (~20 s)
+bank = bank_all.load()                                              # the world (~1 minute)
 env = BE.BankEnv(bank, names=['imo1959_p1'], regime='prefix', max_actions=40, max_decisions=400)
-obs, info = env.reset(options={'problem': 'imo1959_p1'})
+obs, info = env.reset(options={'problem': 'imo1959_p1'})            # or options={'goal': record}: start on any goal given as data
 obs, reward, terminated, truncated, info = env.step(int(option_index))         # info['action_mask'], info['choice'] describe the next question
 ```
 
@@ -135,43 +124,111 @@ obs, reward, terminated, truncated, info = env.step(int(option_index))         #
   illegal index raises `ValueError` (or loses the decision with `illegal='penalize'`).
 * **Reward**: `solve_reward` (default 1) only for a proof the kernel has checked, minus `action_penalty` per action taken and `fail_penalty` per refused action; **truncation** after `max_actions` actions (taken or
   refused) or `max_decisions` decisions. `rich=True` puts the raw `Choice` / `GoalFeat` objects in `info` (what the learners of this repository use to recompute log-probabilities).
-* `gym.make('ITPBank-v0', split='train')` builds the whole bank (about 20 s) and restricts it to a split. A library lemma can be played like a problem (`lemmas=` argument).
-* Features that a stronger agent will want and the environment does not have yet (CLAIM hints from the goal, a hindsight relabeller, a cheap `solved?` oracle for sub-goals) are listed in `ARCHITECTURE_RL.md` section 5.
+* `gym.make('ITPBank-v0', split='train')` builds the whole bank and restricts it to a split. A library lemma, a sub-theorem or a synthetic theorem can be played like a problem.
 
-## 7. What is tested
+## 7. What was measured on dataset v1 (HISTORICAL; `data/results/v1/`)
 
-S44 (`tests/learner/s44_ml_tests.py`, `run_gates.py --ml`): **A** features and data (a goal's tokens are determined, framed and typed; the symbol overlap of a global with its own type is 1; six bank problems'
-demonstrations decompose without a gap and batch into the documented shapes); **B** the network (incremental decoder = batched forward pass, padding included; weights multiply the loss; a positive weight raises the
-probability of the decisions it is given to, a negative one lowers it; a saved model loads to the same function); **C** the search (the stream of candidate actions is in nondecreasing cost, without repeats; an
-action's cost is the negative log-probability of its decisions; the search proves one-step problems with an untrained network and returns a kernel-checked term whose portable actions replay); **D** the environment
-(Gymnasium's API, mask, rewards only for kernel-checked proofs, truncation, reproducible seeds, scripted runs that solve six problems decision by decision, library lemmas); **E** the RL loop (the log-probabilities
-recorded when a rollout samples are those the batched network gives to the same decisions; a greedy rollout is deterministic).
+These are the first measurements of the pipeline, made on **dataset v1** (82 problems, 9 IMO; 56 train / 10 dev / 16 test) before the problem set was enlarged; they name problems that have since become library
+lemmas or been replaced, and they are **not baselines of dataset v2**. They are kept because they are the only learned-prover numbers this repository has, and because they say honestly how little a first
+learner did.
 
-S45 and S46 (`tests/repo/`, `run_gates.py --repo`) test the repository: the layout, the registry, imports from a fresh interpreter, the frozen kernel's checksums, the documents' links, the dataset's digests, and that
-every example runs. The kernel, tactic, environment and bank gates (46) protect everything below the learner.
+**Blind search (no learning)**, 8000 probes, 400 s per problem, both regimes (`blind_{train,dev,test}.json`):
 
-## 8. Reproduce
+| split | problems | solved, prefix regime | solved, strict regime | what was solved |
+|---|---|---|---|---|
+| train | 56 | 9 | 9 (of 55 rows) | the polynomial identities (`ident_*`, 1 probe each), `sum_squares_zero` (175 probes, 3 actions), `quad_form_zero` (165 probes, 2 actions) |
+| dev | 10 | 1 | 1 | `ident_diff_squares` (1 probe) |
+| test | 16 | 2 | 1 (of 15 rows) | `ident_brahmagupta` (1 probe), `imo1964_p1a` (1 probe, prefix regime only) |
 
-All commands run from the repository root after `make kernel` (or `python3 src/python/build_kernel.py`). The dataset is `data/dataset_v1`.
+Everything the blind search proves is closed by `ring`, `nlinarith` or one lemma plus `nlinarith`. It never finds a proof that needs a witness, an induction, a case split with different branches, or a CLAIM.
+
+**Behaviour cloning** (`bc1_history.json`): 30 epochs, 1.56 M parameters, 4396 s on one thread. Teacher-forced metrics on dev:
+
+| epoch | train loss | train acc | dev loss | dev decision acc | dev action acc |
+|---|---|---|---|---|---|
+| 0 | 2.551 | 0.246 | 2.599 | 0.274 | 0.117 |
+| 2 | 1.761 | 0.409 | 2.037 | 0.384 | 0.222 |
+| **4** | 1.444 | 0.499 | **2.008** | 0.416 | 0.217 |
+| 8 | 1.004 | 0.640 | 2.323 | 0.427 | 0.276 |
+| 15 | 0.536 | 0.803 | 3.075 | 0.446 | 0.285 |
+| 29 | 0.255 | 0.906 | 3.931 | 0.452 | 0.314 |
+
+The dev loss is lowest at epoch 4 and rises steadily afterwards: the model memorises the 56 training proofs (train accuracy 0.91 against dev 0.45) while dev *accuracy* creeps up -- it becomes confident and often
+wrong, i.e. **miscalibrated**. For a search that uses the probabilities as costs, calibration is what matters, so the epoch with the best dev **loss** is the checkpoint everything starts from.
+
+**Policy-guided search** (`smoke_policy.json`) was a smoke test of four hand-picked problems in the easy regime: the policy steered the search on `imo2019_p1` (36 probes; the blind search exhausted its space
+after 3490), and did not solve two others. One data point, chosen by hand; it measures nothing. The first **RL** loop (`rl_smoke_history.json`) was two iterations on a random network: a plumbing test.
+
+The learner on dataset v1 therefore did about what the blind search does, plus calibrated guesses; the one learned-prover number worth quoting is that the behaviour-cloned network **overfits within four epochs of
+56 proofs**. That is the problem the later pieces address (more data: the larger bank, the synthetic theorems, hindsight sub-theorems; a different objective: expert iteration), and it is the reason the
+experiments are built to measure, rather than assume, whether they help.
+
+## 8. What we do not know yet (the questions of `EXPERIMENTS.md`)
+
+* How much each learned prover improves on the blind baseline at equal probes on held-out problems, in the strict regime and on the problems without helper lemmas.
+* Whether pre-training on synthetic theorems helps olympiad accuracy, and how that grows with the number of synthetic theorems (0 / 1k / 4k / 15k / 60k). The generator's theorems are backward chains of lemma
+  applications (`GENERATOR.md` section 9): they can teach premise selection and term building; they cannot teach case splits, induction, rewriting or claims, and 79 of the 123 lemmas of the pool occur in
+  them. Whether 60 000 is enough is exactly this experiment.
+* Whether hindsight helps (`ei_her` vs `ei`, `ppo` vs `ppo_nosub`), whether the bootstrapped library helps (`ei_her_boot` vs `ei_her`) and whether the lemmas it admits are used.
+* Which actor is best inside expert iteration (sampling, IDA\*, MCTS, manager-worker) and which prover is best for a given network.
+* How all of it scales with inference compute (10 ... 2000 probes), with training iterations, and with the cost in time and memory (`bench/`).
+
+## 9. What is tested
+
+* **S44** (`tests/learner/s44_ml_tests.py`, `run_gates.py --ml`): **A** features and data (a goal's tokens are determined, framed and typed; the symbol overlap of a global with its own type is 1; demonstrations
+  decompose without a gap and batch into the documented shapes); **B** the network (incremental decoder = batched forward pass, padding included; weights multiply the loss; a saved model loads to the same
+  function); **C** the search (candidate actions in nondecreasing cost, without repeats; an action's cost is the negative log-probability of its decisions; a returned term is kernel-checked and its portable
+  actions replay); **D** the environment (Gymnasium's API, mask, rewards only for kernel-checked proofs, truncation, reproducible seeds, scripted runs decision by decision); **E** the RL loop; **F** goals, budget and hindsight (the environment starts on any closed statement given as data, and the episode is solved by the example's own proof).
+* **S47** (`tests/environment/s47_hindsight_tests.py`): the proof tree of an episode and what each action achieved; every reference proof of the bank replayed with the tree on, the examples (hindsight
+  theorems) pinned, replayed in a fresh engine and accepted by the independent checker; a corrupted record yields no false example.
+* **S51** (`tests/learner/s51_suite_tests.py`, 1 216 checks): the training suite and the experiment runner. **A** the statistics against values worked out by hand (Student-t, Wilson, Holm, Chao1, paired
+  tests, bootstrap, rarefaction); **B** the run graph of every profile (unique ids, acyclic, the closure of a target, the seeds and overrides, the synthetic-set exclusion and the training commands: no test data
+  in them) and the estimator; **C** the collector on a runs directory written by hand (solved-within-budget matrices, intervals, comparisons, the strict view, subsets, the report, the warnings); **D**
+  hindsight on a small world (what the harvest keeps is exactly what the proof tree says was proved; every theorem replays in a fresh engine of another configuration; corrupted proofs are dropped and
+  counted); **E** the library (one test per reason of refusal, the kernel's and the independent checker's acceptance of a proof that cites a lemma, determinism across worlds, corrupted records); **F** the
+  goals (train problems and train sub-theorems only, reproducible sampling, the budget); **G** the provers and the protocol (an unsolved search spends budget + 1 probes; "solved within B" read off the
+  largest budget is what a run with budget B finds; rows, resumption, both regimes, the second opinion); **H** a real run of `ml_ei.py` with hindsight and bootstrapping, then `ml_evaluate.py` with
+  `--lemmas auto` (also when no lemma was admitted, and the loud failure when the file is gone); **I** the shell scripts and a real scheduler on trivial commands (needs, failure, skip, resume, cores,
+  memory packing, `--force`, `--cascade`, the lock).
+* **S45, S46** (`tests/repo/`): the repository -- layout, registry, imports from a fresh interpreter, the frozen kernel's checksums, links, the dataset's digests, that every example runs, the release archive.
+* **S48** (the generator), **S49, S50** (the problem sets: texts, statements, answers, duplicates, proofs), and the kernel, tactic, environment and bank gates protect everything below the learner.
+
+## 10. Reproduce
+
+All commands run from the repository root after `make kernel`. The settings of the experiment scripts are environment variables (`PROFILE`, `SEEDS`, `DEVICE`, `JOBS`, `CORES`, `MEM_GB`, `RUNS`, `SET`;
+`scripts/env.sh`, or once in `scripts/local.env`).
 
 ```
-python3 src/python/problems/dataset.py --verify data/dataset_v1                  # replay all 90 demonstrations in a fresh engine over a freshly built world (about 1 min)
-python3 src/python/learner/ml_eval.py data/dataset_v1 --split dev --probes 8000 --time 400 --blind --out data/results/blind_dev.json      # also: --split train / test
-python3 src/python/learner/ml_train.py data/dataset_v1 --out artifacts/models/bc1.pt --epochs 30                                       # about 73 min, one thread
-python3 src/python/learner/ml_eval.py data/dataset_v1 --split dev --probes 4000 --model artifacts/models/bc1.pt --out data/results/bc1_dev.json
-python3 src/python/learner/ml_report.py blind=data/results/blind_dev.json bc1=data/results/bc1_dev.json --markdown
-python3 src/python/learner/ml_rl.py data/dataset_v1 --init artifacts/models/bc1.pt --out artifacts/models/rl.pt --iters 60 --episodes 24 --mode reinforce
+make check-env                                   # python, torch, CUDA, memory, disk
+make smoke                                       # the whole pipeline on a tiny world (an hour or two on two cores): before every real run
+PROFILE=small SEEDS=0-2 make experiments        # the shape of every result: the whole bank, 5 000 synthetic train theorems, 3 seeds
+DEVICE=cuda PROFILE=full SEEDS=0-6 make experiments      # the paper: 60 000 synthetic train theorems, 7 seeds (default 5)
+make status ; make report                        # what is done; tables, figures and numbers from the runs so far
 ```
 
-Seeds are fixed (`--seed 0`); training and search use one thread, so runs are reproducible on the same library versions. The trained models of these runs (`bc1.pt` etc.) are in the release archive under
-`artifacts/models/` (they are not in the git history); the result files in `data/results/` are.
+and the single tools the scripts call (each is resumable):
 
-## 9. Limits
+```
+python3 src/python/problems/dataset.py --verify data/dataset_v2                         # replay every recorded proof in a fresh engine over a freshly built world (about 2 minutes)
+python3 src/python/synth/synth_cli.py grow --out data/synth_v2 --train-target 60000 --exclude-dataset data/dataset_v2 --jobs 4        # the synthetic set (GENERATOR.md)
+python3 src/python/learner/ml_bc.py data/dataset_v2 --out runs/pre/s0 --synth data/synth_v2 --no-bank --epochs 6 --seed 0               # pre-training
+python3 src/python/learner/ml_bc.py data/dataset_v2 --out runs/ft/s0 --init runs/pre/s0/best.pt --lr 3e-4 --epochs 20 --seed 0         # fine-tuning
+python3 src/python/learner/ml_ei.py data/dataset_v2 --init runs/ft/s0/best.pt --out runs/ei/s0 --her --bootstrap --p-sub 0.25 --workers 4 --seed 0
+python3 src/python/learner/ml_ppo.py data/dataset_v2 --init runs/ft/s0/best.pt --out runs/ppo/s0 --iters 250 --workers 4 --seed 0
+python3 src/python/learner/ml_evaluate.py data/dataset_v2 --split dev,test --regimes prefix,strict --solver sample --model ft=runs/ft/s0/best.pt --probes 2000 --recheck --workers 4 --out runs/eval/ft_s0
+```
 
-* 82 problems is a tiny training set; a transformer with 1.5 M parameters overfits it within four epochs. Do not tune the architecture before the data grows (`ARCHITECTURE_RL.md` section 6).
-* The splits are small (dev 10, test 16): a difference of one or two solved problems is noise. Use the library lemmas' dev and test splits (38 and 78 proofs) as the larger, easier held-out sets.
-* The prefix regime overstates ability (section 1). The strict regime has only 8 problems.
+Seeds are fixed (`--seed`); training and search use one thread per process by default, so a run is reproducible on the same library versions (a GPU is not bit-reproducible). The trained models of the author's
+runs, if any, are in the release archive under `artifacts/models/` (they are not in the git history); the result files of dataset v1 are in `data/results/v1/` (section 7).
+
+## 11. Limits
+
+* 268 problems is a small training set, and the held-out splits are small (dev 20, test 58, of which 81 problems in all are statement-only and may be unsolvable with the library): a difference of one or two
+  solved problems is noise. The report therefore gives a paired bootstrap over problems next to the paired test over seeds, and the library lemmas' dev and test splits (40 and 94 proofs) as larger, easier held-out sets.
+* The prefix regime overstates ability (section 1); report the helper-free column and the strict table.
+* The contest texts are paraphrases, some written from memory (`BANK.md`: the `origin` and `verified` labels); the formal statements are checked for faithfulness, not copied from a source.
 * Teacher-forced accuracy is not search success; the only number that counts is kernel-checked proofs per probe budget on held-out problems.
 * The reference proofs are *one* proof per problem. A learner that finds another proof is right; the BC loss punishes it. Expert iteration and search-based evaluation do not have this problem; teacher-forced
   metrics do.
 * Probes are not seconds: a policy-guided probe costs about 40x a blind probe (network evaluation on one CPU thread). Compare methods at equal probes AND report seconds.
+* The CUDA path of the training code was written to be correct by construction and is tested for the CPU; it has not been run on a GPU by its author.

@@ -5,7 +5,7 @@ An agent without a text interface still has to be able to SAY a statement, a wit
 builder, an action is carried out by the tactic layer, the finished proof is checked by the kernel (and here also by the independent checker) -- so what this gate pins down is that the machinery does
 what its documentation says, for every kind of input, including those that a learner will produce by accident:
 
-  A. THE BUILDER.  Every term of the library's proofs (759 of them) is said and built back as the same kernel term; random walks over the choices it offers (many contexts, many types) give terms the kernel
+  A. THE BUILDER.  Every term of the library's proofs (more than 700: check A1) is said and built back as the same kernel term; random walks over the choices it offers (many contexts, many types) give terms the kernel
      accepts, every offered choice is legal, a code means the same in another engine, an illegal choice is refused and changes nothing, codes mutated at random never crash it; numerals; a head applied to MORE
      arguments than its type has binders (`Z.strong_induction P a H n h x e`); a principle whose conclusion is `P n` and whose arguments wait for the motive (`Z.int_induction`); premises limit the library.
   B. THE ACTIONS.  CLAIM, REFINE (goals `('g',)`), APPLY_WITH (both modes), REWRITE_WITH, REWRITE_AT, FORWARD, INDUCT_WITH (also generalising), INJECT, LINCOMB and USE with a code, and CASES / INDUCT that
@@ -15,7 +15,7 @@ what its documentation says, for every kind of input, including those that a lea
   D. PROBES.  Probing leaves the kernel as it was, accepted or refused; the outcome depends on the budget only by running out of it; the same probe gives the same goals.
   E. THE MENU.  The enumerators of the second language (FORWARD, REWRITE_AT, INDUCT_WITH, INJECT, CLAIM hints): bounded, deterministic, every action found again from its signature, nearly all of them
      carried out by the probe, restricted by the engine's kinds.
-  F. THE RECORDER.  The authored proofs of the library replay as sequences of actions (>= 398 of 400; the two that do not are the two documented ones), every replay re-checked by the kernel and by the
+  F. THE RECORDER.  The authored proofs of the library replay as sequences of actions (>= 453 of 459; the six that do not are the documented ones, docs/BANK.md section 7b), every replay re-checked by the kernel and by the
      independent checker, every one replays again from its JSON in a fresh engine, changed or truncated or extended sequences are refused or end in a proof the kernel checks, a proof is no proof of
      another statement.
   G. NAMES.  The engine's tag for the names it introduces (the recorder's, so that they never clash with an author's).
@@ -789,7 +789,7 @@ def sec_C(c):
             A.replay_portable(eng2, fx.recs[d['name']].stmt, d['steps'], d['gid']); n_steps += len(d['steps'])
             for s_ in d['steps']: kinds[s_['kind']] += 1
         except Exception as e: bad.append((d['name'], type(e).__name__, str(e)[:80]))
-    expect(not bad and len(js) >= 398 and n_steps >= 1900, 'C1 every demonstration replays from its JSON in a fresh engine and the kernel accepts it (%d proofs, %d steps; %s)' % (len(js), n_steps, bad[:3]))
+    expect(not bad and len(js) >= 453 and n_steps >= 2600, 'C1 every demonstration replays from its JSON in a fresh engine and the kernel accepts it (%d proofs, %d steps; %s)' % (len(js), n_steps, bad[:3]))
     expect(all(kinds[x] > 0 for x in ('APPLY', 'REWRITE', 'CASES', 'INDUCT', 'CLAIM', 'FORWARD', 'APPLY_WITH', 'RING', 'USE', 'REFINE', 'INDUCT_WITH', 'LINARITH', 'REWRITE_AT', 'REWRITE_WITH', 'LINCOMB', 'NLINARITH')),
            'C1 the demonstrations use every kind of action there is to demonstrate (%s)' % dict(kinds))
     # the actions that say everything themselves are their own portable form: to_portable / from_portable is the identity
@@ -1149,7 +1149,9 @@ def sec_E(c):
 
 
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ F. the recorder
-KNOWN_GAPS = {'Z.induction_on', 'Z.mk_inj'}                    # (a term with a `match`; a term that is a proof by computation only)
+KNOWN_GAPS = {'Z.induction_on': 'not_encodable', 'Z.mk_inj': 'not_encodable',        # (a term with a `match`; a term that is a proof by computation only)
+              'Z.dvd_fact': 'stale_ref', 'Z.one_le_pow': 'stale_ref',                  # (the author's script uses an induction hypothesis the engine does not have: the author's induction is not the engine's)
+              'Z.pow_nonneg': 'probe_apply', 'Z.pow_pos': 'probe_apply'}               # (the author's `apply` leaves one goal where the engine's action leaves none: the engine settles the goal itself)
 
 
 def indep(c):
@@ -1170,9 +1172,9 @@ def ic_check(c, term, stmt):
 
 
 GOLDEN = os.path.join(itp_paths.GOLDEN, 's40_golden.json')
-PINNED_KINDS = {'REWRITE': 425, 'APPLY': 303, 'CASES': 294, 'CLAIM': 177, 'FORWARD': 125, 'APPLY_WITH': 107, 'RING': 106, 'USE': 96, 'REFINE': 92, 'INDUCT_WITH': 50, 'LINARITH': 50, 'REWRITE_AT': 45, 'INDUCT': 38, 'REWRITE_WITH': 35,
-                'LINCOMB': 30, 'NLINARITH': 5}
-PINNED_OPS = {'rw': 460, 'apply': 410, 'have': 316, 'cases': 294, 'ring': 106, 'exists': 96, 'exact': 90, 'induction_on': 50, 'linarith': 50, 'rw_at': 45, 'induct': 38, 'linear_combination': 30, 'nlinarith': 5}
+PINNED_KINDS = {'REWRITE': 534, 'CASES': 346, 'APPLY': 340, 'CLAIM': 217, 'LINARITH': 190, 'APPLY_WITH': 187, 'FORWARD': 155, 'RING': 140, 'USE': 132, 'REFINE': 115, 'REWRITE_AT': 96, 'INDUCT_WITH': 75,
+                'LINCOMB': 46, 'INDUCT': 38, 'REWRITE_WITH': 37, 'INTERVAL_CASES': 15, 'NLINARITH': 14}       # (the 453 proofs; the 398 older ones gave REWRITE 425, APPLY 303, CASES 294, ... and the 55 added by the library extension the rest)
+PINNED_OPS = {'rw': 571, 'apply': 527, 'have': 375, 'cases': 346, 'linarith': 190, 'ring': 140, 'exists': 132, 'exact': 113, 'rw_at': 96, 'induction_on': 75, 'linear_combination': 46, 'induct': 38, 'interval_cases': 15, 'nlinarith': 14}
 
 
 def demo_digest(k, steps):
@@ -1192,8 +1194,8 @@ def sec_F(c):
     ok = sorted(nm for nm, r in res.items() if r.ok); bad = {nm: r for nm, r in res.items() if not r.ok}
     # ---- F1. coverage
     expect(len(res) == len(recs) and len(res) >= 400, 'F1 every recorded proof of the library was replayed (%d)' % len(res))
-    expect(len(ok) >= 398 and set(bad) <= KNOWN_GAPS, 'F1 all but the two known proofs are replayed as kernel-checked action sequences (%d of %d; not replayed: %s)' % (len(ok), len(res), sorted(bad)))
-    expect(all(r.gap.reason == 'not_encodable' and r.gap.detail and r.where and r.view for r in bad.values()), 'F1 a proof that is not replayed says why (a term that cannot be said), where, and shows both goals (%s)' % {nm: (r.gap.reason, r.where) for nm, r in bad.items()})
+    expect(len(ok) >= 453 and set(bad) <= set(KNOWN_GAPS), 'F1 all but the six known proofs are replayed as kernel-checked action sequences (%d of %d; not replayed: %s)' % (len(ok), len(res), sorted(bad)))
+    expect(all(r.gap.reason == KNOWN_GAPS.get(nm) and r.gap.detail and r.where and r.view for nm, r in bad.items()), 'F1 a proof that is not replayed says why (the documented reason), where, and shows both goals (%s)' % {nm: (r.gap.reason, r.where) for nm, r in bad.items()})
     expect(sum(r.soft['target_differs'] for r in res.values()) == 0, 'F1 the engine\'s goal was always the author\'s')
     # ---- F2. what a result records
     wrong = []; steps = 0; empty = 0
@@ -1229,7 +1231,7 @@ def sec_F(c):
     expect(n_ic >= 28 and not bad_ic, 'F4 the independent checker accepts the proofs by actions of %d theorems (%s)' % (n_ic, bad_ic[:2]))
     # ---- F5. the report
     out = io.StringIO(); stats = REC.report(res, out); text = out.getvalue()
-    expect(stats['n'] == len(res) and stats['ok'] == len(ok) and stats['actions'] == steps and stats['gaps'] == ({'not_encodable': len(bad)} if bad else {}), 'F5 the report counts the proofs, the actions and the gaps (%s)' % ({x: stats[x] for x in ('n', 'ok', 'actions', 'gaps')},))
+    expect(stats['n'] == len(res) and stats['ok'] == len(ok) and stats['actions'] == steps and stats['gaps'] == dict(collections.Counter(r.gap.reason for r in bad.values())), 'F5 the report counts the proofs, the actions and the gaps (%s)' % ({x: stats[x] for x in ('n', 'ok', 'actions', 'gaps')},))
     expect('replayed as kernel-checked action sequences: %d of %d' % (len(ok), len(res)) in text and ('gaps:' in text) == bool(bad) and all(nm in text for nm in bad), 'F5 ... and says so, with the proofs that are not replayed')
     expect(sum(v[0] for v in stats['groups'].values()) == len(res) and sum(v[1] for v in stats['groups'].values()) == len(ok) and sum(stats['kinds'].values()) == steps, 'F5 ... by part of the library and by kind of action')
     demos = REC.demonstrations(res)
@@ -1241,7 +1243,7 @@ def sec_F(c):
     off_ops = {op: (ops_.get(op, 0), want) for op, want in PINNED_OPS.items() if abs(ops_.get(op, 0) - want) > max(2, want // 10)}
     n_compact = sum(1 for nm in ok for d in res[nm].portable if d['kind'] == 'FORWARD' and any(len(cd) == 0 for cd in d['codes'][1:]))
     expect(not off and set(kinds_) <= set(PINNED_KINDS) and not off_ops and set(ops_) <= set(PINNED_OPS), 'F6 the demonstrations use each kind of action and translate each kind of call as often as they did, within 10%% (actions %s; calls %s)' % (off, off_ops))
-    expect(abs(n_compact - 70) <= 7, 'F6 FORWARD is said in its compact form (the arguments the others determine left out) as often as it was (%d of %d)' % (n_compact, kinds_.get('FORWARD', 0)))
+    expect(abs(n_compact - 86) <= 8, 'F6 FORWARD is said in its compact form (the arguments the others determine left out) as often as it was (%d of %d)' % (n_compact, kinds_.get('FORWARD', 0)))
     digests = {nm: demo_digest(k, res[nm].portable) for nm in ok}
     if os.environ.get('S40_UPDATE_GOLDEN'):
         with open(GOLDEN, 'w') as f_: json.dump(digests, f_, indent=0, sort_keys=True)

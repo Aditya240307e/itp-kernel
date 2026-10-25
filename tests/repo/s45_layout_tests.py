@@ -15,7 +15,7 @@ and fragile in exactly the ways this gate watches:
   H. the required directories and files exist, and nothing else is lying around at the top level;
   I. the Makefile parses (`make -n` on each target) and its targets are the documented ones;
   J. the dataset on disk (data/dataset_v2): the manifest's digests are those of the files, and the files agree with each other;
-  K. the release archive: tools/make_dist.py makes a tar and a zip that hold every file once, a manifest that checks, and nothing of the build or the machine;
+  K. the release archive: tools/make_dist.py makes a tar and a zip that hold every file once, a manifest that checks, and nothing of the build or the machine; with --git, a working repository (its history, branches and tags; no remote, user, hook or stash) in a small repository of its own;
   L. the copies of the tree in which the mutation driver and the sanitizer run the gates are complete (an unmutated copy passes a gate).
 """
 import os as _os, sys as _sys; _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', '..', 'src', 'python')); import itp_paths  # noqa: E402,F401
@@ -67,7 +67,7 @@ def sec_A():
     expect(len(REG.GATE_CMDS) >= 46 and len(REG.ML_GATE_CMDS) >= 1 and len(REG.REPO_GATE_CMDS) >= 2, 'A  the registry has the kernel gates (%d), the learner gate and the repository gates' % len(REG.GATE_CMDS))
     expect(all(c in REG.REPO_GATE_CMDS for c in cmds if c[0].startswith('repo/')), 'A  the gates under tests/repo are the REPO_GATE_CMDS')
     expect(set(REG.HEAVY_GATES) <= set(base), 'A  every heavy gate (never run together with another one) is a registered gate (%s)' % sorted(set(REG.HEAVY_GATES) - set(base)))
-    expect(len(REG.BANK_GATE_CMDS) >= 2 and all(c[0].startswith('problems/') for c in REG.BANK_GATE_CMDS) and not set(REG.BANK_GATE_CMDS) & set(REG.GATE_CMDS), 'A  the gates of the contest problems (BANK_GATE_CMDS) are registered apart from the mutation driver\'s GATE_CMDS')
+    expect(len(REG.BANK_GATE_CMDS) >= 2 and all(c[0].startswith('problems/') for c in REG.BANK_GATE_CMDS) and not {tuple(c) for c in REG.BANK_GATE_CMDS} & {tuple(c) for c in REG.GATE_CMDS}, 'A  the gates of the contest problems (BANK_GATE_CMDS) are registered apart from the mutation driver\'s GATE_CMDS')
     for c in REG.REPO_GATE_CMDS: expect(c[0].startswith('repo/'), 'A  %s is registered as a repository gate but does not live in tests/repo' % c[0])
 
 
@@ -242,6 +242,19 @@ def sec_J():
     expect(all(p.get('origin') in ('contest', 'adapted', 'style', 'folklore') and p.get('verified') in ('answer-checked', 'recalled', 'none') for p in bank['problems']), 'J  every problem says where it comes from (origin) and whether its text or answer was compared with a source (verified)')
     card = read(os.path.join(d, 'DATASET_CARD.md'))
     expect(('%d problems' % len(names)) in card, 'J  the dataset card states the number of problems (%d)' % len(names))
+    # the numbers the documents state are the numbers of the data (F83): a document that outlives the data it describes is found here
+    nprob, nproved = len(names), len(proved); nhelp = sum(1 for p in bank['problems'] if p.get('helpers'))
+    lib = json.load(open(os.path.join(d, 'library.json'))); lsp = splits['lemmas']; nlib = len(lib['lemmas']); psp = splits['problems']
+    psizes = '%d train / %d dev / %d test' % (len(psp['train']), len(psp['dev']), len(psp['test']))
+    lsizes = 'train %d / dev %d / test %d' % (len(lsp['train']), len(lsp['dev']), len(lsp['test']))
+    expect(nlib == sum(len(v) for v in lsp.values()), 'J  splits.json lists the library lemmas of library.json (%d)' % nlib)
+    stated = {'README.md': ['**%d formal problems**' % nprob, '**%d have a kernel-checked reference proof**' % nproved],
+              'docs/TRAINING.md': ['**%d proved**' % nproved, 'train %d / dev %d / test %d' % (len(psp['train']), len(psp['dev']), len(psp['test'])), '%d (%s)' % (nlib, lsizes), '%d of the %d' % (nhelp, nprob)],
+              'docs/BANK.md': ['%d problems' % nprob, psizes, '%d demonstrations' % nproved, "%d lemmas" % nlib, lsizes],
+              'docs/EXPERIMENTS.md': ['Only %d of the %d problems' % (nhelp, nprob)]}
+    for doc, phrases in stated.items():
+        text = read(os.path.join(ROOT, doc))
+        for ph in phrases: expect(ph in text, 'J  %s does not state "%s" (the numbers of data/dataset_v2)' % (doc, ph))
     # the result files of the first runs (dataset v1) are a historical record under data/results/v1: they say so, and they are not read as results on v2
     rd = os.path.join(ROOT, 'data', 'results')
     expect(os.path.isfile(os.path.join(rd, 'README.md')) and 'dataset v1' in read(os.path.join(rd, 'README.md')), 'J  data/results/README.md says that the result files are those of dataset v1')
@@ -291,6 +304,77 @@ def sec_K():
                 want = {n for n in r.stdout.split('\n') if n and os.path.isfile(os.path.join(ROOT, n))}
                 got = set(inner) - {'MANIFEST.sha256', 'RELEASE.txt'}
                 expect(got == want, 'K  the archive holds the files git knows (missing %s, extra %s)' % (sorted(want - got)[:3], sorted(got - want)[:3]))
+    finally: shutil.rmtree(tmp, ignore_errors=True)
+    if shutil.which('git'): k_git()
+
+
+def k_git():
+    """make_dist.py --git, in a small repository of its own (the tool finds its repository from its own location, so the test copies it there; this also works in a copy of the tree that has no .git): the
+    extracted directory, from the tar and from the zip, is a working repository at the commit of the archive -- its history, branches and tags, clean status, `git fsck`, a commit can be made -- and it holds
+    nothing of the machine that made it: no remote, no user, no hook, no stash, no remote-tracking branch.  Git does not accept a repository without refs/heads, which is empty: the archive must hold
+    directories.  An archive made from a tree with uncommitted changes says so, and the changes show in `git status`."""
+    import tarfile, zipfile
+    env = dict(os.environ, GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull, GIT_TERMINAL_PROMPT='0')
+    def git(cwd, *args, check=True):
+        r = subprocess.run(['git', '-C', cwd] + list(args), capture_output=True, text=True, env=env)
+        if check and r.returncode != 0: raise RuntimeError('git %s: %s' % (' '.join(args), (r.stderr or r.stdout).strip()[:300]))
+        return r
+    tmp = tempfile.mkdtemp(prefix='s45_distgit_')
+    try:
+        repo = os.path.join(tmp, 'repo'); os.makedirs(os.path.join(repo, 'tools')); os.makedirs(os.path.join(repo, 'src'))
+        shutil.copy(os.path.join(ROOT, 'tools', 'make_dist.py'), os.path.join(repo, 'tools', 'make_dist.py'))
+        def put(rel, text, mode=0o644):
+            with open(os.path.join(repo, rel), 'w') as f: f.write(text)
+            os.chmod(os.path.join(repo, rel), mode)
+        put('README.md', 'one\n'); put('src/a.py', 'print(1)\n'); put('run.sh', '#!/bin/sh\necho hi\n', 0o755)
+        git(repo, 'init', '-q', '-b', 'main'); git(repo, 'config', 'user.name', 'Somebody Else'); git(repo, 'config', 'user.email', 'else@example.org')
+        git(repo, 'add', '-A'); git(repo, 'commit', '-q', '-m', 'one')
+        put('README.md', 'one\ntwo\n'); git(repo, 'commit', '-q', '-am', 'two'); git(repo, 'tag', 'v1'); git(repo, 'branch', 'other')
+        git(repo, 'remote', 'add', 'origin', '../private-origin.git'); git(repo, 'update-ref', 'refs/remotes/origin/main', 'HEAD')
+        put('src/a.py', 'print(2)\n'); git(repo, 'stash', '-q')                                           # (a stash: local work in progress that must not travel)
+        os.makedirs(os.path.join(repo, '.git', 'hooks'), exist_ok=True)
+        with open(os.path.join(repo, '.git', 'hooks', 'pre-commit'), 'w') as f: f.write('#!/bin/sh\nexit 1\n')
+        os.chmod(os.path.join(repo, '.git', 'hooks', 'pre-commit'), 0o755)
+        head = git(repo, 'rev-parse', 'HEAD').stdout.strip()
+        def make(name, *extra):
+            r = subprocess.run([sys.executable, os.path.join(repo, 'tools', 'make_dist.py'), '--git', '--out', os.path.join(tmp, 'out'), '--name', name] + list(extra), capture_output=True, text=True, env=env, timeout=300)
+            expect(r.returncode == 0, 'K  make_dist.py --git fails: %s' % (r.stderr or r.stdout)[-300:])
+            return os.path.join(tmp, 'out', name + '.tar.gz'), os.path.join(tmp, 'out', name + '.zip')
+        tp, zp = make('pkg')
+        if not (os.path.isfile(tp) and os.path.isfile(zp)): expect(False, 'K  make_dist.py --git made no archive'); return
+        xt, xz = os.path.join(tmp, 'xt'), os.path.join(tmp, 'xz'); os.makedirs(xt); os.makedirs(xz)
+        with tarfile.open(tp) as tf:
+            tf.extractall(xt, filter='fully_trusted')                                                   # (our own archive, with its permissions)
+            dirs = {m.name for m in tf.getmembers() if m.isdir()}
+            expect({'pkg/.git/refs/heads', 'pkg/.git/refs/tags', 'pkg/.git/objects'} <= dirs, 'K  the tar holds the directories of .git, the empty ones too (refs/heads, refs/tags): %s' % sorted(d for d in dirs if '.git' in d)[:6])
+        with zipfile.ZipFile(zp) as zf:
+            zf.extractall(xz)
+            expect({'pkg/.git/refs/heads/', 'pkg/.git/refs/tags/'} <= set(zf.namelist()), 'K  the zip holds the directories of .git as well')
+        for kind, x in (('tar', os.path.join(xt, 'pkg')), ('zip', os.path.join(xz, 'pkg'))):
+            expect(git(x, 'rev-parse', '--is-inside-work-tree', check=False).stdout.strip() == 'true', 'K  the extracted %s is a git working tree' % kind)
+            expect(git(x, 'rev-parse', 'HEAD', check=False).stdout.strip() == head and git(x, 'rev-list', '--count', 'HEAD', check=False).stdout.strip() == '2', 'K  the extracted %s is at the commit of the archive with its history' % kind)
+            expect(git(x, 'fsck', '--no-dangling', check=False).returncode == 0, 'K  git fsck is happy with the extracted %s: %s' % (kind, git(x, 'fsck', check=False).stderr.strip()[:200]))
+            branches = set(git(x, 'for-each-ref', '--format=%(refname)', check=False).stdout.split())
+            expect(branches == {'refs/heads/main', 'refs/heads/other', 'refs/tags/v1'}, 'K  the %s holds the branches and tags and nothing else (no stash, no remote-tracking branch): %s' % (kind, sorted(branches)))
+            expect(git(x, 'remote', check=False).stdout.strip() == '' and 'private-origin' not in open(os.path.join(x, '.git', 'config')).read(), 'K  the extracted %s has no remote (a path of the machine that made it)' % kind)
+            expect(git(x, 'config', '--local', '--get', 'user.name', check=False).returncode != 0 and git(x, 'config', '--local', '--get', 'user.email', check=False).returncode != 0,
+                   'K  the extracted %s carries no user identity' % kind)
+            hooks = os.path.join(x, '.git', 'hooks')
+            expect(not os.path.isdir(hooks) or not [h for h in os.listdir(hooks) if not h.endswith('.sample')], 'K  the extracted %s carries no hook (code that runs when a commit is made)' % kind)
+            expect(not os.path.exists(os.path.join(x, '.git', 'logs')), 'K  the extracted %s carries no reflog' % kind)
+            if kind == 'tar':                                                                                 # (Python's zip extraction drops the executable bit, which git then reports)
+                st = git(x, 'status', '--porcelain', check=False).stdout
+                expect(st == '', 'K  git status of the extracted tar is clean (MANIFEST.sha256 and RELEASE.txt are not shown): %r' % st[:200])
+            r = git(x, '-c', 'user.name=New Person', '-c', 'user.email=new@example.org', 'commit', '-q', '--allow-empty', '-m', 'a commit in the extracted directory', check=False)
+            expect(r.returncode == 0 and git(x, 'log', '-1', '--format=%an', check=False).stdout.strip() == 'New Person', 'K  a commit can be made in the extracted %s, under the identity of whoever makes it: %s' % (kind, r.stderr.strip()[:200]))
+        rel = open(os.path.join(xt, 'pkg', 'RELEASE.txt')).read()
+        expect('history 2 commits' in rel and 'uncommitted' not in rel, 'K  RELEASE.txt of a clean tree names the history and no uncommitted changes (%r)' % rel[:200])
+        put('README.md', 'one\ntwo\nthree\n')                                                        # an uncommitted change: the archive says so, and the extracted directory shows it
+        tp2, _ = make('pkg2')
+        os.makedirs(os.path.join(tmp, 'xt2')); tarfile.open(tp2).extractall(os.path.join(tmp, 'xt2'), filter='fully_trusted')
+        x2 = os.path.join(tmp, 'xt2', 'pkg2')
+        expect('uncommitted changes' in open(os.path.join(x2, 'RELEASE.txt')).read() and git(x2, 'status', '--porcelain', check=False).stdout.strip() == 'M README.md', 'K  an archive of a tree with uncommitted changes says so and `git status` shows them')
+        expect(sorted(os.listdir(os.path.join(tmp, 'out'))) == ['pkg.tar.gz', 'pkg.zip', 'pkg2.tar.gz', 'pkg2.zip'], 'K  make_dist.py --git leaves nothing else in its output directory')
     finally: shutil.rmtree(tmp, ignore_errors=True)
 
 

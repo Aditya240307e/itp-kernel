@@ -718,6 +718,17 @@ def sec_G(c):
     expect([n for n, _ in children(True, st_b, ca, 0)] == [2, 3] and [n for n, _ in children(False, st_b, ca, 0)] == [5, 6], 'G  cases on a with h : a = b: the split variable and the reverted copies of b and h go (2 and 3 hypotheses left, not 5 and 6)')
     expect([n for n, _ in children(True, st_b, ia, 1)] == [2, 4], 'G  induction on b: only h is reverted; [a, h] and [a, k, ih, h]')
     expect(children(True, st_b, ca, 2) == [], 'G  cases on h : a = b substitutes and the goal is closed by computation')
+    # F81: what a split reverted comes back at the END of each goal under the name it had.  The tactic layer calls the copies of a family's parameters p<digits>, and the clean-up removes those -- but a hypothesis
+    # that an author called p12 is not one of them: it stays (the recorder gives the engine's hypotheses the author's names with `rename_hyps`)
+    import recorder as REC
+    def named(kind, hyp, rename):
+        e = G.Engine(w); g, p_ = first_goal(e, st_b); REC.rename_hyps(p_, 0, rename); g = e.goal_of(p_, 0); m = e.menu(g)
+        ch = e.probe(g, next(a for a in m.actions if a.kind == kind and a.arg == hyp), m)
+        return None if ch is None else [x.hyp_names for x in ch]
+    for pre in ('q', 'p'):
+        nb, nh = pre + '12', pre + '13'
+        expect(named(ca, 0, {1: nb, 2: nh}) == [[nb, nh], ['h3', nb, nh]], 'G  cases on a with b : Nat, h : a = b called %s and %s: both come back at the end of each goal, with their names (%s)' % (nb, nh, named(ca, 0, {1: nb, 2: nh})))
+        expect(named(ia, 1, {2: nh}) == [['a0', nh], ['a0', 'h3', 'h4', nh]], 'G  induction on b with h : a = b called %s: it comes back at the end of each goal, with its name (%s)' % (nh, named(ia, 1, {2: nh})))
     sj = w.global_type('succ_inj')
     n_np = 0
     e_c = G.Engine(w, premises=w.gid['succ_inj']); g, _ = first_goal(e_c, sj); m = e_c.menu(g); a = next(a for a in m.actions if a.kind == ca and a.arg == 2)

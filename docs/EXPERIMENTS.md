@@ -6,8 +6,8 @@ measured, how to run it, and what the results can and cannot show.
 
 ```
 scripts/smoke_test.sh              # the whole pipeline on a tiny world: does it run on this machine?   (an hour or two on 2 cores; much less on a big machine)
-PROFILE=small scripts/run_all.sh   # the first real numbers: the whole bank, 5 000 synthetic theorems, 3 seeds
-PROFILE=full  scripts/run_all.sh   # the paper: 60 000 synthetic theorems, 5 seeds (SEEDS=0-6 for seven)
+PROFILE=small scripts/run_all.sh   # the first real numbers: the whole bank, 5 000 synthetic train theorems, 3 seeds
+PROFILE=full  scripts/run_all.sh   # the paper: 60 000 synthetic train theorems, 5 seeds (SEEDS=0-6 for seven)
 ```
 
 ## 1. Questions, experiments, outputs
@@ -29,8 +29,8 @@ PROFILE=full  scripts/run_all.sh   # the paper: 60 000 synthetic theorems, 5 see
 ## 2. Definitions (they are the definitions of the paper)
 
 * **Task**: a problem of the bank in a *regime*. The experiments use the *prefix* regime (every global before the problem is on the menu, the problem's own helper lemmas included) on all problems, and
-  additionally the *strict* regime (helper lemmas hidden) for the problems where that is a different task (`ml_evaluate --regimes prefix,strict`; reported in the table `strict`). About 12% of the problems
-  have helper lemmas; the table `main` therefore also has a column for the problems **without** helper lemmas, where the regimes coincide and nothing is given away.
+  additionally the *strict* regime (helper lemmas hidden) for the problems where that is a different task (`ml_evaluate --regimes prefix,strict`; reported in the table `strict`). Only 10 of the 268 problems
+  (4%) have helper lemmas of their own, so for the other 258 the regimes coincide and nothing is given away; the table `main` has a column for them (`free`) and the table `strict` reports the ten.
 * **Probe**: one try of an action on a goal by the engine, whoever asks (a search, a policy rollout, a worker). Refused tries cost as much as accepted ones. All budgets are in probes.
 * **Solved within B probes**: the prover returned a proof that the engine replayed and the kernel checked, after at most B probes. A prover is run **once at the largest budget** and the curve
   "solved within B" is read off that run (exact, because a budget only truncates a run; a run stopped by the per-problem time limit counts as unsolved at every larger budget).
@@ -56,8 +56,8 @@ PROFILE=full  scripts/run_all.sh   # the paper: 60 000 synthetic theorems, 5 see
 | purpose | does the pipeline run? (numbers mean nothing) | the shape of every result | the paper |
 | problems | 17 (+ what they need) | all | all |
 | seeds (default) | 2 | 3 | 5 (`SEEDS=0-6` for 7) |
-| synthetic theorems kept (pre-training sizes) | 300 (0, 100, 300) | 5 000 (0, 500, 1500, 5000) | 60 000 (0, 1000, 4000, 15000, 60000) |
-| generator attempts | 1 800 | 40 000 | 400 000 |
+| synthetic TRAIN theorems (pre-training sizes) | 300 (0, 100, 300) | 5 000 (0, 500, 1500, 5000) | 60 000 (0, 1000, 4000, 15000, 60000) |
+| generator attempts, first round (`grow` adds rounds up to 3x) | 1 800 | 40 000 | 450 000 |
 | epochs: pre-train / fine-tune / scratch | 2 / 3 / 3 | 6 / 12 / 20 | 6 / 20 / 30 |
 | expert iteration: iterations x tasks x probes | 2 x 8 x 40 | 10 x 48 x 100 | 30 x 128 x 200 |
 | PPO: iterations x episodes | 3 x 8 | 60 x 32 | 250 x 64 |
@@ -75,7 +75,7 @@ A *run* is a node: an id (its directory under the runs directory), a command, th
 | stage | run id | what | needs |
 |---|---|---|---|
 | data | `data/dataset` | verify the dataset (smoke: build it) | -- |
-| data | `data/synth_gen`, `synth_merge`, `synth_verify`, `synth_card`, `synth_stats` | generate, merge (excluding every bank statement), verify from the data alone, card, saturation statistics | dataset |
+| data | `data/synth_gen`, `synth_merge`, `synth_verify`, `synth_card`, `synth_stats` | `grow`: generate until the merge would keep the target number of TRAIN theorems (the held-out 12% come on top; a shortfall at three times the first round's attempts is an error, not a smaller set), merge (excluding every bank statement), verify from the data alone, card, saturation statistics | dataset |
 | pre | `pre/n<N>/s<seed>` | behaviour cloning on N synthetic theorems only (library-only world: no olympiad data) | synth_merge |
 | ft | `ft/bc/s<seed>` | pre-trained (N = max) then fine-tuned on the bank's train split and the library lemmas | `pre/n<max>` |
 | ft | `ft/bc_scratch`, `ft/bc_mw`, `ft/bc_n<N>` | no pre-training; manager-worker labels; smaller pre-training | |
@@ -135,7 +135,7 @@ RUNS/report/                                             report.md  numbers.json
 ```
 scripts/00_check_env.sh            # python, libraries, the built kernel, cores / memory / disk / GPU, git state
 scripts/01_build_dataset.sh        # kernel (make kernel) + replay every recorded proof of data/dataset_v2
-scripts/02_generate_synthetic.sh   # the synthetic set (full: 400 000 attempts -> 60 000 theorems)
+scripts/02_generate_synthetic.sh   # the synthetic set (full: 60 000 train theorems; about 450 000 attempts, more if the caps need it)
 scripts/03_pretrain_finetune.sh    # pre/*, ft/*
 scripts/04_reinforcement_learning.sh
 scripts/05_evaluate.sh
@@ -145,8 +145,10 @@ scripts/run_all.sh                 # all of it, one scheduler (stages overlap), 
 scripts/status.sh
 ```
 
-Settings are environment variables (`scripts/env.sh`, or once in `scripts/local.env`): `PROFILE`, `SEEDS` (`0-4`, `0-6`, `0,2,5`), `RUNS`, `JOBS`, `CORES`, `MEM_GB`, `DEVICE` (`cpu`, `cuda`), `WORKERS`, `SET`,
-`TARGET` (`'rl/ei_her/*'`). The scheduler packs runs within `CORES` and `MEM_GB` using the runs' estimates (`MEM_GB` table in `exp_spec.py`; a run's cores are its `--workers`); every command is resumable
+Settings are options of every script (`./scripts/run_all.sh --profile full --seeds 0-6 --device cuda --jobs 4 --set rl_iters=20 --set eval_probes=100`; `--help` lists them), or environment variables
+(`PROFILE=full SEEDS=0-6 ./scripts/run_all.sh`), or written once in `scripts/local.env`; an option wins over the environment and that over `local.env`.  The settings: `PROFILE`, `SEEDS` (the default is five
+seeds, `0-4`; `0-6` is seven; `0,2,5`), `RUNS`, `JOBS`, `CORES`, `MEM_GB`, `DEVICE` (`cpu`, `cuda`), `WORKERS`, `SET` (`--set` is repeatable), `TARGET` (`'rl/ei_her/*'`). A script that calls another one hands its
+settings on. The scheduler packs runs within `CORES` and `MEM_GB` using the runs' estimates (`MEM_GB` table in `exp_spec.py`; a run's cores are its `--workers`); every command is resumable
 (a training run continues from its last epoch/iteration, an evaluation from its rows, the generator from its shards), so `Ctrl-C` and a rerun lose at most one checkpoint interval. `exp_run.py --force ID
 [--cascade]` redoes a run (and what depends on it); a failed run blocks only what needs it.
 
@@ -168,8 +170,27 @@ forked before CUDA is touched and use CPU copies of the weights. The code path f
 
 ## 10. Compute
 
-See section 11 (filled from measurements); `python3 src/python/experiments/exp_estimate.py PROFILE` prints the estimate for a profile with the rates of your machine (it reads
-`RUNS/bench/bench.json` when `scripts/06_benchmarks.sh` has been run).
+`python3 src/python/experiments/exp_estimate.py PROFILE [--seeds 0-6] [--cores N] [--set k=v]` prints the estimate of a profile stage by stage. It multiplies the work of every run (training steps, probes) by
+rates: those of the development machine (2 cores; `exp_estimate.RATES`: 55 training steps/s for the default network, 6 to 60 probes/s depending on the solver) or, once `scripts/06_benchmarks.sh` has run, the
+ones it measured on YOUR machine (`RUNS/bench/bench.json`; on a GPU pass `--train-rate` with the rate the benchmark reports for `DEVICE=cuda`).
+**These are estimates. The author has not run the `full` profile** (the pipeline was exercised on worlds of `smoke` size and smaller, and the rates come from those runs); run `scripts/smoke_test.sh` and
+`scripts/06_benchmarks.sh` first and read the estimate again with your own rates.
+
+| profile | seeds | runs | run-hours | core-hours | wall-clock on 8 cores, perfect packing |
+|---|---|---|---|---|---|
+| smoke | 2 | 55 | 2.2 | 2.2 | 0.7 h |
+| small | 3 | 77 | 57 | 102 | 13 h |
+| full | 5 | 122 | 344 | 1 111 | 139 h (about six days) |
+
+`full`, in core-hours: reinforcement learning 797 (40 runs: PPO and the expert-iteration variants), evaluation 215, pre-training 64, fine-tuning 23, data 11, benchmarks 1 -- the RL runs and the evaluation of
+the search solvers are 91 % of it. The cost is linear in the number of seeds (`--seeds 0-6` costs 1.4 times the five-seed training and evaluation, the data and the benchmarks once). To spend less: run the
+`small` profile; fewer seeds; one method (`--target 'rl/ei_her/*'`); fewer iterations or probes (`--set rl_iters=100 --set eval_probes=500`, section 4); a GPU speeds up the network updates only (proof search stays on
+the CPU).
+
+**Memory.** The world of the whole bank takes about 1.2 to 1.4 GB per process when built and up to about 2.8 GB in the runs that were measured (`smoke`); forked workers share it. Pre-training on 60 000
+theorems keeps about 3 GB of steps in memory. (The gate S50, which replays the whole bank's proofs, reaches 4.5 GB: on an 8 GB machine do not run it next to another heavy gate -- `tests/run_gates.py` runs the heavy gates one at a time.) Set `MEM_GB` to what the machine has; the scheduler runs fewer jobs at once rather than more.
+**Disk.** Measured on `smoke`: about 30 MB per training run (checkpoints) and about 10 KB per generator attempt; extrapolated to `full` that is about 3 GB for its 90 training runs and several GB for the
+450 000 generator attempts. Keep 20 GB free.
 
 ## 11. Troubleshooting
 

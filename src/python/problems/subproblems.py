@@ -21,7 +21,7 @@ Everything is verified when it is built (gym_tree.py replays and kernel-checks e
 import os as _os, sys as _sys; _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..')); import itp_paths  # noqa: E402,F401
 import os, sys, json, collections, time
 import bank as B, bank_all, bank_split
-import gym_env as G, gym_acts as A, gym_tree as T
+import gym_env as G, gym_acts as A, gym_tree as T, gym_premises as PM
 
 FORMAT = 1
 MAX_LEN = 60                                       # the longest sub-proof kept (the longest reference proof has 53 actions: every proper subtree qualifies)
@@ -156,6 +156,16 @@ def summary_lines(sub):
              'A sub-theorem belongs to the first of train, dev, test whose problem contains it (%d occurrences in later problems are recorded in `also_in`).  '
              % (c['solved'], c['derived'], c['actions'], c['problems'], c['duplicates_in_dataset']))
     L.append('')
+    nocode = collections.Counter(e['split'] for e in sub['examples'] if e['statement_code'] is None)
+    if nocode:
+        arrows = sorted(e['statement'].count(' -> ') for e in sub['examples'] if e['statement_code'] is None)
+        longest = max((e for e in sub['examples'] if e['statement_code'] is not None), key=lambda e: len(e['statement_code']))
+        L.append('%d of them (%s) have no `statement_code`: the typed term builder cannot say the statement (%d to %d implications in the printed statement; a code has at most %d tokens, and the longest statement that has one, '
+                 'with %d implications, needs %d), so the environment cannot be started on it and the learners leave it out; `--verify` finds each again in the reference proof of its problem instead of restating it '
+                 'from its data (%s).' %
+                 (sum(nocode.values()), ', '.join('%s: %d' % (s_, nocode[s_]) for s_ in SPLIT_ORDER if nocode[s_]), arrows[0], arrows[-1], T.GB.MAX_CODE, longest['statement'].count(' -> '),
+                  len(longest['statement_code']), ', '.join(sorted({e['problem'] for e in sub['examples'] if e['statement_code'] is None}))))
+        L.append('')
     L.append('| split | solved | derived |'); L.append('|---|---|---|')
     for s in SPLIT_ORDER: L.append('| %s | %d | %d |' % (s, c['by_split'][s]['solved'], c['by_split'][s]['derived']))
     L.append('')
@@ -207,12 +217,25 @@ def verify(dataset_dir, progress=None):
         if 'demonstration' not in rec: continue
         ep = replay_tree(bk, eng, rec['name'], rec['demonstration']['steps'])
         if action_rows(ep.tree) != ann['problems'][rec['name']]['rows']: raise RuntimeError('the labels of %s are not those of its proof' % rec['name'])
-    n = 0
+    n = 0; unsayable = collections.defaultdict(list)
     for ex in sub['examples']:
+        if ex['statement_code'] is None: unsayable[ex['problem']].append(ex); continue          # (the builder cannot say this statement: see below)
         stmt = T.statement_from_code(fresh, ex['statement_code'], ex['premises'])
         if T.digest(bk.w.show(stmt)) != ex['statement_digest'] or bk.w.show(stmt) != ex['statement']: raise RuntimeError('%s does not say its statement' % ex['id'])
         A.replay_portable(fresh, stmt, ex['steps'], ex['premises']); n += 1
         if n % 200 == 0: say('verified %d/%d' % (n, len(sub['examples'])))
+    # A sub-theorem whose statement the builder cannot say (more than `gym_build.MAX_CODE` tokens: 23 or more implications) cannot be restated from its data.  It is found again instead: the reference proof of its
+    # problem is replayed and the sub-theorems extracted from it, with the limit the file was made with, each replayed and checked by the kernel; the one in the file must be among them, with the same statement,
+    # the same premises and the same actions.  (The learners do not use these examples: a goal is given to the environment as a code.)
+    probs = {r['name']: r for r in data['problems']}
+    for name, exs in unsayable.items():
+        ep = replay_tree(bk, eng, name, probs[name]['demonstration']['steps'])
+        found = {(T.digest(e.text), json.dumps(PM.to_json(e.premises), sort_keys=True)): e for e in ep.tree.examples(verify=True, max_len=sub['max_len'])}
+        for ex in exs:
+            e = found.get((ex['statement_digest'], json.dumps(ex['premises'], sort_keys=True)))
+            if e is None or e.text != ex['statement'] or e.code is not None or json.dumps(e.steps, sort_keys=True) != json.dumps(ex['steps'], sort_keys=True):
+                raise RuntimeError('%s has no statement code and is not found again in the reference proof of %s' % (ex['id'], name))
+            n += 1
     return n
 
 

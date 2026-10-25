@@ -24,7 +24,8 @@ GATE_CMDS = (['kernel/s2_tests.py', '1500'], ['kernel/s26_memo_tests.py'], ['ker
 # they pin the contents of the bank, and a mutant of the kernel or of the tactic layer is caught by the gates above (S41, S43, S47 exercise the same machinery on the graded problems)
 BANK_GATE_CMDS = (['problems/s49_contest_tests.py'], ['problems/s50_proofs_tests.py'])
 # the gates that build the world of the whole bank (a gigabyte and more each, minutes of work) -- or, S51, a smaller world and a dozen processes that each load it: `run_gates.py` never runs two of them at the same time, whatever -j says
-HEAVY_GATES = frozenset({'s41_bank_tests.py', 's43_bank2_tests.py', 's47_hindsight_tests.py', 's49_contest_tests.py', 's50_proofs_tests.py', 's51_suite_tests.py'})
+HEAVY_GATES = frozenset({'s41_bank_tests.py', 's43_bank2_tests.py', 's44_ml_tests.py', 's46_examples_tests.py', 's47_hindsight_tests.py', 's49_contest_tests.py', 's50_proofs_tests.py', 's51_suite_tests.py'})
+                                                                                                         # (the gates that build the whole bank's world, or run examples that do: several GB each -- S50 reaches 4.5 GB, and two of them at once were killed by the OS on an 8 GB machine)
 # the gates of the LEARNER (S44: features, network, search, Gymnasium environment; S51: the training suite -- statistics, experiment matrix, collector, hindsight, bootstrapped library, goals, provers, evaluator,
 # expert iteration end to end, the runner and the shell scripts): they need torch and gymnasium, which the kernel and its tactics do not, and a mutant of the kernel is caught by the gates above long before
 # these would matter, so the mutation driver does not run them; `run_gates.py --ml` does

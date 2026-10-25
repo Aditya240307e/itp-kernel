@@ -127,11 +127,19 @@ class Collected:
         self.all_rows = self.rows
         self.rows = [r for r in self.all_rows if r.get('regime', 'prefix') == 'prefix']          # the default view: every table is about the prefix regime unless it says otherwise (view('strict'))
         self.helpers = {p['name']: len(p.get('helpers') or []) for p in self.bank}
+        for n in sorted(set((self.profile or {}).get('synth_sizes') or ()) - {0}):                    # (a pre-training run says how many synthetic theorems it really trained on)
+            u = self.synth_used(n)
+            if u is not None and u != n: self.warnings.append('pre-training of nominal size %d trained on %d synthetic theorems (the merged set has fewer train theorems than the size asked for)' % (n, u))
         for rid, e in self.eval_runs.items():
             if e['meta']: self.meta = e['meta']; break
         if not self.meta:
             for fin in self.finals.values():
                 pass
+
+    def synth_used(self, n):
+        """how many synthetic theorems the pre-training runs of nominal size n trained on (the smallest over the seeds that finished; None: no final.json says)"""
+        v = [f.get('synth_theorems') for rid, f in self.finals.items() if rid.startswith('pre/n%d/' % n) and isinstance(f.get('synth_theorems'), int)]
+        return min(v) if v else None
 
     # ------------------------------------------------------------------------------------------------------------------------------------------------------------ selection
     def variants(self, group):

@@ -11,7 +11,7 @@ Every (model, solver) pair is run on every task (a problem in a regime) of the s
     recheck.json   with --recheck: for every solved row the independent checker's verdict on the proof (checker/recheck.py)
 
 `seed` in a row is the REPLICATE: the training seed of the model (read from its checkpoint, or --seed); a model-free solver has seed 0.  The run is RESUMABLE: a row already in rows.jsonl (same method, seed, name,
-regime) is not computed again.  A deterministic solver (blind, ida) is run once at the largest budget and the curve "solved within B probes" is read off its rows (ml_aggregate); a seeded solver (sample, mcts, mw,
+regime) is not computed again.  A deterministic solver (blind, ida) is run once at the largest budget and the curve "solved within B probes" is read off its rows (experiments/exp_collect.py); a seeded solver (sample, mcts, mw,
 uniform) is seeded by the model's seed, so replicates are independent runs of the whole pipeline.  `--workers N` spreads the tasks over N forked processes that share the world.
 
 A model trained with a library of bootstrapped lemmas (ml_ei --bootstrap) must be evaluated with it: `--lemmas auto` reads the lemma file next to the checkpoint (the checkpoint says which, and the library's

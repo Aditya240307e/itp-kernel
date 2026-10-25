@@ -77,6 +77,13 @@ def keep_closable(cfg, digest):
     return int(digest[:8], 16) % 10_000 < cfg.closer_keep * 10_000
 
 
+def world_digest_of(world, limit):
+    """the digest of the library below `limit` (problems/bank.py has the one definition, by which a dataset names its world).  The data are a function of the configuration, the generator AND this: the pool
+    of lemmas the theorems are grown from is the library, so a library that has grown makes other theorems for the same indices (the gate S48 pins the records of a range, and said so when ext_lib was added)."""
+    import bank as B
+    return B.world_digest(world, limit)
+
+
 class Generator:
     def __init__(self, cfg, world=None, build=None):
         self.cfg = cfg
@@ -88,7 +95,7 @@ class Generator:
         self.pool = SP.Pool(world, self.limit, domains=cfg.domains)
         self.growers = {}
         self.checker = None
-        self.world_digest = None
+        self.world_digest = world_digest_of(world, self.limit)
 
     def grower(self, domain='Z'):
         g = self.growers.get(domain)
@@ -147,11 +154,23 @@ class Generator:
 
 
 def run_range(cfg, a, b, path, world=None, log=None):
-    """generate the indices a..b-1 and write the records to `path` (jsonl.gz) and a meta file `path + '.meta.json'`; returns the meta. A shard that exists is not remade."""
+    """generate the indices a..b-1 and write the records to `path` (jsonl.gz) and a meta file `path + '.meta.json'`; returns the meta.
+    A shard that exists is not remade -- if it is the shard asked for: made by this configuration, this generator and this library (`world`, the digest of the library below the limit), over this range.
+    A shard of another configuration, generator or library is an error (shards of two generators, or of two libraries, must never be mixed in one dataset: use another directory); one of another range
+    (the shard size changed) is made again."""
     meta_path = path + '.meta.json'
+    t0 = time.time(); gen = None
     if os.path.exists(path) and os.path.exists(meta_path):
-        return json.load(open(meta_path))
-    t0 = time.time(); gen = Generator(cfg, world=world)
+        meta = json.load(open(meta_path))
+        if meta.get('config') != cfg.digest() or meta.get('generator') != generator_digest():
+            raise RuntimeError('%s was made with configuration %s and generator %s; this is configuration %s and generator %s -- shards of different generators are not mixed: use another --out' %
+                               (path, meta.get('config'), meta.get('generator'), cfg.digest(), generator_digest()))
+        gen = Generator(cfg, world=world)                                    # (the library is needed to say which library the shard is for)
+        if meta.get('world') != gen.world_digest:
+            raise RuntimeError('%s was made in the library %s; the library now is %s -- shards of two libraries are not mixed (the same index makes another theorem when the pool of lemmas has changed): '
+                               'use another --out' % (path, meta.get('world') or '(not recorded: a shard of an older generator)', gen.world_digest))
+        if meta.get('range') == [a, b]: return meta
+    if gen is None: gen = Generator(cfg, world=world)
     rejects = collections.Counter(); errors = []; disagreements = []; records = []
     for i in range(a, b):
         try:
@@ -169,7 +188,7 @@ def run_range(cfg, a, b, path, world=None, log=None):
     with gzip.open(tmp, 'wt', encoding='utf-8') as f:
         for r in records: f.write(json.dumps(r, separators=(',', ':')) + '\n')
     os.replace(tmp, path)
-    meta = {'format': FORMAT, 'config': cfg.digest(), 'generator': generator_digest(), 'range': [a, b], 'records': len(records), 'rejects': dict(rejects), 'errors': errors[:20], 'n_errors': len(errors),
+    meta = {'format': FORMAT, 'config': cfg.digest(), 'generator': generator_digest(), 'world': gen.world_digest, 'range': [a, b], 'records': len(records), 'rejects': dict(rejects), 'errors': errors[:20], 'n_errors': len(errors),
             'disagreements': disagreements, 'seconds': round(time.time() - t0, 1), 'stats': dict(gen.grower('Z').stats)}
     with open(meta_path + '.tmp', 'w') as f: json.dump(meta, f, indent=1)
     os.replace(meta_path + '.tmp', meta_path)

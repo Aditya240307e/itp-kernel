@@ -5,15 +5,16 @@ deterministic world (the library, then the problems in the order they were regis
 know about it: where it comes from, what it says in words, **a check that the formal statement says what the words
 say**, a reference proof, and the regimes it is attacked in. Everything is data: the agent sees a goal, never text.
 
-Files: `bank.py` (design, building, checks, export), `bank_lib.py` (the first 28 problems) and `bank_lib2.py` (54
-more), `bank_all.py` (the whole bank as one world), `semantic.py` (reference semantics and faithfulness checks),
-`bank_baseline.py` (blind-search difficulty), `bank_split.py` (train/dev/test), `lib_corpus.py` (the proofs of the library
-lemmas as action sequences), `dataset.py` (build, verify and describe the dataset), gates `s41_bank_tests.py` (the 28:
-127 checks, `s41_golden.json`) and `s43_bank2_tests.py` (the 54 and the dataset machinery: `s43_golden.json`).
+Files: `bank.py` (design, building, checks, export), the problem modules (`bank_lib` 21 and `bank_lib2` 51 graded problems; `bank_amc`, `bank_amc2`, `bank_aime2` the AMC/AIME tier; `bank_imo`, `bank_imo2`, `bank_imo3`,
+`bank_imo4`, `bank_classic` the IMO tier; helpers `bank_kit.py`, `bank_spec.py`), `bank_all.py` (the whole bank, 268 problems, as one world), `semantic.py` (reference semantics and faithfulness checks), `imo_truth.py`
+(brute-force evidence for statements without a proof), `bank_dups.py` (the duplicate screen), `bank_baseline.py` (blind-search difficulty), `bank_split.py` (train/dev/test), `lib_corpus.py` (the proofs of the
+library lemmas as action sequences), `subproblems.py` (the labels of every action and the theorems a reference proof contains), `dataset.py` (build, verify and describe the dataset). Gates: `s41_bank_tests.py`
+and `s43_bank2_tests.py` (the graded problems and the machinery: `s41_golden.json`, `s43_golden.json`), `s49_contest_tests.py` (the contest problems: provenance, statements, the statement-only tier, duplicates;
+`s49_golden.json`), `s50_proofs_tests.py` (the premises mask and the proofs of the contest tier, with the independent checker), `s47_hindsight_tests.py` (the sub-theorems).
 
 ```python
 import bank_all
-bank = bank_all.load()                         # the 82 problems: builds the world once (about 20 seconds)
+bank = bank_all.load()                         # the 268 problems: builds the world once (about a minute and 2.5 GB)
 bank.names(level=2, topic='divisibility')      # the index
 ep = bank.episode('imo1959_p1')                # a gym Episode: the statement as a goal, with the premises of the prefix regime
 ep = bank.episode('imo1969_p1', 'strict')      # ... with the lemmas written for the problem hidden
@@ -147,7 +148,57 @@ identities, `sum_squares_zero` and the trivial prefix regime of `imo1964_p1a` fa
 right square as a hint term, the number-theory lemmas need the case split — a good signal that the bank asks for
 ideas and not only for search.
 
-## 6. The problems (82)
+## 6. The problems (268)
+
+**Two tiers.** *Proved* (187): the formal statement, its checked meaning and a kernel-checked reference proof (an action sequence, replayed in a fresh engine and re-checked by the independent checker: S50).
+*Statement-only* (81): the formal statement, its checked meaning (section 3), and brute-force evidence over ranges far beyond the box that it is true (`imo_truth.py`), but no proof. A statement-only problem is a
+task all the same -- whatever an agent proves for it is kernel-checked -- and one that some run solves is listed in the experiment report (`Statement-only problems solved`). They are lower bounds on solvability:
+read the `proved` and `unproved` subsets separately.
+
+| module (problems) | proved | statement-only | what |
+|---|---|---|---|
+| `bank_lib` (21), `bank_lib2` (51) | 72 | 0 | the graded problems of S41/S43: identities, inequalities, divisibility, Diophantine and functional equations, nine IMO problems (1959 P1, 1964 P1 a/b and P2, 1969 P1, 1982 P1, 1984 P2, 1988 P6, 2019 P1) |
+| `bank_amc` (23), `bank_aime2` (8) | 30 | 1 | AIME problems (texts paraphrased; 23 `contest`, 8 `adapted`), answers compared with a public record |
+| `bank_amc2` (72) | 72 | 0 | AMC-style problems written for the bank (`origin = style`): **not** AMC problems, no claim of provenance |
+| `bank_imo` (28), `bank_imo2` (10) | 0 | 38 | IMO and ISL problems, statement only |
+| `bank_imo3` (13) | 13 | 0 | olympiad lemmas and a few contest problems with proofs (IMO 1977 P6, IMO 1983 P6, ISL 2005 N3, Vasc's inequality, ...) |
+| `bank_imo4` (15), `bank_classic` (27) | 0 | 42 | more shortlist problems, APMO, and classical results and exercises of olympiad number theory (Euclid, Wilson, Bertrand, Lagrange, ...), statement only |
+
+Levels (how much *thinking* the problem asks for, not how long the proof is): 1: 37, 2: 67, 3: 75, 4: 45, 5: 44; kinds: 144 `prove`, 121 `answer` ("determine all ..."), 3 `exists`. Of the 81 statement-only problems 43 are
+level 5 and 31 level 4. **The IMO tier is mostly statements**: of 41 IMO, 18 ISL and 1 APMO problems, 12 have a proof; what an agent can be asked to do on the rest is to find one.
+
+**Provenance.** Every problem carries `origin` and `verified` (gate S49 pins the composition, because a paper has to report it):
+
+| `origin` | meaning | problems |
+|---|---|---|
+| `contest` | a problem of that contest; the text is a paraphrase written for this bank (some from memory) | 72 |
+| `adapted` | a contest problem changed to fit the formal vocabulary (a part of it, integers instead of reals, a fixed parameter) | 19 |
+| `style` | written for the bank in the manner of a contest; no claim to be a contest problem | 72 |
+| `folklore` | classical identities, inequalities and named results | 105 |
+
+| `verified` | meaning | problems |
+|---|---|---|
+| `answer-checked` | the answer or the claim was recomputed by brute force (`imo_truth.py`, or the brute-force evidence of the problem) and, for contest problems, compared with a public record of it (AoPS threads, a public dataset of AIME answers) | 114 |
+| `recalled` | the text or the numbers were written from memory and not compared with a source; marked so | 9 |
+| `none` | nothing to compare (style problems, folklore) | 145 |
+
+The texts of AMC/AIME/IMO/ISL problems here are **paraphrases**, and the source label (`IMO 1982 P4 (a)`, `ISL 2012 N6`) is a pointer, not a claim of verbatim text; the formal statement is checked against the text
+by section 3, which is the part that matters for a prover. A few ISL labels were assigned from memory (`verified = recalled`); the text of ISL 2000 N4, 2007 N2, 2012 N4/N6, 2013 N1, 2014 N2, 2016 N4, 2021 N1, APMO 2019 P1,
+IMO 2016 P4 and the nine oldest IMO problems was compared with the source on the web.
+
+**Duplicates.** Two problems that say the same thing are a leak when a split separates them. `bank_dups.py` screens in three layers (gate S49, section E): (1) identical formal statements; (2) the same meaning under any
+renaming of the variables (the statements are decoded and compared by the *numbers* their relation atoms are made of, so `a^3 + b^3 >= a^2 b + a b^2` and `a^3 + b^3 >= a b (a + b)` are told apart and `x + y = 2` /
+`a + b = 2` are not); (3) alike texts (a pair above a threshold is reviewed by a person: one family, or entered in `REVIEWED_DIFFERENT` with the reason). The audit replaced four AMC-style problems that were identical in
+meaning to graded ones and grouped near-duplicates into families (`bank_split.FAMILIES`); a family is never separated by a split.
+
+**Splits** (by family, frozen salt, section 7b): 190 train / 20 dev / 58 test. Proved: 132 / 15 / 40. The test split holds 11 IMO (3 proved), 2 ISL (1 proved), 7 AIME, 17 folklore, 12 AMC-style and 9 classical
+problems: 40 proved and 18 statement-only. Dataset v1 had 82 problems (56 / 10 / 16); ten of them were library lemmas in disguise (`not_dvd_between`, `square_mod_four`, ...) and are not problems any more, and
+`ident_pell_product` moved from train to test when the audit found it to be a variant of `ident_brahmagupta`; every other problem of v1 has the same statement and the same split.
+
+### 6a. The first graded problems
+
+The table below lists the problems of the first modules by level, as they were when the bank had 82 problems. Ten of them are library lemmas now and no longer problems of the bank (`N.induction3`, `cube_minus_n_div6`,
+`cube_mod_nine`, `dvd_coprime_product`, `five_dvd_fifth_power`, `not_dvd_between`, `square_mod_four`, `square_mod_three`, `sum_squares_zero`, `three_dvd_sum_squares`); the other 72 are unchanged.
 
 | level | problems |
 |---|---|
@@ -157,7 +208,7 @@ ideas and not only for search.
 | 4 | `imo2019_p1` (IMO 2019 P1, answer: all functions with `f(2a)+2f(b)=f(f(a+b))`), `x2_y2_3z2` (infinite descent), `fe_f_x_plus_f_y` (answer), `imo1982_p1` (IMO 1982 P1, answer: `f(1982) = 660`), `fe_quadratic` (answer) |
 | 5 | `imo1988_p6` (IMO 1988 P6, Vieta jumping) |
 
-Nine are IMO problems (1959 P1, 1964 P1 a/b and P2, 1969 P1, 1982 P1, 1984 P2, 1988 P6, 2019 P1). The level is how much *thinking* the
+Nine of them are IMO problems (1959 P1, 1964 P1 a/b and P2, 1969 P1, 1982 P1, 1984 P2, 1988 P6, 2019 P1). The level is how much *thinking* the
 problem asks for, not how long the proof is: the case enumerations (`pythag_three`, `cube_sum_not_4_mod_9`,
 `three_squares_mod_eight`: 107–197 actions) are level 3, `imo1964_p1a` is one `APPLY` in the prefix regime. Inequalities
 that are over the reals in the original (`imo1964_p2`, `schur_nonneg`, the AM-GM family) are stated for integers (the
@@ -190,18 +241,20 @@ python3 src/python/problems/dataset.py OUT_DIR           # bank.json, splits.jso
 python3 src/python/problems/dataset.py --verify OUT_DIR  # replay every demonstration in a fresh engine over a rebuilt world
 ```
 
-The released copy of dataset v1 is `data/dataset_v1/` (its digests are checked by gate S45, section J; `make dataset-verify` replays all 90 recorded proofs in a fresh engine, about a minute; example 07 reads it
-without the kernel). The result files of the baseline runs on it are in `data/results/` (`docs/TRAINING.md`).
+The released copy of dataset v2 is `data/dataset_v2/` (its digests are checked by gate S45, section J; `make dataset-verify` replays every recorded proof and sub-theorem in a fresh engine over a rebuilt world, a few
+minutes; example 07 reads it without the kernel). Dataset v1 (82 problems) is gone from the tree (it is in the git history, in the commits before the one that introduced dataset v2); the result files of the first baseline runs, made on it, are in
+`data/results/v1/` and are a historical record (`data/results/README.md`, `docs/TRAINING.md` section 5).
 
-* `bank.json` — section 7's file for all 82 problems, each with its `split` and `family`. 82 demonstrations (1816 actions); 8 problems have a second proof for the strict regime.
+* `bank.json` — section 7's file for all 268 problems, each with its `split`, `family`, `origin` and `verified` (and `proved`: a statement-only problem has no `demonstration`). 187 demonstrations (6 033 actions; mean 32, median 11,
+  longest 466; 4 154 actions in the train split); 8 problems have a second proof for the strict regime (538 actions).
 * `splits.json` — the split policy and the splits. **By family, as a pure function of the family key** (`bank_split.py`): the two parts of
   one olympiad problem, a statement in other clothes (`4ab ≤ (a+b)²` and `2ab ≤ a²+b²`), an argument with another constant
   (`sqrt2`/`sqrt3`) are in one split; the split of a family is a hash of its key under a frozen salt (found once, the smallest
   that satisfies the coverage requirements: every split has problems of levels 1–3, test has IMO problems and six topics), so
-  **adding problems never moves an old one**. Version 1: 56 train / 10 dev / 16 test (test has `imo2019_p1`, `imo1964_p1a/b`,
-  `x2_y2_3z2`, `frobenius_3_5`, …). Dev picks the epoch and the search parameters; test is read once.
-* `library.json` — the proofs of the library's 398 lemmas (1978 actions) as action sequences, with a split by lemma name (the
-  imitation data besides the bank); a lemma whose statement is a bank problem's is marked `bank_duplicate` and left out of training.
+  **adding problems never moves an old one** (the exception is a problem that the duplicate audit puts into the family of another one). Version 2: 190 train / 20 dev / 58 test (test has `imo2019_p1`, `imo1964_p1a/b`,
+  `x2_y2_3z2`, `frobenius_3_5`, and eight statement-only IMO problems, …). Dev picks the epoch and the search parameters; test is read once.
+* `library.json` — the proofs of the library's 453 lemmas (2 677 actions) as action sequences, with a split by lemma name (train 319 / dev 40 / test 94; the
+  imitation data besides the bank); a lemma whose statement is a bank problem's is marked `bank_duplicate` (4) and left out of training. Six lemmas of the library are NOT in the corpus because the recorder cannot turn their authored proofs into actions (`unreplayed` in the file, with the reason: `Z.induction_on` and `Z.mk_inj` (a `match` term, a code that builds a different term), `Z.dvd_fact` and `Z.one_le_pow` (the author's script uses an induction hypothesis the engine does not have), `Z.pow_nonneg` and `Z.pow_pos` (the author's `apply` leaves one goal where the engine's action leaves none: the engine settles the goal itself)); they are premises like the rest, they just have no demonstration.
 * `DATASET_CARD.md` — generated from the files (counts, splits, kinds of action), pinned by the manifest.
 
 ## 8. Adding to the bank
@@ -216,9 +269,9 @@ without the kernel). The result files of the baseline runs on it are in `data/re
    `audit_prims` / `audit_theorems` confirm the entry against the definitions and the proved theorems.
 4. Run the gate (`S41_ONLY=B python3 tests/problems/s41_bank_tests.py` for the bank content), update the golden digests on purpose.
 
-## 9. Gates S41 and S43
+## 9. Gates S41, S43, S49 and S50
 
-**S41** (127 checks, about 150 s) — the first 28 problems and the machinery:
+**S41** (126 checks, about 100 s) — the first 28 problems and the machinery:
 A. the meaning tables against the library definitions and 383 proved theorems, and corrupted tables are noticed ·
 A2. the reader and the evaluator, wrong specs are rejected, atoms, body, vacuity, equivalences · B. every problem:
 metadata, faithfulness, all mutants caught, skip reasons, golden digests · C. replay in both regimes, the independent
@@ -238,6 +291,18 @@ same statement · C. replay in both regimes (1384 actions), the independent chec
 `Episode` playthroughs · E. splits (partition, no family straddles, coverage, purity: the same split with fewer problems),
 the card, the library corpus replays from its JSON.
 Environment: `S43_ONLY=A,B,…`, `S43_FAILFAST`, `S43_TRACE`, `S43_UPDATE_GOLDEN`, `S43_HEAVY`.
+
+**S49** (the contest problems: the AMC/AIME tier and the IMO tier, 196 problems on top of the 72 graded ones) — A. the registry: 268 problems in the order of the modules, the two tiers, the *composition* (contest class x origin x
+verified x tier), levels, kinds and the numbers per split are pinned, because they are what a paper has to report · B. the evidence: every statement-only problem has a brute-force claim over a range far beyond the box,
+and every claim holds · C. the statements, in the built world: each contest problem is read back and agrees with its spec, its mutants are told from it or explained, it is sayable in the typed term builder, a statement
+without a proof is true on the box; the statements are pinned by digest (`s49_golden.json`) and pairwise different · D. the tier: a false statement-only problem is rejected, a true one accepted, and a statement-only
+problem that is no proposition, declares a theorem, has helpers, an unknown `origin` or an unknown `verified` is refused · E. duplicates: no two problems say the same thing (three layers, `bank_dups.py`), with negative controls.
+
+**S50** (the premises mask and the proofs of the contest tier) — A. `gym_premises.Premises` as values (normal form, `sees`, JSON round trip) · B. the leak: in a small bank of three problems, with a plain prefix the theorem of an
+*earlier* problem is on the menu of a later one and one action finishes it; with the mask it is not on the menu, the term builder refuses to say it and the action is refused · C. the mask in the whole bank: the premises of every
+problem are exactly the library and its own block, no theorem or helper of another problem is visible, a proved problem does not see its own theorem · D. the 115 proved contest problems: each reference proof replays as a
+kernel-checked action sequence, survives a JSON round trip, mentions only globals its premises offer, and depends on no axiom (quotient primitives only) · E. the second opinion: the independent checker
+(`recheck.SecondOpinion`, restricted to the globals a proof needs) accepts every one of those proofs and rejects a proof for another problem's statement.
 
 ## 10. Toward ISL N1–N3, A1–A3
 

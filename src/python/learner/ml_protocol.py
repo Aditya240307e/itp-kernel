@@ -10,7 +10,7 @@ result is a ROW per (problem, regime):
 
 A method that is deterministic (a search) is run once with the largest budget and its curve "solved within B probes" is read off the rows (a problem is solved within B iff `solved and probes <= B`).  A method
 that samples (a policy acting) is run with a seed: independent episodes on the problem until one finishes the proof or the budget is spent, every episode's probes added up, so the same curve can be read off
-a run with the largest budget.  `ml_report.py` and `ml_aggregate.py` turn rows into tables.
+a run with the largest budget.  `ml_report.py` (a quick table) and `experiments/exp_collect.py` + `exp_tables.py` (the tables of the paper) turn rows into tables.
 
     row = sample_row(env, net, ctx, gtab, 'imo1959_p1', 'prefix', probe_budget=4000, max_actions=40, seed=0)
 """

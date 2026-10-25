@@ -3,7 +3,8 @@
 `src/python/synth/` makes tens of thousands of theorems, each with a kernel-checked proof, from the lemma library. They are **synthetic**: true by construction, varied in depth and in the lemmas they need,
 and not meant to be interesting mathematics. They are the practice ground for a prover that is later trained and tested on olympiad problems (the problem bank, `docs/BANK.md`). This note says what the
 generator makes, how, why that way, how the data are checked, and what they do **not** show. Gate: S48 (`tests/synth/s48_synth_tests.py`). Numbers that describe a particular dataset are in its card
-(`DATASET_CARD.md`, written from the manifest by `synth_cli.py card`); the numbers below that are marked *pilot* come from a 3 000-attempt run and are there to give a sense of scale, not to be quoted.
+(`DATASET_CARD.md`, written from the manifest by `synth_cli.py card`); the numbers below that are marked *pilot* come from one run of 30 000 attempts (seed 101: 7 065 records, 6 024 after the merge; about 41
+core-minutes) and are there to give a sense of scale, not to be quoted.
 
 ## 1. What a theorem is
 
@@ -62,7 +63,9 @@ unification and the decision procedures; further families (section 10) add case 
 
 ## 4. Quality: what is rejected, and why
 
-A growth attempt ends in a record or in a counted rejection. About one attempt in five becomes a record (*pilot*: 21%). The rejections are the quality control; the card of a dataset carries the ledger.
+A growth attempt ends in a record or in a counted rejection. *Pilot*: 7 065 of 30 000 attempts (23.5%) became records, and the merge kept 6 024 of those (20.1% of the attempts: 60 duplicate statements, 979 over the
+skeleton cap, 2 statements of a library lemma or a bank problem dropped). The rejections are the quality control; the card of a dataset carries the ledger (the pilot's largest items: too shallow 5 080, closed at once
+by a decision procedure and not kept 3 063, a hypothesis that is a truth 2 814, root step 2 635, hypotheses not needed 2 449, too many hypotheses 2 273).
 
 | rule | why |
 |---|---|
@@ -84,16 +87,21 @@ false`. The evaluator and the kernel have never disagreed on a generated theorem
 constants of one domain (`logic`, `Z`, `N`, `Nat`), whose binders are numbers or propositions (no motive, function or type), and which is not on the short list of the library's own machinery
 (`NOT_A_BUILDING_BLOCK`: the quotient's well-definedness lemmas, representation lemmas, induction principles). A library that grows (sums, remainders, ...) feeds the pool by extending a vocabulary.
 Roots additionally need premises the term builder can satisfy: lemmas with `Not` premises or nested binders and lemmas that conclude `False` are not roots (they can still be *applied*).
-Today's Z pool has 123 lemmas in six areas; the pilot applied 71 of them. Lemmas that never appear are, mostly, the ring laws (`ring` closes those goals first), the case-split lemmas (`Z.le_total`,
-`Z.lt_trichotomy`, `Z.eq_dec`: they are for family F2) and lemmas with negated premises.
+Today's Z pool has 123 lemmas in six areas; the pilot's 6 024 theorems applied 79 of them (30 201 applications), and the usage is concentrated: the exponential of its entropy is 42, i.e. the data behave as if there
+were about 42 equally used lemmas, and the five most used lemmas (`Z.dvd_of_dvd_neg`, `Z.lt_of_sub_pos`, `Z.lt_of_le_of_lt`, `Z.lt_of_lt_of_le`, `Z.dvd_of_neg_dvd`) are 28% of all applications. Lemmas that never appear are,
+mostly, the ring laws (`ring` closes those goals first), the case-split lemmas (`Z.le_total`, `Z.lt_trichotomy`, `Z.eq_dec`: they are for family F2) and lemmas with negated premises.
 
 ## 6. Identity, shards, merge
 
-* **The index is the identity.** Record *i* of seed *s* is a pure function of the configuration and *i*. A shard can be remade alone, a record regenerated to check it, the index space cut into ranges
+* **The index is the identity.** Record *i* of seed *s* is a pure function of the configuration, the library and *i*. A shard can be remade alone, a record regenerated to check it, the index space cut into ranges
   and handed to processes in any order. Gate S48 compares records made in order, in reverse, by a new generator, and by other processes with other `PYTHONHASHSEED`s, and pins the digests of a fixed range.
 * **Three digests say what made the data**: the configuration (`Config.digest()`: everything that decides the data and nothing else), the generator (a hash of the source of `synth_*.py` that makes theorems),
-  the world (the library below the limit, `bank.world_digest`). Each shard's `.meta.json` names the first two; the manifest names all three.
-* **Merge** (`synth_merge.merge`, in index order, so the result does not depend on how the index space was cut): (1) *exclusion*: a theorem whose statement is that of a library lemma, a bank problem
+  the world (the library below the limit, `bank.world_digest`). Each shard's `.meta.json` names all three, and so does the manifest.  **The library is an input.** The pool of lemmas the theorems are grown from
+  is the library, so a library that has grown makes other theorems for the same indices (adding `ext_lib` changed 20 of the 241 records that gate S48 pins, and the old library with the new generator
+  reproduced all of them: finding F84).  A shard is therefore reused only if it was made in the library of today, and `merge` refuses shards of different libraries; after a change of the library, generate
+  into a new directory.
+* **Merge** (`synth_merge.merge`, in index order, so the result does not depend on how the index space was cut; `--train-target N` stops at the N-th *train* record, `--target N` at the N-th record of any
+  split -- 12% of the records are held out, so "60 000 theorems to train on" is `--train-target 60000`; a dataset made with a target is the beginning of the one made without, so more shards never change it): (1) *exclusion*: a theorem whose statement is that of a library lemma, a bank problem
   or a sub-theorem of one is dropped; (2) *duplicates*; (3) *shape cap*: a shape is a statement with numerals and variable names forgotten, at most 2 per shape; (3b) *skeleton cap*: a skeleton is a
   proof with its terms forgotten (kinds and lemmas of the steps), at most 25 per skeleton; (4) **splits**, functions of the record: `test_comp` = the record's *recipe* (the set of lemmas and
   decision procedures its proof uses) hashes into the held-out 6% of recipes, so no training record has that recipe (a test of putting known lemmas together in a way not seen in training); `test_iid` 3% and
@@ -112,16 +120,39 @@ satisfies the statement; every 20th record also finds the label `solved_by` agai
 
 ```
 python3 src/python/synth/synth_cli.py gen    --out DIR --seed 1 --attempts 160000 --shard 2000 --jobs 2     # resumable; the result does not depend on --jobs or --shard
-python3 src/python/synth/synth_cli.py merge  --out DIR [--target 60000] [--shape-cap 2] [--skeleton-cap 25] [--subproblems data/dataset_v1/subproblems.json]
+python3 src/python/synth/synth_cli.py merge  --out DIR [--train-target 60000] [--shape-cap 2] [--skeleton-cap 25] --exclude-dataset data/dataset_v2    # the benchmark's statements, lemmas and sub-theorems (and shapes) leave
+python3 src/python/synth/synth_cli.py grow   --out DIR --train-target 60000 --attempts 450000 --max-attempts 1350000 --shard 2000 --jobs 4 --exclude-dataset data/dataset_v2   # gen + count, until the target is met
 python3 src/python/synth/synth_cli.py verify --out DIR [--sample K] [--no-second-opinion]
 python3 src/python/synth/synth_cli.py card   --out DIR
 python3 tests/run_gates.py s48_synth_tests.py                                                               # the gate (about 70 s)
 ```
 
-Cost (*pilot*, one core): about 0.1 s per attempt, about one attempt in five yields a record; the verification costs about 0.1 s per record. A dataset of 60 000 records is therefore about 300 000 attempts
-(8 core-hours) and 2 core-hours of verification.
+Cost (*pilot*, one core, world builds included): 12 attempts per second (30 000 attempts in 2 473 core-seconds); about one attempt in five yields a kept record; the verification costs about 0.1 s per record.
+60 000 train theorems are about 68 000 records in all, hence roughly 340 000 to 450 000 attempts (8 to 10 core-hours, 2 to 3 hours on four cores) and about 2 core-hours of verification. The yield falls as the set
+grows (the n-th instance of a skeleton is dropped), which is why `grow` counts instead of guessing: the experiment pipeline (`docs/EXPERIMENTS.md`) uses it, starts at 450 000 attempts and gives up, loudly, at three
+times as many.
 
-## 9. Limitations (read before using the data, or before quoting a result)
+## 9. What the pilot says about quality and quantity, and the limitations (read before using the data, or before quoting a result)
+
+*Pilot* (one run, 6 024 kept theorems, seed 101; the numbers of a 60 000-theorem set will differ in the details, not in kind):
+
+| | |
+|---|---|
+| areas | divisibility 1 499, logic 1 400, existence 1 217, order 932, equality 511, gcd 465 |
+| depth (of the tree) | 2 to 10, mean 4.3 (499 / 1 416 / 1 643 / 1 202 / 743 / 365 / 133 / 21 / 2 at depth 2 ... 10); steps per proof: mean 5.3 (2.2 at depth 2, 6.1 at depth 5, 10.4 at depth 9) |
+| action kinds in the proofs | 5 of the 15 kinds that the bank's reference proofs use: `APPLY` 66.0% of the steps (in 99.6% of the theorems), `APPLY_WITH` 29.3% (78.8%), `LINARITH` 3.7% (15.9%), `NLINARITH` 0.9% (4.4%), `RING` 0.09% (0.4%). The reference proofs of dataset v2, by contrast, are 27% `LINARITH`, 13% `CLAIM`, 12% `CASES`, 12% `FORWARD`, 9% `REWRITE_AT`, 8% `APPLY_WITH`, 5% `APPLY`, 5% `USE`; the ten kinds the synthetic proofs never contain are 56% of their steps |
+| closed at once by a decision procedure | 13.0% (the quota keeps one in five of them; they are labelled `solved_by`) |
+| existential conclusions | 20.2% |
+| distinct | 6 012 statement shapes (cap 2), 4 793 proof skeletons (4 390 of them occur once), 3 939 recipes (sets of lemmas) |
+| saturation (Good-Turing, Chao1) | skeletons: coverage 0.27, i.e. 73% of the next draws would have a skeleton not yet seen; Chao1 estimates 47 000 ± 3 100 skeletons that the generator can make; recipes: coverage 0.45, 19 600 ± 1 000; shapes: not saturated (1.4 million ± 0.4 million). Rarefaction: 4 268 draws show 3 497 skeletons on average, 6 024 draws 4 793 |
+| lemmas | 79 of the pool's 123 lemmas are applied (30 201 applications); effectively 42 (the exponential of the usage entropy) |
+
+How to read this. *Not trivial, not copies*: no statement is a statement of the library, the bank or the sub-theorems (they are removed by digest and by shape), depth is at least the plan's, hypotheses are needed,
+the median proof has five steps. *Not rich either*: the proofs are chains of lemma applications with terms to choose; the vocabulary is the integers' order, divisibility, gcd and existence; only five kinds of action
+occur and two of them are 95% of the steps. What this data can teach is premise selection, unification and the building of terms; it cannot teach claims, case splits, induction or rewriting (those need further
+families, section 10). *Is 60 000 enough?* It is more than the number of skeletons the pilot's saturation curve says are cheap to find at one per attempt (the Chao1 estimate is about 47 000), so beyond some tens of thousands
+a larger set repeats proof structures with new numerals and variable names; the gain from 15 000 to 60 000 theorems is the quantity to measure, not to assume. The experiment pipeline does measure it: it trains on 0, 1 000,
+4 000, 15 000 and 60 000 synthetic theorems and reports olympiad accuracy against that number (`docs/EXPERIMENTS.md`, E2b), together with the generator's saturation statistics (E5).
 
 * **Synthetic.** The theorems are random combinations of library lemmas. They are true and proved, but often not what a person would ask, and the distribution of hypotheses is whatever the growth left over.
   A prover that does well on them has learned lemma application, unification and the decision procedures; it has not necessarily learned mathematics.
@@ -129,7 +160,9 @@ Cost (*pilot*, one core): about 0.1 s per attempt, about one attempt in five yie
   procedure settles at once. For difficulty use a solver's behaviour (the baseline results of `docs/TRAINING.md`), not the label.
 * **Vocabulary.** Integers only; order, equality, divisibility, gcd, primes, existence. Nothing here has the structure of a real olympiad problem (no sums, recursion, or case analysis beyond what lemmas give).
   That is what the problem bank is for; a pre-training effect on it is a hypothesis to be measured, not a property of this dataset.
-* **Action kinds.** F1 proofs use `APPLY`, `APPLY_WITH`, `RING`, `LINARITH` and `NLINARITH`; a policy pre-trained on F1 alone has never seen `CLAIM`, `CASES`, `INDUCT`, `FORWARD` or `REWRITE`.
+* **Action kinds.** F1 proofs use `APPLY`, `APPLY_WITH`, `RING`, `LINARITH` and `NLINARITH` (`RING` in under 0.1% of the steps); a policy pre-trained on F1 alone has never seen `CASES`, `CLAIM`, `FORWARD`, `USE`,
+  `REWRITE`, `REWRITE_AT`, `REFINE`, `LINCOMB`, `INTERVAL_CASES` or `INDUCT_WITH` -- the kinds that carry most of the steps of the bank's reference proofs. Whether pre-training on premise selection and term
+  building helps with those anyway is what the scaling experiment measures.
 * **The evaluator is not the kernel.** The semantic labels (`sat_rate`, `needed`) are evidence about the *statement*, from a window of small integers. The kernel's acceptance of the proof is the only claim.
 * **A pool that is small in places.** The gcd area has four lemmas, so its statements have few proof skeletons (hence the skeleton cap); the order and divisibility areas are rich.
 

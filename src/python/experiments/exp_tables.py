@@ -189,7 +189,8 @@ def scaling_table(C, P):
     def add(n, group, variant, label):
         if variant not in C.variants(group): return
         dev, k = _cell(C, group, variant, 'sample', 'dev', B, 'all'); test, _ = _cell(C, group, variant, 'sample', 'test', B, 'all'); tp, _ = _cell(C, group, variant, 'sample', 'test', B, 'proved')
-        rows.append([n, label, k, dev, test, tp])
+        u = C.synth_used(n) if n else None
+        rows.append([n if (u is None or u == n) else '%d (%d used)' % (n, u), label, k, dev, test, tp])
     add(0, 'main', 'bc_scratch', 'BC, no pre-training')
     for n in sizes:
         if n == smax: add(n, 'main', 'bc', 'BC, pre-trained + olympiad')
@@ -265,7 +266,7 @@ def system_table(C):
 
 
 HYPER = [      # (profile key, description)
-    ('seeds', 'training seeds (replicates)'), ('synth_target', 'synthetic theorems kept (pre-training pool)'), ('synth_attempts', 'generator attempts'), ('synth_sizes', 'synthetic theorems used for pre-training (scaling study)'),
+    ('seeds', 'training seeds (replicates)'), ('synth_target', 'synthetic train theorems (the largest pre-training pool)'), ('synth_attempts', 'generator attempts'), ('synth_sizes', 'synthetic theorems used for pre-training (scaling study)'),
     ('pre_epochs', 'pre-training epochs'), ('pre_batch', 'batch size (decisions)'), ('ft_epochs', 'fine-tuning epochs (after pre-training)'), ('ft_lr', 'fine-tuning peak learning rate'), ('scratch_epochs', 'epochs from scratch (no pre-training)'),
     ('rl_iters', 'expert-iteration iterations'), ('rl_episodes', 'tasks per iteration'), ('rl_probes', 'probe budget per task during training'), ('ei_updates', 'gradient steps per iteration'), ('boot_per_iter', 'library lemmas admitted per iteration at most'),
     ('ppo_iters', 'PPO iterations'), ('ppo_episodes', 'PPO episodes per iteration'),

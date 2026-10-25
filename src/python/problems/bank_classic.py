@@ -340,8 +340,10 @@ def _(w, b):
            topics=('functional-equation', 'induction'), level=5, kind='prove', origin='folklore', verified='answer-checked',
            spec=spec(('fn',), [lambda f: all(f(n) >= 0 for n in range(0, 9)), lambda f: f(1) > 0, lambda f: all(f(m * m + n * n) == f(m) ** 2 + f(n) ** 2 for m in range(0, 9) for n in range(0, 9))], lambda f: all(f(n) == n for n in range(0, 9)),
                      hatoms=False, atoms=[(C(0), lambda f, n: n), (lambda f, n: f(n), lambda f, n: n)], extra_fns=[lambda n: n if n >= 0 else 5, lambda n: n if n >= 0 else -5, lambda n: n if n <= 3 else 0, lambda n: n if n != 0 else 1],
-                     skip_mutants={'Z.le -> Z.lt in (Z.le 0 x3)': 'equivalent: the equation is symmetric in m and n, so a guard 0 < m only loses the pair (0, 0), and the pair (1, 0) already gives f(1) = f(1)^2 + f(0)^2, hence f(0) = 0 and f(0) = 2 f(0)^2',
-                                   'constant 0 -> 1 in (Z.le 0 x3)': 'the same', 'Z.le -> Z.lt in (Z.le 0 x4)': 'the same', 'constant 0 -> 1 in (Z.le 0 x4)': 'the same'}),
+                     skip_mutants={'Z.le -> Z.lt in (Z.le 0 x3)': 'equivalent: the equation is symmetric in m and n, so a guard 0 < m loses only the pairs (0, n); for n > 0 the pair (n, 0) says the same, and the pair (1, 0) gives f(1) = f(1)^2 + f(0)^2, hence f(1) = 1 and f(0) = 0, which is the pair (0, 0)',
+                                   'constant 0 -> 1 in (Z.le 0 x3)': 'equivalent to the guard 0 < m: over the integers 1 <= m is 0 < m',
+                                   'Z.le -> Z.lt in (Z.le 0 x4)': 'equivalent: the same argument with m and n exchanged -- the pair (0, 1) gives f(1) = 1 and f(0) = 0, and the pairs (m, 0) are the pairs (0, m) by symmetry',
+                                   'constant 0 -> 1 in (Z.le 0 x4)': 'equivalent to the guard 0 < n: over the integers 1 <= n is 0 < n'}),
            notes='f is a function on the integers whose values at the non-negative integers are non-negative and satisfy the equation there; f(0) = 0, f(1) = 1, f(2) = 2, f(4) = 4, f(5) = 5 and then every f(n) follows from identities like 3^2 + 4^2 = 5^2 + 0^2, '
                  'in general from (2k+1)^2 + (k-2)^2 = (2k-1)^2 + (k+2)^2')
 def _(w, b):

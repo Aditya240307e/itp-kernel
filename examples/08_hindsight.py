@@ -69,7 +69,7 @@ ex = max((e for e in exs if e.kind == 'solved'), key=lambda e: e.length, default
 d = json.loads(json.dumps(ex.to_dict()))                           # plain data: this is what a dataset file or a replay buffer holds
 print('\nthe longest solved example, as data:')
 print('  statement  ', d['statement'][:120] + (' ...' if len(d['statement']) > 120 else ''))
-print('  code       ', '%d tokens of the typed term builder, %d premises' % (len(d['statement_code']), d['premises']))
+print('  code       ', '%d tokens of the typed term builder; premises %s (the globals an attempt may use: `upto`, less the ranges that are `hidden`)' % (len(d['statement_code']), json.dumps(d['premises'])))
 print('  proof      ', ', '.join(s['kind'] for s in d['steps']))
 fresh = G.Engine(w)                                                # another engine, configured as the bank's own
 statement = T.statement_from_code(fresh, d['statement_code'], d['premises'])

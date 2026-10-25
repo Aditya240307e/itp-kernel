@@ -166,6 +166,13 @@ def sec_B(c):
         # no run trains on a dev or test problem, and the synthetic set excludes the benchmark
         merge = runs['data/synth_merge']
         expect('--exclude-dataset' in merge.argv, 'B9 %s: the synthetic set is merged with the benchmark excluded' % name)
+        gen = runs['data/synth_gen']; arg = lambda r, flag: r.argv[r.argv.index(flag) + 1]
+        expect(gen.argv[2] == 'grow' and int(arg(gen, '--train-target')) == P['synth_target'] == int(arg(merge, '--train-target')) and '--target' not in merge.argv,
+               'B9b %s: the synthetic set is made for a number of TRAIN theorems, by `grow` and by the merge alike' % name)
+        expect(int(arg(gen, '--max-attempts')) > int(arg(gen, '--attempts')) == P['synth_attempts'] and arg(gen, '--exclude-dataset') == arg(merge, '--exclude-dataset'),
+               'B9c %s: grow counts with the merge\'s own exclusions, and may add rounds' % name)
+        expect(all(int(arg(r, '--synth-max')) <= P['synth_target'] for r in runs.values() if '--synth-max' in r.argv) and max(P['synth_sizes']) == P['synth_target'],
+               'B9d %s: no run asks for more synthetic theorems than the set has, and the largest pre-training is the whole set' % name)
         for i, r in runs.items():
             if r.stage in ('pre', 'ft', 'rl'):
                 expect('--split' not in r.argv and '--test' not in r.argv, 'B10 %s: %s does not choose a split (the trainers read the train split and use dev only to select)' % (name, i))
@@ -905,6 +912,21 @@ def sec_I(c):
     expect(rc == 2 and 'PROFILE must be' in out, 'I5 an unknown profile is refused')
     rc, out = sh('bash scripts/env.sh', PROFILE='full', SEEDS='0-6', DEVICE='cuda', JOBS='3', WORKERS='5', SET='rl_iters=7')
     expect('SEEDS=0-6' in out and 'DEVICE=cuda' in out and 'JOBS=3' in out and 'WORKERS=5' in out and "SET='rl_iters=7'" in out, 'I6 settings from the environment (%s)' % out.strip()[:100])
+    # every setting is an option of every script: `--seeds 0-6` runs seven seeds, `--set` is repeatable, `--opt=value` works, a typo is refused, the options reach the scripts that a script calls
+    rc, out = sh('bash scripts/env.sh --profile full --seeds 0-6 --device cuda --jobs 3 --workers 5 --set rl_iters=7 --set eval_probes=40', PROFILE='smoke', SEEDS='0-1', DEVICE='cpu')
+    expect(rc == 0 and 'PROFILE=full SEEDS=0-6' in out and 'DEVICE=cuda' in out and 'JOBS=3' in out and 'WORKERS=5' in out and "SET='rl_iters=7 eval_probes=40'" in out, 'I6b the options (--seeds 0-6, --set twice, ...) win over the environment (%s)' % out.strip()[:100])
+    rc, out = sh('bash scripts/env.sh --seeds=0-6 --runs=/somewhere --mem-gb=12 --cores=3 --target=rl/ppo/s0', PROFILE='small')
+    expect(rc == 0 and 'SEEDS=0-6' in out and 'RUNS=/somewhere' in out and 'MEM_GB=12' in out and 'CORES=3' in out and "TARGET='rl/ppo/s0'" in out, 'I6c --option=value works as well (%s)' % out.strip()[:100])
+    rc, out = sh('bash scripts/env.sh --seed 0-6')
+    expect(rc == 2 and "unknown option '--seed'" in out, 'I6d an unknown option is refused, not ignored')
+    rc, out = sh('bash scripts/env.sh --seeds')
+    expect(rc == 2 and 'needs a value' in out, 'I6e an option without a value is refused')
+    rc, out = sh('bash scripts/env.sh --profile nonsense')
+    expect(rc == 2 and 'PROFILE must be' in out, 'I6f an unknown profile given as an option is refused too')
+    rc, out = sh('bash scripts/env.sh --help')
+    expect(rc == 0 and '--seeds' in out and 'SEEDS' in out and 'PROFILE=full' not in out, 'I6g --help prints the settings and the options')
+    rc, out = sh('. scripts/env.sh --seeds 0-6 --profile small --set rl_iters=3 >/dev/null; bash -c \'echo "child:$SEEDS:$PROFILE:$SET"\'')
+    expect(rc == 0 and 'child:0-6:small:rl_iters=3' in out, 'I6h a script that calls another one hands its options on (run_all.sh calls 00_check_env.sh, 06_benchmarks.sh, 07_report.sh): %s' % out.strip()[-60:])
     tmp = tempfile.mkdtemp(prefix='s51i_')
     try:
         # local.env gives the usual settings; what the caller exports wins
@@ -915,6 +937,8 @@ def sec_I(c):
         expect('PROFILE=smoke' in out and 'DEVICE=cuda' in out and 'WORKERS=3' in out, 'I7 local.env sets what the caller does not set, the caller wins (%s)' % out.strip()[:90])
         p = subprocess.run(['bash', os.path.join(fake, 'scripts', 'env.sh')], capture_output=True, text=True, env=dict(clean)); out = p.stdout
         expect('PROFILE=small' in out and 'SEEDS=0-2' in out, 'I8 local.env alone')
+        p = subprocess.run(['bash', os.path.join(fake, 'scripts', 'env.sh'), '--device', 'cpu', '--seeds=0-6'], capture_output=True, text=True, env=dict(clean, PROFILE='smoke', DEVICE='cuda:1')); out = p.stdout
+        expect('PROFILE=smoke' in out and 'DEVICE=cpu' in out and 'SEEDS=0-6' in out and 'WORKERS=3' in out, 'I8b an option wins over the environment and over local.env (%s)' % out.strip()[:90])
         # the runner through the scripts' own function: nothing is executed, the graph is printed
         R = os.path.join(tmp, 'runs')
         rc, out = sh('. scripts/env.sh >/dev/null; exp_run --dry-run', PROFILE='smoke', RUNS=R, JOBS='2')

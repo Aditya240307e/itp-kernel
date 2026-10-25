@@ -16,6 +16,10 @@
 #   TARGET    only these runs and what they need (comma separated; a trailing * is a prefix):  "rl/ei_her/*,rl/ppo/s0"
 #   PY        the Python interpreter                                                                                         default: python3
 #
+# Every setting is also an option of every script (they win over scripts/local.env and the environment):
+#     ./scripts/run_all.sh --profile full --seeds 0-6 --device cuda --jobs 4 --set rl_iters=20 --set eval_probes=100
+#   --profile --seeds --runs --jobs --cores --mem-gb --device --workers --target --py, and --set (repeatable; added to SET); `--seeds=0-6` works too; --help prints this text.
+#
 # Every command of the matrix is resumable: run a script again after an interruption and it continues where it stopped.
 # A runs directory belongs to ONE profile / seed list / SET: the runner refuses to mix results made with different settings
 # (DEVICE, WORKERS, JOBS, CORES and MEM_GB are about the machine, not the results, and may change between runs).
@@ -36,6 +40,26 @@ if [ -f "$SCRIPTS_DIR/local.env" ]; then
   unset _kept _v
 fi
 
+# command-line options (the same settings; see the header)
+while [ $# -gt 0 ]; do
+  _opt="$1"; _val=""; _have=0; shift
+  case "$_opt" in --*=*) _val="${_opt#*=}"; _opt="${_opt%%=*}"; _have=1;; esac
+  case "$_opt" in
+    -h|--help) sed -n '2,/^$/p' "$SCRIPTS_DIR/env.sh" | sed 's/^# \{0,1\}//'; exit 0;;
+    --profile|--seeds|--runs|--jobs|--cores|--mem-gb|--device|--workers|--target|--py|--set)
+      if [ "$_have" = 0 ]; then
+        [ $# -ge 1 ] || { echo "$_opt needs a value (see --help)" >&2; exit 2; }
+        _val="$1"; shift
+      fi
+      case "$_opt" in
+        --profile) PROFILE="$_val";;  --seeds) SEEDS="$_val";;  --runs) RUNS="$_val";;  --jobs) JOBS="$_val";;  --cores) CORES="$_val";;  --mem-gb) MEM_GB="$_val";;
+        --device) DEVICE="$_val";;  --workers) WORKERS="$_val";;  --target) TARGET="$_val";;  --py) PY="$_val";;  --set) SET="${SET:+$SET }$_val";;
+      esac;;
+    *) echo "unknown option '$_opt' (see --help)" >&2; exit 2;;
+  esac
+done
+unset _opt _val _have
+
 : "${PROFILE:=full}"
 case "$PROFILE" in smoke|small|full) ;; *) echo "PROFILE must be smoke, small or full (got '$PROFILE')" >&2; exit 2;; esac
 if [ -z "${SEEDS:-}" ]; then case "$PROFILE" in smoke) SEEDS=0-1;; small) SEEDS=0-2;; *) SEEDS=0-4;; esac; fi
@@ -48,6 +72,7 @@ if [ -z "${SEEDS:-}" ]; then case "$PROFILE" in smoke) SEEDS=0-1;; small) SEEDS=
 : "${CORES:=}"
 : "${MEM_GB:=}"
 if [ -z "${JOBS:-}" ]; then JOBS="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1)"; fi
+export PROFILE SEEDS RUNS PY DEVICE WORKERS SET TARGET CORES MEM_GB JOBS            # (the scripts run each other: what an option set is what the next script reads from its environment)
 export PYTHONUNBUFFERED=1
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}" MKL_NUM_THREADS="${MKL_NUM_THREADS:-1}"
 

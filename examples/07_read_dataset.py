@@ -66,7 +66,7 @@ print('subproblems.json: %d theorems (%d solved + %d derived, proofs of at most 
       % (len(subs['examples']), subs['counts']['solved'], subs['counts']['derived'], subs['max_len'], {s: n for s, n in sorted(collections.Counter(e['split'] for e in subs['examples']).items())}))
 sub = next(e for e in subs['examples'] if e['kind'] == 'derived')
 print('  one derived fact (%s, %d actions): %s' % (sub['id'], sub['length'], sub['statement'][:90]))
-assert len({(e['statement_digest'], e['premises']) for e in subs['examples']}) == len(subs['examples'])    # every theorem once per set of visible lemmas (`premises`)
+assert len({(e['statement_digest'], json.dumps(e['premises'], sort_keys=True)) for e in subs['examples']}) == len(subs['examples'])    # every theorem once per set of visible lemmas (`premises`: an int, or {'upto': n, 'hidden': [[a, b], ..]})
 assert all(e['split'] == next(p['split'] for p in problems if p['name'] == e['problem']) for e in subs['examples'])    # a sub-theorem is in the split of its problem
 
 # the splits are consistent between the files

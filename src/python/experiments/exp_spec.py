@@ -56,7 +56,7 @@ PROFILES = {
         eval_probes=500, headline=200, eval_time_limit=30.0, eval_budgets=(10, 20, 50, 100, 200, 500), eval_splits='dev,test', recheck=1, workers=2, device='cpu', threads=1, mem_scale=1.0),
     'full': dict(
         seeds=5, dataset=FULL_DATASET,
-        synth_attempts=400000, synth_target=60000, synth_jobs=4, synth_sizes=(0, 1000, 4000, 15000, 60000), synth_verify_sample=1, synth_seed=1,
+        synth_attempts=450000, synth_target=60000, synth_jobs=4, synth_sizes=(0, 1000, 4000, 15000, 60000), synth_verify_sample=1, synth_seed=1,
         pre_epochs=6, pre_batch=64, ft_epochs=20, ft_lr=3e-4, scratch_epochs=30, bc_eval_every=5, bc_eval_probes=200,
         rl_iters=30, rl_episodes=128, rl_probes=200, ppo_iters=250, ppo_episodes=64, ei_updates=60, rl_eval_every=3, rl_eval_probes=500, boot_per_iter=16,
         eval_probes=2000, headline=1000, eval_time_limit=60.0, eval_budgets=(10, 20, 50, 100, 200, 500, 1000, 2000), eval_splits='dev,test', recheck=1, workers=4, device='cpu', threads=1, mem_scale=1.0),
@@ -135,9 +135,10 @@ def build(name, seeds=None, runs_dir=None, overrides=None):
     else:
         add(Run('data/dataset', 'data', py('problems', 'dataset', '--verify', D), check=[os.path.join(D, 'manifest.json')], tags={'verify_only': True}))
     ds = 'data/dataset'
-    add(Run('data/synth_gen', 'data', py('synth', 'synth_cli', 'gen', '--out', SY, '--seed', P['synth_seed'], '--attempts', P['synth_attempts'], '--shard', 2000 if P['synth_attempts'] >= 8000 else 300,
-                                          '--jobs', P['synth_jobs']), needs=[ds], check=[os.path.join(SY, 'config.json')], cores=P['synth_jobs']))
-    add(Run('data/synth_merge', 'data', py('synth', 'synth_cli', 'merge', '--out', SY, '--target', P['synth_target'], '--exclude-dataset', D), needs=['data/synth_gen'], check=[os.path.join(SY, 'manifest.json')]))
+    # synth_target is the number of TRAIN theorems (the held-out 12% come on top); `grow` generates until the merge would keep that many, starting from synth_attempts and giving up at three times as many
+    add(Run('data/synth_gen', 'data', py('synth', 'synth_cli', 'grow', '--out', SY, '--seed', P['synth_seed'], '--train-target', P['synth_target'], '--attempts', P['synth_attempts'], '--max-attempts', 3 * P['synth_attempts'],
+                                          '--shard', 2000 if P['synth_attempts'] >= 8000 else 300, '--jobs', P['synth_jobs'], '--exclude-dataset', D), needs=[ds], check=[os.path.join(SY, 'config.json')], cores=P['synth_jobs']))
+    add(Run('data/synth_merge', 'data', py('synth', 'synth_cli', 'merge', '--out', SY, '--train-target', P['synth_target'], '--exclude-dataset', D), needs=['data/synth_gen'], check=[os.path.join(SY, 'manifest.json')]))
     add(Run('data/synth_verify', 'data', py('synth', 'synth_cli', 'verify', '--out', SY, '--sample', P['synth_verify_sample']), needs=['data/synth_merge'], check=[os.path.join(SY, 'verification.json')]))
     add(Run('data/synth_card', 'data', py('synth', 'synth_cli', 'card', '--out', SY), needs=['data/synth_verify'], check=[os.path.join(SY, 'DATASET_CARD.md')]))
     add(Run('data/synth_stats', 'data', py('synth', 'synth_stats', SY, '--out', os.path.join(SY, 'stats.json')), needs=['data/synth_merge'], check=[os.path.join(SY, 'stats.json')], mem_gb=1.0))

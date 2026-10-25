@@ -63,16 +63,25 @@ def read_records(path):
         for line in f: yield json.loads(line)
 
 
-def merge(shards, out_dir, cfg, exclude=(), world_digest=None, generator=None, shape_cap=2, skeleton_cap=25, salt='split-v1', permille=(60, 30, 30), target=None, progress=None, exclude_shapes=(), sources=None):
-    """merge shard files (paths of .jsonl.gz written by synth_gen.run_range, each with its .meta.json) into the dataset in `out_dir`; returns the manifest (also written there)"""
-    os.makedirs(out_dir, exist_ok=True)
+def merge(shards, out_dir, cfg, exclude=(), world_digest=None, generator=None, shape_cap=2, skeleton_cap=25, salt='split-v1', permille=(60, 30, 30), target=None, progress=None, exclude_shapes=(), sources=None,
+          train_target=None, dry_run=False):
+    """merge shard files (paths of .jsonl.gz written by synth_gen.run_range, each with its .meta.json) into the dataset in `out_dir`; returns the manifest (also written there).
+
+    `target`: stop after that many records in all (every split); `train_target`: stop after that many TRAIN records -- what an experiment means by "60 000 synthetic theorems" (the held-out 12% of the records
+    come on top of them).  Records are taken in index order, so a dataset made with a target is the prefix of the dataset made without one: more shards never change it.
+    `dry_run`: count only -- nothing is written, the result is {'counts', 'records', 'dropped_in_merge'}."""
+    if not dry_run: os.makedirs(out_dir, exist_ok=True)
     exclude = set(exclude); exclude_shapes = set(exclude_shapes); seen = set(); shapes = collections.Counter(); skeletons = collections.Counter(); dropped = collections.Counter()
     metas = [json.load(open(p + '.meta.json')) for p in shards]
+    if world_digest is not None:                                             # (the shards of one dataset are made in one library: see synth_gen.run_range)
+        other = sorted({str(m.get('world')) for m in metas} - {world_digest})
+        if other: raise RuntimeError('the shards were made in the library %s (None: not recorded), the library now is %s -- the data of two libraries are not mixed: generate again, in another --out' % (other, world_digest))
     order = sorted(range(len(shards)), key=lambda i: metas[i]['range'][0])
     outs = {s: [] for s in SPLITS}; kept = 0
     for i in order:
         for rec in read_records(shards[i]):
             if target is not None and kept >= target: dropped['beyond the target count'] += 1; continue
+            if train_target is not None and len(outs['train']) >= train_target: dropped['beyond the target count'] += 1; continue
             if rec['digest'] in exclude: dropped['statement of a library lemma, bank problem or sub-theorem'] += 1; continue
             if rec['digest'] in seen: dropped['duplicate statement'] += 1; continue
             sh = shape_of(rec['pretty'])
@@ -84,6 +93,7 @@ def merge(shards, out_dir, cfg, exclude=(), world_digest=None, generator=None, s
             rec['shape'] = sh; rec['skeleton'] = sk; rec['split'] = split_of(rec, salt, permille)
             outs[rec['split']].append(rec); kept += 1
         if progress: progress(shards[i], kept)
+    if dry_run: return {'counts': {s: len(outs[s]) for s in SPLITS}, 'records': kept, 'dropped_in_merge': dict(dropped)}
     for s in SPLITS:
         with gzip.open(os.path.join(out_dir, s + '.jsonl.gz.tmp'), 'wt', encoding='utf-8') as f:
             for r in outs[s]: f.write(json.dumps(r, separators=(',', ':')) + '\n')
@@ -91,6 +101,7 @@ def merge(shards, out_dir, cfg, exclude=(), world_digest=None, generator=None, s
     allrecs = [r for s in SPLITS for r in outs[s]]
     man = {'format': 1, 'name': 'synthetic', 'config': cfg.to_json(), 'config_digest': cfg.digest(), 'generator': generator, 'world_digest': world_digest, 'limit': cfg.limit_name,
            'split_rule': {'salt': salt, 'permille': {'test_comp': permille[0], 'test_iid': permille[1], 'dev': permille[2]}, 'shape_cap': shape_cap, 'skeleton_cap': skeleton_cap},
+           'targets': {'records': target, 'train': train_target},
            'exclusions': {'digests': len(exclude), 'bank_shapes': len(exclude_shapes), 'sources': sources or []},
            'shards': len(shards), 'attempts': sum(m['range'][1] - m['range'][0] for m in metas), 'records_before_merge': sum(m['records'] for m in metas),
            'rejects': dict(sum((collections.Counter(m['rejects']) for m in metas), collections.Counter())), 'errors': sum(m['n_errors'] for m in metas),

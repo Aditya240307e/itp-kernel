@@ -16,8 +16,10 @@ configuration and the index (so that a published dataset can be regenerated, and
   E. TAMPERING.     A record that is wrong in any one field is refused (with the reason): steps dropped, added, reversed, swapped between records, a lemma replaced; a code of another statement; digest,
                     readable text, counts and labels changed.  `verify_files` reports the id of the bad record and says the dataset is not ok.
   F. MERGE.         Exclusion of the library's, the bank's and the sub-theorems' statements; duplicates; the shape cap; splits (no recipe of `test_comp` in the other splits, a split is a function of the
-                    record); the result does not depend on how the index space was cut into shards, nor on their order.
-  G. THE COMMAND LINE.  gen (two processes) -> merge -> verify -> card, end to end; the card says what the manifest says.
+                    record); the result does not depend on how the index space was cut into shards, nor on their order; the train target (exactly that many train records, a prefix of the dataset
+                    without a target; a dry run counts the same and writes nothing); shards of another configuration are refused, shards of another range are made again.
+  G. THE COMMAND LINE.  gen (two processes) -> merge -> verify -> card, end to end; the card says what the manifest says; `grow` tops up a dataset that is short of its train target (and the result is the
+                    one a single large `gen` and `merge --train-target` give), says SHORT and exits 3 when it cannot, and `merge --train-target` fails the same way unless `--allow-short`.
 
 Environment: S48_TRACE=1 prints timings, S48_ONLY=A,B selects sections, S48_UPDATE_GOLDEN=1 rewrites the pinned digests (when a change of the generator is intended).
 """
@@ -207,11 +209,14 @@ def sec_B(c):
     # B5  pinned: the digests of the range (the generator and the library, as they are)
     pins = {str(i): fx.recs[i]['digest'] for i in sorted(fx.recs)}
     if os.environ.get('S48_UPDATE_GOLDEN'):
-        with open(GOLDEN, 'w') as f: json.dump({'config': fx.cfg.digest(), 'range': list(RANGE), 'digests': pins}, f, indent=0, sort_keys=True)
+        with open(GOLDEN, 'w') as f: json.dump({'config': fx.cfg.digest(), 'range': list(RANGE), 'world': fx.gen.world_digest, 'digests': pins}, f, indent=0, sort_keys=True)
     gold = json.load(open(GOLDEN)) if os.path.exists(GOLDEN) else {'config': None, 'range': None, 'digests': {}}
     diff = sorted(set(pins) ^ set(gold['digests'])) + sorted(k for k in pins if k in gold['digests'] and pins[k] != gold['digests'][k])
     expect(gold['config'] == fx.cfg.digest() and gold['range'] == list(RANGE), 'B5 the pinned configuration is the gate\'s (%s)' % os.path.basename(GOLDEN))
-    expect(not diff, 'B5 the theorems of the indices %s..%s are those in %s: %d differ (%s) -- if the change is intended: S48_UPDATE_GOLDEN=1 python3 s48_synth_tests.py' % (RANGE[0], RANGE[1], os.path.basename(GOLDEN), len(set(diff)), sorted(set(diff))[:5]))
+    same_world = gold.get('world') == fx.gen.world_digest
+    why = ('' if same_world else ' [the LIBRARY is not the one of the pins (%s pinned, %s now): the pool of lemmas decides the theorems, so a library that has grown or changed makes other ones]' % (gold.get('world'), fx.gen.world_digest))
+    expect(not diff, 'B5 the theorems of the indices %s..%s are those in %s: %d differ (%s)%s -- if the change is intended: S48_UPDATE_GOLDEN=1 python3 s48_synth_tests.py' % (RANGE[0], RANGE[1], os.path.basename(GOLDEN), len(set(diff)), sorted(set(diff))[:5], why))
+    if not same_world: expect(False, 'B5 the pins were made in this library (a pin made in another library says nothing about the generator: re-pin with S48_UPDATE_GOLDEN=1 and read the difference first)')
 
 
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ C. the records
@@ -425,7 +430,7 @@ def sec_E(c):
 def write_shard(path, recs, a, b):
     with gzip.open(path, 'wt') as f:
         for r in recs: f.write(json.dumps(r, separators=(',', ':')) + '\n')
-    json.dump({'format': SG.FORMAT, 'config': 'x', 'generator': 'g', 'range': [a, b], 'records': len(recs), 'rejects': {'too shallow': (b - a) - len(recs)}, 'errors': [], 'n_errors': 0, 'disagreements': [],
+    json.dump({'format': SG.FORMAT, 'config': 'x', 'generator': 'g', 'world': 'wd', 'range': [a, b], 'records': len(recs), 'rejects': {'too shallow': (b - a) - len(recs)}, 'errors': [], 'n_errors': 0, 'disagreements': [],
                'seconds': 1.0, 'stats': {}}, open(path + '.meta.json', 'w'))
 
 
@@ -488,6 +493,40 @@ def sec_F(c):
         expect(SM.skeleton_of(t) != SM.skeleton_of(recs[4]), 'F3 ... and another proof is another skeleton')
         m4 = SM.merge([os.path.join(d1, 'shard_0.jsonl.gz')], os.path.join(tmp, 'o4'), fx.cfg, world_digest='wd', target=10)
         expect(m4['records'] == 10 and m4['dropped_in_merge'].get('beyond the target count', 0) > 0, 'F3 the target count caps the dataset (%d)' % m4['records'])
+        # F5  the train target: exactly that many train records, and the dataset is the prefix (in index order) of the one without a target; a dry run counts the same and writes nothing
+        full = {s_: [json.loads(l) for l in lines] for s_, lines in read_all(os.path.join(tmp, 'o1')).items()}
+        k = max(2, len(full['train']) // 2)
+        m6 = SM.merge([os.path.join(d1, 'shard_0.jsonl.gz')], os.path.join(tmp, 'o6'), fx.cfg, world_digest='wd', train_target=k)
+        part = {s_: [json.loads(l) for l in lines] for s_, lines in read_all(os.path.join(tmp, 'o6')).items()}
+        expect(m6['counts']['train'] == k == len(part['train']) and m6['targets'] == {'records': None, 'train': k}, 'F5 the train target gives exactly that many train records (%d)' % k)
+        expect(all(part[s_] == full[s_][:len(part[s_])] for s_ in SM.SPLITS), 'F5 every split of the targeted dataset is the beginning of the same split without a target (more shards never change it)')
+        expect(len(part['dev']) + len(part['test_iid']) + len(part['test_comp']) < len(full['dev']) + len(full['test_iid']) + len(full['test_comp']), 'F5 the held-out records after the last train record are not kept')
+        dry = SM.merge([os.path.join(d1, 'shard_0.jsonl.gz')], os.path.join(tmp, 'o7'), fx.cfg, world_digest='wd', train_target=k, dry_run=True)
+        expect(dry['counts'] == m6['counts'] and dry['records'] == m6['records'] and dry['dropped_in_merge'] == m6['dropped_in_merge'] and not os.path.exists(os.path.join(tmp, 'o7')), 'F5 a dry run counts what the merge keeps and writes nothing')
+        m8 = SM.merge([os.path.join(d1, 'shard_0.jsonl.gz')], os.path.join(tmp, 'o8'), fx.cfg, world_digest='wd', train_target=10 ** 6)
+        expect(m8['counts'] == m1['counts'], 'F5 a train target beyond what exists keeps everything (the caller decides whether that is short)')
+        # F6  shards: those of another configuration or generator are refused (never mixed), those of another range are made again, those asked for are not remade
+        sd = os.path.join(tmp, 'sh'); os.makedirs(sd)
+        sp = os.path.join(sd, 'shard_0.jsonl.gz')
+        meta = SG.run_range(fx.cfg, 0, 12, sp, world=fx.w)
+        expect(meta['range'] == [0, 12] and meta['config'] == fx.cfg.digest() and meta['generator'] == SG.generator_digest(), 'F6 run_range names the range, the configuration and the generator')
+        stamp = os.path.getmtime(sp)
+        again = SG.run_range(fx.cfg, 0, 12, sp, world=fx.w)
+        expect(again == meta and os.path.getmtime(sp) == stamp, 'F6 a shard that is the one asked for is not remade')
+        raises('F6 a shard of another configuration is an error', lambda: SG.run_range(SG.Config(seed=SEED + 1), 0, 12, sp, world=fx.w), RuntimeError)
+        mt = json.load(open(sp + '.meta.json')); mt['generator'] = 'someoneelse'; json.dump(mt, open(sp + '.meta.json', 'w'))
+        raises('F6 a shard of another generator is an error', lambda: SG.run_range(fx.cfg, 0, 12, sp, world=fx.w), RuntimeError)
+        mt['generator'] = SG.generator_digest(); json.dump(mt, open(sp + '.meta.json', 'w'))
+        expect(meta['world'] == fx.gen.world_digest == SG.world_digest_of(fx.w, fx.gen.limit), 'F6 run_range names the library the shard was made in (the digest of the world below the limit)')
+        mt['world'] = 'another library'; json.dump(mt, open(sp + '.meta.json', 'w'))
+        raises('F6 a shard made in another library is an error (the pool of lemmas decides the theorems: the same index makes another one)', lambda: SG.run_range(fx.cfg, 0, 12, sp, world=fx.w), RuntimeError)
+        raises('F6 the merge refuses the shard of another library', lambda: SM.merge([sp], os.path.join(tmp, 'o9'), fx.cfg, world_digest=fx.gen.world_digest), RuntimeError)
+        del mt['world']; json.dump(mt, open(sp + '.meta.json', 'w'))
+        raises('F6 a shard that does not say its library (an older generator) is refused as well', lambda: SG.run_range(fx.cfg, 0, 12, sp, world=fx.w), RuntimeError)
+        raises('F6 ... and by the merge', lambda: SM.merge([sp], os.path.join(tmp, 'o9'), fx.cfg, world_digest=fx.gen.world_digest), RuntimeError)
+        mt['world'] = fx.gen.world_digest; json.dump(mt, open(sp + '.meta.json', 'w'))
+        wider = SG.run_range(fx.cfg, 0, 20, sp, world=fx.w)
+        expect(wider['range'] == [0, 20] and [r['index'] for r in SG.read_shard(sp)] == [i for i in sorted(fx.recs) if i < 20], 'F6 a shard of another range is made again, and holds the records of the new range')
         # F4  the manifest: what the card and the paper quote
         man = json.load(open(os.path.join(tmp, 'o1', 'manifest.json')))
         st = man['statistics']
@@ -531,6 +570,37 @@ def sec_G(c):
         r = run('card', '--out', out)
         card = open(os.path.join(out, 'DATASET_CARD.md')).read() if os.path.exists(os.path.join(out, 'DATASET_CARD.md')) else ''
         expect(r.returncode == 0 and ('%d kernel-checked theorems' % man['records']) in card and ('**%d of %d records**' % (ver['checked'], ver['records'])) in card and 'World digest' in card, 'G4 card (it quotes the manifest and the verification)')
+        # G6  grow: starts from shards that exist, tops up until the train split has the target, and the result is what one large gen and `merge --train-target` give
+        w = fx.w; leak = CLI.leak_digests(w, None)
+        def count_at(n):
+            d = os.path.join(tmp, 'cnt%d' % n); os.makedirs(d)
+            write_shard(os.path.join(d, 'shard_0.jsonl.gz'), [fx.recs[i] for i in sorted(fx.recs) if i < n], 0, n)
+            return SM.merge([os.path.join(d, 'shard_0.jsonl.gz')], os.path.join(tmp, 'cnt%d_o' % n), fx.cfg, exclude=leak, world_digest='wd', dry_run=True)['counts']['train']
+        n120, n180 = count_at(120), count_at(180)
+        k = n180
+        if expect(n120 < k, 'G6 (the fixture: %d train records in 120 attempts, %d in 180; the test wants a target between)' % (n120, n180)):
+            out2 = os.path.join(tmp, 'ds2'); os.makedirs(os.path.join(out2, 'shards'))
+            for f in os.listdir(os.path.join(out, 'shards')): shutil.copy(os.path.join(out, 'shards', f), os.path.join(out2, 'shards', f))
+            r = run('grow', '--out', out2, '--seed', str(SEED), '--train-target', str(k), '--attempts', '120', '--max-attempts', '1200', '--shard', '60', '--jobs', '2')
+            expect(r.returncode == 0 and 'round 1: 120 attempts' in r.stdout and 'round 2:' in r.stdout and 'done: the target is met' in r.stdout, 'G6 grow: a first round that falls short, a second that meets the target: %s' % (r.stdout + r.stderr)[-500:])
+            r = run('merge', '--out', out2, '--train-target', str(k))
+            m = json.load(open(os.path.join(out2, 'manifest.json')))
+            expect(r.returncode == 0 and m['counts']['train'] == k and m['targets']['train'] == k, 'G6 merge --train-target after grow gives exactly the target (%s)' % m['counts'])
+            # the same dataset from one large gen: records in index order, whatever was generated beyond
+            out3 = os.path.join(tmp, 'ds3')
+            top = int(max(f for f in os.listdir(os.path.join(out2, 'shards')) if f.endswith('.jsonl.gz')).split('_')[1].split('.')[0]) + 60
+            r = run('gen', '--out', out3, '--seed', str(SEED), '--attempts', str(top), '--shard', '60', '--jobs', '2')
+            r = run('merge', '--out', out3, '--train-target', str(k))
+            ids = lambda d, s_: [json.loads(l)['id'] for l in gzip.open(os.path.join(d, s_ + '.jsonl.gz'), 'rt')]
+            same = all(ids(out2, s_) == ids(out3, s_) for s_ in SM.SPLITS) and len(ids(out2, 'train')) == k
+            expect(r.returncode == 0 and same, 'G6 grow + merge --train-target = one gen + merge --train-target (the same records in the same splits)')
+            # G7  too short: grow says so and exits 3; merge --train-target fails the same way unless --allow-short
+            r = run('grow', '--out', out2, '--seed', str(SEED), '--train-target', '100000', '--attempts', '120', '--max-attempts', '120', '--shard', '60', '--jobs', '1')
+            expect(r.returncode == 3 and 'SHORT' in r.stderr, 'G7 grow: --max-attempts reached before the target: SHORT, exit 3 (exit %d: %s)' % (r.returncode, r.stderr[-200:]))
+            r = run('merge', '--out', out2, '--train-target', '100000')
+            expect(r.returncode == 3 and 'SHORT' in r.stderr, 'G7 merge --train-target with too few train records: SHORT, exit 3')
+            r = run('merge', '--out', out2, '--train-target', '100000', '--allow-short')
+            expect(r.returncode == 0, 'G7 ... unless --allow-short')
         # a tampered dataset fails `verify` with a non-zero exit code
         path = os.path.join(out, 'train.jsonl.gz')
         lines = [json.loads(l) for l in gzip.open(path, 'rt')]

@@ -13,6 +13,7 @@ own helper lemmas (prefix regime), and nothing of the other problems.
 
 A `Premises` is a value: immutable, hashable, with a JSON form (`to_json`: an int when nothing is hidden) that `of` reads back.
 """
+import os as _os, sys as _sys; _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..')); import itp_paths  # noqa: E402,F401
 
 
 class Premises:
