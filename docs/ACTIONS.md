@@ -115,14 +115,14 @@ terms with a `match` or a proof by computation, two authored inductions whose hy
 them as JSON. The reference proofs of the problem bank are replayed the same way (BANK.md), also with the lemmas
 written for the problem hidden (`premises=`).
 
-## 7. What is gated (S40, 587 checks; S41 for the bank)
+## 7. What is gated (S40, 600 checks; S41 for the bank)
 
 The builder says and builds back every term of the library's proofs; random walks over its choices give terms the
 kernel accepts and every offered choice is legal; every action kind is accepted/refused as documented, refusals change
 nothing; the portable form round-trips and malformed data is `ActionError`; probes leave the kernel as it was; menus are
 bounded and deterministic and every action is found again from its signature; the library's proofs replay (also from JSON
 in a fresh engine, also checked by the independent checker); random play on true and false statements never finishes a false
-one. The mutation driver (`mutate.py`, 1616 mutants of the engine/builder/actions/recorder) measures how much of this
+one; the assembler's own work budget (a term whose check does not stop is refused, a spent budget is never read as "no proposition": finding F86). The mutation driver (`mutate.py`, 1616 mutants of the engine/builder/actions/recorder) measures how much of this
 the gates actually pin down.
 
 ## 8. Not done yet

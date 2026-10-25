@@ -477,6 +477,15 @@ def sec_A(c):
     took = time.time() - t1
     expect(outcome == 'refused' and took < 30 and ('%d steps' % cap) in why, 'A10 under the library\'s budget the same term is refused by the assembler (`BuildError`) within the engine\'s budget: %s in %.1f s' % (outcome, took))
     expect(k.get_fuel() == amb, 'A10 ... and the library\'s budget is as it was')
+    # a spent budget is the answer of the whole call, never "this is no proposition" or "no goal here" (the answer would be wrong, and a bigger budget would give the right one)
+    b10 = sp10.builder(prime_a0); b10.allow_goals = True
+    expect(b10.is_prop(prime_a0) and b10._goal_ok(prime_a0), 'A10 a statement of the library is a proposition and may be left as a goal')
+    k.set_fuel(1)
+    try:
+        refuses('A10 a spent budget is `FuelExhausted`, not "no proposition"', lambda: b10.is_prop(prime_a0), E.FuelExhausted)
+        refuses('A10 ... and not "no goal here"', lambda: b10._goal_ok(prime_a0), E.FuelExhausted)
+    finally: k.set_fuel(amb)
+    expect(k.get_fuel() == amb and b10.is_prop(prime_a0) and b10._goal_ok(prime_a0), 'A10 ... and with the budget back the answers are the right ones')
     # the budget is the engine's: with a smaller one a term that is fine is refused, with a larger one it is built
     PROP_ = k.mk_type(0)
     leg_code = GB.TermSpace(eng, [], []).encode(k.global_info(gid['Z.sq_nonneg'])[1], PROP_)
