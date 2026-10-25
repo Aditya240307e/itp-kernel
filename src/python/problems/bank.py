@@ -124,6 +124,9 @@ def build_world(base, bank=None, w=None, only=None):
     """the world of the bank: `base(w)` (a library builder such as imo_lib.build_imo) and then the build function of every problem, in the order they were registered. Returns (w, {name: Placed}).
     `only`: names to build (the declared problems are always located). A theorem that a build function should have proved but did not is an error."""
     bank = bank or BANK
+    if only is not None:
+        unknown = sorted(set(only) - set(bank.problems))
+        if unknown: raise ValueError('only: no such problem in the bank: %s' % ', '.join(unknown))          # (a misspelt name would silently leave the problem out of a test world or a smoke dataset)
     w = base(w) if w is not None else base()
     placed = collections.OrderedDict(); k = w.k
     if LIBRARY_LIMIT not in w.gid: raise ValueError('the base library has no global %s, the end of the library' % LIBRARY_LIMIT)

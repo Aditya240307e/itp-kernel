@@ -38,7 +38,7 @@ FULL_DATASET = os.path.join('data', 'dataset_v2')
 
 # the problems of the smoke world: a few of each split (bank_split), short reference proofs; the bank adds what they depend on
 SMOKE_PROBLEMS = ('ident_cube_sum', 'ident_three_cubes', 'ident_cube_diff', 'ineq_am_gm_two', 'ineq_cauchy_two', 'ineq_four_ab', 'imo1959_p1', 'pow_sub_dvd', 'ineq_cauchy_three',        # train
-                  'ident_diff_squares', 'not_dvd_between', 'two_pow_gt_n', 'find_all_x2_eq_x',                                                                                      # dev
+                  'ident_diff_squares', 'bernoulli_int', 'two_pow_gt_n', 'find_all_x2_eq_x',                                                                                      # dev
                   'ident_brahmagupta', 'coprime_consecutive', 'ineq_cross_terms', 'n4_n2_1_composite')                                                                              # test
 
 PROFILES = {

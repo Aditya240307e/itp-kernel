@@ -4,8 +4,8 @@
     T['main'].md()   T['main'].tex()
 
 Every cell is computed here from the rows of the evaluations and the logs of the training runs; nothing is typed in.  A percentage with two or more replicates is `mean +- half-width` of the 95% Student-t
-interval over replicates (training seeds); with ONE replicate (the model-free baselines) it is the Wilson interval over problems in parentheses (low–high).  Differences between methods are paired by seed; the p-values
-of one family of comparisons carry Holm's correction.
+interval over replicates (training seeds); with ONE replicate (the model-free baselines) it is the Wilson interval over problems in parentheses (low–high); a t-interval that would leave [0, 100] (two or three
+replicates on a handful of problems) is clipped to it and written in parentheses too.  Differences between methods are paired by seed; the p-values of one family of comparisons carry Holm's correction.
 """
 import os as _os, sys as _sys; _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..')); import itp_paths  # noqa: E402,F401
 import os, sys, math, collections
@@ -74,7 +74,9 @@ class Table:
 def pct(m, lo, hi, n, digits=1):
     if m is None or (isinstance(m, float) and math.isnan(m)): return '--'
     f = '%%.%df' % digits
-    if n >= 2 and not math.isnan(lo): return (f + ' ± ' + f) % (100 * m, 50 * (hi - lo))
+    if n >= 2 and not math.isnan(lo):
+        if lo < 0.0 or hi > 1.0: return ('%s (%.0f–%.0f)' % (f, 100 * max(0.0, lo), 100 * min(1.0, hi))) % (100 * m)           # (a t-interval that leaves [0, 100] -- few replicates, few problems -- is clipped and written like the Wilson interval)
+        return (f + ' ± ' + f) % (100 * m, 50 * (hi - lo))
     if n == 1 and not math.isnan(lo): return ('%s (%.0f–%.0f)' % (f, 100 * lo, 100 * hi)) % (100 * m)
     return f % (100 * m)
 
@@ -126,7 +128,7 @@ def main_table(C, P):
     nt = len(C.names('test', 'all')); nd = len(C.names('dev', 'all')); ntp = len(C.names('test', 'proved')); ntu = len(C.names('test', 'unproved'))
     return Table('main', 'Problems solved (%%) within %s probes per problem: dev (%d problems) and test (%d problems; %d with a reference proof in the bank, %d statement-only).' % (B, nd, nt, ntp, ntu),
                  ['Method', 'seeds', 'dev', 'test', 'test, proved', 'test, statement-only', 'test, no helpers', 'probes / solved', 'steps / proof'], rows,
-                 notes=['mean ± half-width of the 95% t-interval over seeds; a single run (the model-free baselines) shows its Wilson interval over problems in parentheses.  "Solved" means a proof that the engine replayed and the kernel checked; '
+                 notes=['mean ± half-width of the 95% t-interval over seeds; a single run (the model-free baselines) shows its Wilson interval over problems in parentheses, and so does a t-interval that would leave [0, 100] (clipped).  "Solved" means a proof that the engine replayed and the kernel checked; '
                         'probes and steps are means over the problems a method solved (so a method that solves more, harder problems can need more).  The test split was not used to choose anything.'],
                  align='lrrrrrrrr')
 
@@ -354,7 +356,9 @@ def soundness_table(C):
     chk = sum(v['checked'] for v in C.recheck.values()); acc = sum(v['accepted'] for v in C.recheck.values())
     allr = getattr(C, 'all_rows', C.rows)
     solved = sum(1 for r in allr if r.get('solved')); err = sum(1 for r in allr if r.get('error'))
+    noproof = sum(1 for r in allr if r.get('solved') and not r.get('proof'))
     rows = [['rows (task x method x seed) evaluated', len(allr)], ['rows with a kernel-checked proof', solved], ['rows that raised an error in the solver', err],
+            ['solved rows without a portable proof (they cannot be replayed or re-checked)', noproof],
             ['proofs given to the independent checker', chk], ['accepted by the independent checker', acc], ['rejected', chk - acc]]
     return Table('soundness', 'Soundness of the evaluation.', ['quantity', 'count'], rows, notes=['A row counts as solved only after the engine replayed its proof and the kernel accepted the term; the independently written checker (recheck.py) re-checks the same terms.'], align='lr')
 

@@ -6,7 +6,7 @@ runs them, `mutants/mutate.py` runs the kernel ones against every mutant of the 
 ```
 python3 tests/run_gates.py                        the 47 kernel gates, two at a time (about 13 minutes on two cores)
 python3 tests/run_gates.py -j 1                   serially (use this when timing matters)
-python3 tests/run_gates.py --ml                   + the learner's gate S44 (needs torch and gymnasium)
+python3 tests/run_gates.py --ml                   + the learner's gates S44 and S51 (need torch and gymnasium)
 python3 tests/run_gates.py --repo                 + the repository gates S45 (layout) and S46 (examples)
 python3 tests/run_gates.py --synth                + the synthetic theorem generator's gate S48 (about 70 seconds)
 python3 tests/run_gates.py --all                  everything
@@ -102,6 +102,8 @@ Times are seconds on the 2-core box with two gates at a time (the last full run,
 |---|---|---|
 | `s41_bank_tests.py` | 184 s | The problem bank -- formal olympiad problems whose statements are CHECKED TO MEAN what the problem says, with reference proofs that replay through the action language. |
 | `s43_bank2_tests.py` | 396 s | The extended problem bank -- the 54 problems of bank_lib2.py on top of the 28 of S41, and the infrastructure that they needed. |
+| `s49_contest_tests.py` | | The contest problems (AMC/AIME/ISL/IMO/APMO and classical exercises): provenance (`origin`, `verified`), statements that mean what the problem says (answers brute-forced), the splits (a family never straddles two), the duplicate screen. |
+| `s50_proofs_tests.py` | | The proofs of the contest problems: the premises mask, every recorded proof replayed in a fresh engine, kernel-checked and judged by the independent checker. |
 
 ### Differential harness (`tests/support`)
 
@@ -114,6 +116,7 @@ Times are seconds on the 2-core box with two gates at a time (the last full run,
 | gate | time | what it protects |
 |---|---|---|
 | `s44_ml_tests.py` | 105 s | The learner's machinery -- features, the policy network, the search it guides, the Gymnasium environment (budget, goal-conditioned reset, achieved goals) and the policy-gradient bookkeeping. |
+| `s51_suite_tests.py` | | The training suite and the experiment layer -- the statistics against hand-worked values, the experiment matrix, the collector, hindsight (what a failed attempt proved), the library of lemmas the agent proved (every rule of admission), the goals of the learners, the provers and the protocol "solved within B probes", expert iteration end to end on a small world, the scheduler and the shell scripts. |
 
 ### The synthetic theorem generator (`tests/synth`; `run_gates.py --synth`)
 

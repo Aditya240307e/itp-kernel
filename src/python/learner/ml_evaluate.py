@@ -64,12 +64,16 @@ def model_info(path):
 
 def library_of(models, lemmas_arg):
     """the lemma file to evaluate under, from `--lemmas` ('' none, 'auto' read it from the checkpoints, else a path) and the models' own records: (path or '', {model path: block digest or None})"""
-    digests = {}; files = set()
+    digests = {}; files = set(); missing = []
     for label, path in models:
         _, extra = model_info(path)
         digests[path] = extra.get('block_digest')
-        if extra.get('lemmas'): files.add(os.path.join(os.path.dirname(os.path.abspath(path)), extra['lemmas']))
+        if extra.get('lemmas'):
+            lf = os.path.join(os.path.dirname(os.path.abspath(path)), extra['lemmas'])
+            if os.path.exists(lf): files.add(lf)
+            else: missing.append((path, lf, extra.get('block_digest')))
     if lemmas_arg == 'auto':
+        if missing: raise SystemExit('the checkpoint %s was trained with a library of bootstrapped lemmas (block %s) but its file %s is not there: restore it, or evaluate with --lemmas FILE' % (missing[0][0], missing[0][2], missing[0][1]))
         if len(files) > 1: raise SystemExit('the models were trained with different libraries (%s): evaluate them in separate runs' % sorted(files))
         lemmas_arg = next(iter(files), '')
         if lemmas_arg and any(d is None for d in digests.values()): raise SystemExit('some models were trained without the library and some with it: evaluate them in separate runs')
@@ -168,12 +172,11 @@ def recheck_rows(bk, eng, rows, lib, out_path, progress=print):
         items.append((i, term, pl.stmt, None))
     good = [t for _, t, s, w in items if t is not None]
     verdicts = []
-    if good:
-        so = RC.SecondOpinion(bk.w.k, needed_by=[x for _, t, s, w in items if t is not None for x in (t, s)])
-        for i, term, stmt, why in items:
-            if term is None: verdicts.append({'row': i, 'ok': False, 'message': why}); continue
-            ok, msg = so.accepts(term, stmt)
-            verdicts.append({'row': i, 'method': rows[i]['method'], 'seed': rows[i]['seed'], 'name': rows[i]['name'], 'ok': bool(ok), 'message': '' if ok else str(msg)[:200]})
+    so = RC.SecondOpinion(bk.w.k, needed_by=[x for _, t, s, w in items if t is not None for x in (t, s)]) if good else None
+    for i, term, stmt, why in items:
+        if term is None: verdicts.append({'row': i, 'method': rows[i]['method'], 'seed': rows[i]['seed'], 'name': rows[i]['name'], 'ok': False, 'message': why}); continue
+        ok, msg = so.accepts(term, stmt)
+        verdicts.append({'row': i, 'method': rows[i]['method'], 'seed': rows[i]['seed'], 'name': rows[i]['name'], 'ok': bool(ok), 'message': '' if ok else str(msg)[:200]})
     n_ok = sum(1 for v in verdicts if v['ok'])
     progress('second opinion: %d of %d proofs accepted' % (n_ok, len(verdicts)))
     MT.write_json(out_path, {'checked': len(verdicts), 'accepted': n_ok, 'verdicts': verdicts})

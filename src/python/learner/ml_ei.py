@@ -215,6 +215,7 @@ def main(argv=None):
         if a.resume and os.path.exists(lem_path): lib.load(lem_path); print('resumed %d lemmas' % lib.n_installed, flush=True)
         elif a.lemmas: lib.load(a.lemmas); print('%d lemmas installed from %s' % (lib.n_installed, a.lemmas), flush=True)
         lib.sync()
+        if not os.path.exists(lem_path): save_lemmas(lib, lem_path)                    # (always: the checkpoints name this file, also when no lemma has been admitted yet -- and a run that admits none ends with an empty one)
     bank, subs = GL.train_goals(bk, a.data, 'train', a.max_ref_len)
     synth = []
     if a.synth:

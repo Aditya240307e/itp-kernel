@@ -23,11 +23,12 @@ GATE_CMDS = (['kernel/s2_tests.py', '1500'], ['kernel/s26_memo_tests.py'], ['ker
 # the gates of the CONTEST problems of the bank (provenance and statements: S49; the premises mask and the proofs, with the independent checker: S50); `run_gates.py` runs them with the others, the mutation driver does not:
 # they pin the contents of the bank, and a mutant of the kernel or of the tactic layer is caught by the gates above (S41, S43, S47 exercise the same machinery on the graded problems)
 BANK_GATE_CMDS = (['problems/s49_contest_tests.py'], ['problems/s50_proofs_tests.py'])
-# the gates that build the world of the whole bank (a gigabyte and more each, minutes of work): `run_gates.py` never runs two of them at the same time, whatever -j says
-HEAVY_GATES = frozenset({'s41_bank_tests.py', 's43_bank2_tests.py', 's47_hindsight_tests.py', 's49_contest_tests.py', 's50_proofs_tests.py'})
-# the gates of the LEARNER's machinery (features, network, search, Gymnasium environment): they need torch and gymnasium, which the kernel and its tactics do not, and a mutant of the kernel is caught by the
-# gates above long before these would matter, so the mutation driver does not run them; `run_gates.py --ml` does
-ML_GATE_CMDS = (['learner/s44_ml_tests.py'],)
+# the gates that build the world of the whole bank (a gigabyte and more each, minutes of work) -- or, S51, a smaller world and a dozen processes that each load it: `run_gates.py` never runs two of them at the same time, whatever -j says
+HEAVY_GATES = frozenset({'s41_bank_tests.py', 's43_bank2_tests.py', 's47_hindsight_tests.py', 's49_contest_tests.py', 's50_proofs_tests.py', 's51_suite_tests.py'})
+# the gates of the LEARNER (S44: features, network, search, Gymnasium environment; S51: the training suite -- statistics, experiment matrix, collector, hindsight, bootstrapped library, goals, provers, evaluator,
+# expert iteration end to end, the runner and the shell scripts): they need torch and gymnasium, which the kernel and its tactics do not, and a mutant of the kernel is caught by the gates above long before
+# these would matter, so the mutation driver does not run them; `run_gates.py --ml` does
+ML_GATE_CMDS = (['learner/s44_ml_tests.py'], ['learner/s51_suite_tests.py'])
 # the gates of the repository itself (its layout, its examples); `run_gates.py --repo`
 REPO_GATE_CMDS = (['repo/s45_layout_tests.py'], ['repo/s46_examples_tests.py'])
 # the gate of the SYNTHETIC THEOREM GENERATOR and the datasets it writes (src/python/synth); `run_gates.py --synth`. It needs neither torch nor a mutant run: a mutant of the kernel is caught by the gates above.

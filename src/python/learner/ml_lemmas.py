@@ -47,7 +47,7 @@ class LemmaRecord:
 
     @classmethod
     def from_dict(cls, d):
-        return cls(int(d['id']), str(d['name']), tuple(tuple(t) for t in d['statement_code']), d['steps'], int(d['n_before']), str(d.get('origin', '')), str(d.get('source', '')), int(d['length']),
+        return cls(int(d['id']), str(d['name']), tuple(tuple(t) for t in d['statement_code']), d['steps'], int(d['n_before']), d.get('origin', ''), str(d.get('source', '')), int(d['length']),
                    str(d['statement_digest']))
 
     def __repr__(self): return 'LemmaRecord(%s, %d actions, %s)' % (self.name, self.length, self.status)

@@ -1,7 +1,7 @@
 """S45 gate: the repository's layout is the layout the documentation describes, and stays so.
 
-The project is organised by ROLE (src/c++ and src/python/{authoring,checker,library,environment,problems,learner,synth}; tests/{kernel,library,environment,problems,learner,synth,repo,support};
-mutants; examples; docs; data; legacy), while every module is imported by its plain name -- `import gym_env` -- because src/python/itp_paths.py puts each directory on sys.path.  That is convenient
+The project is organised by ROLE (src/c++ and src/python/{authoring,checker,library,environment,problems,learner,synth,experiments}; tests/{kernel,library,environment,problems,learner,synth,repo,support};
+mutants; examples; docs; data; legacy; scripts (the experiments, as shell scripts); paper (the TMLR manuscript); tools), while every module is imported by its plain name -- `import gym_env` -- because src/python/itp_paths.py puts each directory on sys.path.  That is convenient
 and fragile in exactly the ways this gate watches:
 
   A. the gate registry (tests/gate_registry.py): every registered script exists, none is registered twice, and every gate script on disk is registered (a gate that nobody runs checks nothing);
@@ -146,7 +146,7 @@ def sec_E():
 
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ F. machine paths
 MACHINE = re.compile('|'.join(['/' + 'home' + '/', '/' + 'mnt' + '/', '/' + 'root' + '/', '/tmp/' + 'claude', 'C:' + chr(92) + chr(92) + 'Users']))
-TEXT = ('.py', '.md', '.json', '.txt', '.cpp', '.hpp', '.sh', '.cfg', '.toml', '.yml', '.yaml', 'Makefile', 'SHA256SUMS')
+TEXT = ('.py', '.md', '.json', '.txt', '.cpp', '.hpp', '.sh', '.cfg', '.toml', '.yml', '.yaml', '.tex', '.bib', '.example', 'Makefile', 'SHA256SUMS')
 
 
 def sec_F():
@@ -182,13 +182,16 @@ def sec_G():
 REQUIRED_FILES = ['README.md', 'Makefile', 'requirements.txt', '.gitignore',
                   'src/c++/hybrid/itp_kernel.hpp', 'src/c++/hybrid/itp_bindings.cpp', 'src/c++/reference/itp_kernel.hpp', 'src/c++/reference/itp_bindings.cpp', 'src/c++/reference/README.md',
                   'src/python/itp_paths.py', 'src/python/build_kernel.py',
-                  'tests/README.md', 'tests/run_gates.py', 'tests/gate_registry.py', 'mutants/README.md', 'mutants/mutate.py', 'mutants/catalogue.py', 'legacy/README.md', 'tools/sanitize.py',
-                  'docs/FINDINGS.md', 'docs/ROADMAP.md', 'docs/BANK.md', 'docs/ACTIONS.md', 'docs/KERNEL_DESIGN.md', 'docs/ARCHITECTURE_RL.md', 'docs/TRAINING.md', 'docs/GENERATOR.md',
+                  'tests/README.md', 'tests/run_gates.py', 'tests/gate_registry.py', 'mutants/README.md', 'mutants/mutate.py', 'mutants/catalogue.py', 'legacy/README.md', 'tools/sanitize.py', 'tools/make_dist.py', 'tools/check_env.py',
+                  'docs/FINDINGS.md', 'docs/ROADMAP.md', 'docs/BANK.md', 'docs/ACTIONS.md', 'docs/KERNEL_DESIGN.md', 'docs/ARCHITECTURE_RL.md', 'docs/TRAINING.md', 'docs/GENERATOR.md', 'docs/EXPERIMENTS.md',
+                  'scripts/env.sh', 'scripts/local.env.example', 'scripts/00_check_env.sh', 'scripts/01_build_dataset.sh', 'scripts/02_generate_synthetic.sh', 'scripts/03_pretrain_finetune.sh', 'scripts/04_reinforcement_learning.sh',
+                  'scripts/05_evaluate.sh', 'scripts/06_benchmarks.sh', 'scripts/07_report.sh', 'scripts/run_all.sh', 'scripts/smoke_test.sh', 'scripts/status.sh',
+                  'paper/main.tex', 'paper/main.bib', 'paper/Makefile', 'paper/tmlr.sty', 'paper/tmlr.bst', 'paper/generated/.gitkeep',
                   'data/dataset_v2/bank.json', 'data/dataset_v2/splits.json', 'data/dataset_v2/library.json', 'data/dataset_v2/manifest.json', 'data/dataset_v2/DATASET_CARD.md']
-REQUIRED_DIRS = ['src/python/authoring', 'src/python/checker', 'src/python/library', 'src/python/environment', 'src/python/problems', 'src/python/learner', 'src/python/synth',
+REQUIRED_DIRS = ['src/python/authoring', 'src/python/checker', 'src/python/library', 'src/python/environment', 'src/python/problems', 'src/python/learner', 'src/python/synth', 'src/python/experiments', 'scripts', 'paper',
                  'tests/kernel', 'tests/library', 'tests/environment', 'tests/problems', 'tests/learner', 'tests/synth', 'tests/repo', 'tests/support', 'tests/golden', 'examples', 'data/results']
-TOP_LEVEL = {'README.md', 'Makefile', 'requirements.txt', '.gitignore', '.git', 'build', 'dist', 'artifacts', 'src', 'tests', 'mutants', 'examples', 'docs', 'data', 'legacy', 'tools', '.venv',
-             'MANIFEST.sha256', 'RELEASE.txt'}                      # (the last two: what tools/make_dist.py adds to a release archive, hence present in an extracted one)
+TOP_LEVEL = {'README.md', 'Makefile', 'requirements.txt', '.gitignore', '.git', 'build', 'dist', 'artifacts', 'runs', 'src', 'tests', 'mutants', 'examples', 'docs', 'data', 'legacy', 'tools', 'scripts', 'paper', '.venv',
+             'MANIFEST.sha256', 'RELEASE.txt'}                      # (runs: where the experiments write, untracked; the last two: what tools/make_dist.py adds to a release archive, hence present in an extracted one)
 
 
 def sec_H():
@@ -207,7 +210,7 @@ def sec_H():
 def sec_I():
     text = read(os.path.join(ROOT, 'Makefile'))
     targets = re.findall(r'^([a-z][a-z0-9_-]*):', text, flags=re.M)
-    wanted = {'help', 'kernel', 'gates', 'gates-ml', 'gates-repo', 'gates-synth', 'dataset-verify', 'examples', 'mutants-check', 'dist', 'clean'}
+    wanted = {'help', 'kernel', 'gates', 'gates-ml', 'gates-repo', 'gates-synth', 'dataset-verify', 'examples', 'mutants-check', 'dist', 'clean', 'check-env', 'smoke', 'experiments', 'status', 'report', 'paper'}
     expect(wanted <= set(targets), 'I  the Makefile lacks targets %s' % sorted(wanted - set(targets)))
     if shutil.which('make') is None: return
     for t in targets:
@@ -267,7 +270,7 @@ def sec_K():
             inner = {n.split('/', 1)[1]: m for n, m in zip(names, members)}
             tops = {n.split('/')[0] for n in inner}
             expect(tops <= TOP_LEVEL, 'K  top-level entries of the archive that the repository does not have: %s' % sorted(tops - TOP_LEVEL))
-            need = {'MANIFEST.sha256', 'RELEASE.txt', 'README.md', 'Makefile', 'requirements.txt', 'src', 'tests', 'examples', 'docs', 'data', 'mutants', 'tools', 'legacy'}
+            need = {'MANIFEST.sha256', 'RELEASE.txt', 'README.md', 'Makefile', 'requirements.txt', 'src', 'tests', 'examples', 'docs', 'data', 'mutants', 'tools', 'legacy', 'scripts', 'paper'}
             expect(need <= tops, 'K  the archive lacks parts of the repository: %s' % sorted(need - tops))
             bad = [n for n in inner if n.endswith(('.so', '.pyc', '.o', '.pyd')) or set(n.split('/')) & {'.git', 'build', '__pycache__', 'dist', '.venv'}]
             expect(not bad, 'K  build products or caches in the archive: %s' % bad[:5])

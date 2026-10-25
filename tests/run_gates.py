@@ -4,7 +4,7 @@
     python3 tests/run_gates.py                       the kernel gates (the ones the mutation driver runs: kernel, tactics, environment, bank) and the gates of the contest problems, 2 at a time (never two of the
                                                      gates that build the whole bank's world at once: gate_registry.HEAVY_GATES)
     python3 tests/run_gates.py -j 1                  serial (use this when timing matters)
-    python3 tests/run_gates.py --ml                  + the learner's gate (s44; needs torch and gymnasium)
+    python3 tests/run_gates.py --ml                  + the learner's gates (s44 machinery, s51 training suite; need torch and gymnasium)
     python3 tests/run_gates.py --repo                + the repository gates (s45 layout, s46 examples)
     python3 tests/run_gates.py --synth               + the gate of the synthetic theorem generator (s48)
     python3 tests/run_gates.py --all                 every gate
