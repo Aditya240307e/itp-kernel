@@ -967,7 +967,8 @@ class Engine:
         reverted = set(p.ps.last_reverted())
         for i in range(made):
             names = p._names[p.ps.goal_meta_id(i)]
-            dead = ({scrutinee} if consumes else set()) | reverted | {l for l in range(n_before, len(names)) if names[l][:1] == 'p' and names[l][1:].isdigit()}
+            top = len(names) - len(reverted)                           # (what the split reverted comes back at the END of the goal under the names it had: a hypothesis that is called p12 is not a copy of a parameter)
+            dead = ({scrutinee} if consumes else set()) | reverted | {l for l in range(n_before, top) if names[l][:1] == 'p' and names[l][1:].isdigit()}
             self._clear_dead(p, i, dead)
 
     def _clean_interval(self, p, made, n_before):

@@ -45,9 +45,10 @@ class BankEnv(gym.Env):
     metadata = {'render_modes': []}
 
     def __init__(self, bank, names=None, regime='prefix', ctx=None, engine=None, max_actions=60, max_decisions=600, max_options=1024, max_tokens=512,
-                 solve_reward=1.0, action_penalty=0.0, fail_penalty=0.0, seed=0, rich=True, lemmas=None, illegal='raise', track=False):
+                 solve_reward=1.0, action_penalty=0.0, fail_penalty=0.0, seed=0, rich=True, lemmas=None, illegal='raise', track=False, library=None):
         super().__init__()
         self.bank = bank; self.regime = regime; self.track = track
+        self.library = library                          # ml_lemmas.LemmaLibrary: the lemmas the agent proved, which the problems and goals of this environment may use besides what their premises say
         self.lemmas = dict(lemmas or {})                # name -> (statement, premises): library lemmas to prove, besides the problems of the bank
         self.names = list(names if names is not None else bank.placed)
         self.eng = engine or G.Engine(bank.w, kinds=set(G.Kind), strict=False)
@@ -57,7 +58,7 @@ class BankEnv(gym.Env):
         if illegal not in ('raise', 'penalize'): raise ValueError("illegal is 'raise' or 'penalize'")
         self.illegal = illegal                         # an option index outside the current decision's options: an error, or a decision lost with the penalty of a refused action
         self.rng = random.Random(seed)
-        n_glob = self.ctx.bags.n
+        n_glob = F.GMAX if library is not None else self.ctx.bags.n          # (a library grows: the observation has room for every global the policy can represent)
         self.n_globals = n_glob
         self.observation_space = spaces.Dict({
             'tokens': spaces.Box(0, F.VOCAB, (max_tokens,), np.int32), 'seg': spaces.Box(0, 2, (max_tokens,), np.int8), 'hyp_of': spaces.Box(-1, 4096, (max_tokens,), np.int16),
@@ -86,7 +87,7 @@ class BankEnv(gym.Env):
             regime = o.get('regime', self.regime)
             if name in self.lemmas: stmt, prem = self.lemmas[name]
             else:
-                pl = self.bank.placed[name]; stmt, prem = pl.stmt, pl.premises(regime)
+                pl = self.bank.placed[name]; stmt, prem = pl.stmt, self._widen(pl.premises(regime))
         budget = o.get('budget')
         if budget is not None and (isinstance(budget, bool) or not isinstance(budget, (int, np.integer)) or budget < 1): raise ValueError('budget: a positive number of actions, not %r' % (budget,))
         ep = G.Episode(self.eng, stmt, name, premises=prem, track=self.track)
@@ -104,13 +105,17 @@ class BankEnv(gym.Env):
         if 'goal' in o:
             g = o['goal']
             if not isinstance(g, dict) or g.get('statement_code') is None: raise ValueError("goal: a dict with a 'statement_code' (a list of tokens) and 'premises'")
-            prem = g.get('premises', None)
+            prem = self._widen(g.get('premises', None))
             try: stmt = GTR.statement_from_code(self.eng, g['statement_code'], prem)
             except (GB.BuildError, TypeError, ValueError) as e: raise ValueError('goal: the statement code says no statement: %s' % (e,)) from None
             name = o.get('name') or g.get('name') or 'goal:%s' % (g.get('statement_digest') or GTR.digest(self.eng.w.show(stmt)))
         else:
-            stmt, prem = o['statement'], o.get('premises', None); name = o.get('name') or 'statement'
+            stmt, prem = o['statement'], self._widen(o.get('premises', None)); name = o.get('name') or 'statement'
         return name, stmt, prem
+
+    def _widen(self, prem):
+        """the premises of a task, widened by the lemmas of the library (when the environment has one)"""
+        return prem if self.library is None else self.library.premises(prem)
 
     def _begin_goal(self):
         ep = self.ep

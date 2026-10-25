@@ -22,6 +22,11 @@ class DataContext:
         self.ser = F.Serializer(self.k)
         self.bags = F.GlobalBags(self.k, self.ser)
 
+    def refresh_globals(self):
+        """the world has grown (a lemma was added): the symbols of every global again.  Networks made before take them with `PolicyNet.set_globals(ctx.bags)`."""
+        self.bags = F.GlobalBags(self.k, self.ser)
+        return self.bags
+
 
 class Step:
     """one action taken in one goal, as the decisions that assembled it.  Besides the BC fields: `sub` (the number of actions of the subtree of this goal in the proof it comes from; -1 unknown), and what

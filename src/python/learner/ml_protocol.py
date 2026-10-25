@@ -77,10 +77,11 @@ def sample_row(env, net, ctx, gtab, name, regime, probe_budget, max_actions, see
 
 
 def annotate(row, bk, method, seed=None):
-    """level, split and method on a row"""
+    """level, split, method, whether the problem has a reference proof (`proved`), its origin, source and family on a row"""
     import bank_split as BS
-    pl = bk.placed[row['name']]
-    row['level'] = pl.problem.level; row['split'] = BS.split_of(row['name']); row['method'] = method
+    pl = bk.placed[row['name']]; pr = pl.problem
+    row['level'] = pr.level; row['split'] = BS.split_of(row['name']); row['method'] = method
+    row['proved'] = bool(pl.proved); row['origin'] = pr.origin; row['source'] = pr.source; row['family'] = pr.family or row['name']          # (a statement-only problem has no reference proof: nobody has proved it)
     if seed is not None: row['seed'] = seed
     return row
 

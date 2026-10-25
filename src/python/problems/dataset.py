@@ -2,6 +2,8 @@
 
     python3 dataset.py OUT_DIR                 build everything into OUT_DIR (several minutes): bank.json, splits.json, library.json, annotations.json, subproblems.json, DATASET_CARD.md, manifest.json
     python3 dataset.py --verify OUT_DIR        read the files back and replay every demonstration and every sub-theorem in a fresh engine over a freshly built world
+    python3 dataset.py OUT_DIR --only a,b,c [--lib-max N]    a PARTIAL dataset of the named problems (or @FILE) and what they need, with the first N lemmas of the library corpus: for tests and the smoke
+                                               runs of the experiments; bank.json says `only`
 
     import dataset
     info = dataset.build(out_dir)              # the files; info: counts and digests
@@ -60,6 +62,9 @@ def card(data, splits, library=None, extra=None):
     lv = collections.Counter(p['level'] for p in probs); kd = collections.Counter(p['kind'] for p in probs); tp = collections.Counter(t for p in probs for t in p['topics'])
     src = collections.Counter(source_class(p['source']) for p in probs)
     org = collections.Counter(p.get('origin', 'contest') for p in probs); ver = collections.Counter(p.get('verified', 'none') for p in probs)
+    if data.get('only'):
+        add('**A PARTIAL dataset** (built with `--only`: %d problems and what they need).  It exists for tests and the smoke runs of the experiments; nothing measured on it means anything.' % len(probs))
+        add('')
     add('## Contents')
     add('')
     add('| level | problems | proved | meaning |'); add('|---|---|---|---|')
@@ -126,10 +131,26 @@ def card(data, splits, library=None, extra=None):
     return '\n'.join(L)
 
 
-def build(out_dir, library=True, hindsight=True, progress=None):
+def names_of(arg):
+    """the problems a --only argument names: comma separated, or @FILE with a name on every line"""
+    if not arg: return None
+    if isinstance(arg, (set, list, tuple)): return set(arg)
+    if arg.startswith('@'): return {l.strip() for l in open(arg[1:]) if l.strip()}
+    return {n for n in arg.split(',') if n}
+
+
+def world_of(data):
+    """the bank (world and placed problems) that the bank.json `data` describes: the whole bank, or -- for a partial dataset, built with `only` for tests and smoke runs -- the problems it lists"""
+    only = data.get('only')
+    return bank_all.load(only=set(only)) if only else bank_all.load()
+
+
+def build(out_dir, library=True, hindsight=True, progress=None, only=None, lib_max=None):
+    """the dataset of the whole bank in `out_dir`; with `only` (a set of problem names) a PARTIAL dataset of those problems and what they need (tests and smoke runs: it is marked `only` in bank.json)"""
     t0 = time.time(); say = progress or (lambda *a: None)
     os.makedirs(out_dir, exist_ok=True)
-    bk = bank_all.load(); w2, recs = bk.recordings()
+    only = names_of(only)
+    bk = bank_all.load(only=only) if only else bank_all.load(); w2, recs = bk.recordings()
     eng = G.Engine(w2, kinds=set(G.Kind), strict=True)
     demos = {}; strict = {}
     for i, (n, pl) in enumerate(bk.placed.items()):
@@ -144,11 +165,12 @@ def build(out_dir, library=True, hindsight=True, progress=None):
     data = bk.export(path, demos=demos, strict_demos=strict)
     for rec in data['problems']:
         rec['split'] = bank_split.split_of(rec['name']); rec['family'] = bank_split.family(rec['name'])
+    if only: data['only'] = sorted(bk.placed)
     with open(path, 'w') as f: json.dump(data, f, indent=1)
     lib = None
     if library:
         digs = {r['statement_digest'] for r in data['problems']}
-        lib = lib_corpus.build(bank_digests=digs, progress=lambda i, n, nm: say('library %d/%d %s' % (i, n, nm)) if i % 50 == 0 else None)
+        lib = lib_corpus.build(bank_digests=digs, max_lemmas=lib_max, progress=lambda i, n, nm: say('library %d/%d %s' % (i, n, nm)) if i % 50 == 0 else None)
         lib_corpus.write(lib, os.path.join(out_dir, 'library.json'))
     sp = splits_doc([r['name'] for r in data['problems']], [l['name'] for l in lib['lemmas']] if lib else ())
     with open(os.path.join(out_dir, 'splits.json'), 'w') as f: json.dump(sp, f, indent=1)
@@ -171,7 +193,7 @@ def verify(out_dir, progress=None):
     for fn, dg in man['files'].items():
         if file_digest(os.path.join(out_dir, fn)) != dg: raise RuntimeError('%s is not the file the manifest describes' % fn)
     data = json.load(open(os.path.join(out_dir, 'bank.json')))
-    bk = bank_all.load(); eng = G.Engine(bk.w, kinds=set(G.Kind), strict=True)
+    bk = world_of(data); eng = G.Engine(bk.w, kinds=set(G.Kind), strict=True)
     if B.world_digest(bk.w, bk.k.num_globals()) != data['world_digest']: raise RuntimeError('the world built now is not the world of the dataset')
     n = 0
     for rec in data['problems']:
@@ -191,9 +213,11 @@ def verify(out_dir, progress=None):
 
 
 if __name__ == '__main__':
-    args = sys.argv[1:]
+    args = sys.argv[1:]; only = None; lib_max = None
+    if '--only' in args: i = args.index('--only'); only = args[i + 1]; args = args[:i] + args[i + 2:]
+    if '--lib-max' in args: i = args.index('--lib-max'); lib_max = int(args[i + 1]); args = args[:i] + args[i + 2:]
     if args and args[0] == '--verify':
         print('replayed %d demonstrations' % verify(args[1], progress=lambda m: None))
     else:
-        info = build(args[0] if args else 'dataset_out', progress=lambda m: print('\r' + m[:70].ljust(70), end='', flush=True) if m.endswith(('0', '5')) else None)
+        info = build(args[0] if args else 'dataset_out', progress=lambda m: print('\r' + m[:70].ljust(70), end='', flush=True) if m.endswith(('0', '5')) else None, only=only, lib_max=lib_max)
         print(); print(json.dumps(info, indent=1))

@@ -36,15 +36,16 @@ class PolicyNet(nn.Module):
     def __init__(self, bags, d=128, layers=3, heads=4, ff=384, dropout=0.1, max_len=512):
         super().__init__()
         self.d = d
-        self.register_buffer('all_idx', torch.as_tensor(bags.all_idx)); self.register_buffer('all_off', torch.as_tensor(bags.all_off[:-1]))
-        self.register_buffer('con_idx', torch.as_tensor(bags.con_idx)); self.register_buffer('con_off', torch.as_tensor(bags.con_off[:-1]))
-        self.register_buffer('arity', torch.as_tensor(bags.arity.astype(np.int64)))
-        self.n_globals = bags.n
+        # (what the world says about its globals -- the symbols of their types -- is not learned: these buffers are not part of a checkpoint, `set_globals` puts the current world's in, so that one set of weights
+        # serves the library alone, the whole bank and a library that has grown)
+        for name in ('all_idx', 'all_off', 'con_idx', 'con_off', 'arity'): self.register_buffer(name, torch.zeros(0, dtype=torch.long), persistent=False)
+        self.n_globals = 0
+        self.set_globals(bags)
         self.tok = nn.Embedding(F.VOCAB, d, padding_idx=0)
         self.pos = nn.Embedding(max_len, d)
         self.segE = nn.Embedding(3, d)
         layer = nn.TransformerEncoderLayer(d, heads, ff, dropout, batch_first=True, norm_first=True, activation='gelu')
-        self.enc = nn.TransformerEncoder(layer, layers)
+        self.enc = nn.TransformerEncoder(layer, layers, enable_nested_tensor=False)
         self.ln = nn.LayerNorm(d)
         # globals
         self.bag_all = nn.EmbeddingBag(F.VOCAB, d, mode='mean'); self.bag_con = nn.EmbeddingBag(F.VOCAB, d, mode='mean')
@@ -92,6 +93,13 @@ class PolicyNet(nn.Module):
         cnt = torch.zeros(S * H, device=tokens.device).index_add_(0, idx.reshape(-1), valid.reshape(-1)).clamp(min=1.0)
         hyp = (flat / cnt[:, None]).reshape(S, H, self.d)
         return cls, hyp
+
+    def set_globals(self, bags):
+        """take the symbols of the globals of a world (ml_features.GlobalBags) -- also of a world whose library has grown since the network was made"""
+        dev = self.all_idx.device
+        for name, arr in (('all_idx', bags.all_idx), ('all_off', bags.all_off[:-1]), ('con_idx', bags.con_idx), ('con_off', bags.con_off[:-1]), ('arity', bags.arity.astype(np.int64))):
+            setattr(self, name, torch.as_tensor(np.asarray(arr, dtype=np.int64)).to(dev))
+        self.n_globals = bags.n
 
     def global_table(self, sym_tok=None):
         """(G, d): an embedding for every global: its own symbol, the symbols of its type, of its conclusion, its arity"""

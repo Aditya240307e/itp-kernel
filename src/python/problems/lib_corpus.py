@@ -18,14 +18,16 @@ import bank as B, bank_lib, bank_split, recorder as REC
 import gym_env as G
 
 
-def build(progress=None, names=None, bank_digests=()):
-    """replay the proofs of the base library: the corpus as a dict (see the module documentation). `names`: only these lemmas; `bank_digests`: statement digests of the bank's problems"""
+def build(progress=None, names=None, bank_digests=(), max_lemmas=None):
+    """replay the proofs of the base library: the corpus as a dict (see the module documentation). `names`: only these lemmas; `bank_digests`: statement digests of the bank's problems; `max_lemmas`: only the first
+    N lemmas in the order of the library (the smoke datasets of the experiments)"""
     t0 = time.time()
     w, recs = REC.record_world(bank_lib.base)
     eng = G.Engine(w, kinds=set(G.Kind), strict=True)
     lemmas = []; bad = []
     for name, rec in recs.items():
         if names is not None and name not in names: continue
+        if max_lemmas is not None and len(lemmas) + len(bad) >= max_lemmas: break
         r = REC.replay(eng, rec)
         if not r.ok:
             bad.append({'name': name, 'gid': rec.gid, 'gap': str(r.gap)[:300]}); continue

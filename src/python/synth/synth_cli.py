@@ -1,7 +1,7 @@
 """synth_cli.py -- generate, merge and verify the synthetic theorem dataset.
 
     python3 src/python/synth/synth_cli.py gen    --out DIR --seed 1 --attempts 160000 --shard 2000 --jobs 2     # shards of records: DIR/shards/shard_<first index>.jsonl.gz
-    python3 src/python/synth/synth_cli.py merge  --out DIR [--target 60000] [--shape-cap 2] [--skeleton-cap 25] [--subproblems data/dataset_v2/subproblems.json]   # DIR/{train,dev,test_iid,test_comp}.jsonl.gz, manifest.json
+    python3 src/python/synth/synth_cli.py merge  --out DIR [--target 60000] [--shape-cap 2] [--skeleton-cap 25] [--exclude-dataset data/dataset_v2]   # DIR/{train,dev,test_iid,test_comp}.jsonl.gz, manifest.json
     python3 src/python/synth/synth_cli.py verify --out DIR [--sample 1] [--no-second-opinion]                       # replay every record from its data in a fresh process
     python3 src/python/synth/synth_cli.py card   --out DIR                                                          # DIR/DATASET_CARD.md from the manifest
 
@@ -33,6 +33,26 @@ def leak_digests(w, subproblems=None):
     return out
 
 
+def dataset_exclusions(dirs):
+    """(digests, shapes, sources) of the statements a synthetic dataset must not contain, from the files of datasets made by `problems/dataset.py`: the digests of the bank problems, the lemmas of the
+    library and the sub-theorems, and the SHAPES (numerals and variable names forgotten) of the bank problems"""
+    import synth_check as SC, synth_merge as SM
+    digests = set(); shapes = set(); sources = []
+    for d in dirs:
+        bank = json.load(open(os.path.join(d, 'bank.json')))
+        for p in bank['problems']:
+            digests.add(p['statement_digest']); shapes.add(SM.shape_of(SC.pretty(p['statement'])))
+        n_lib = n_sub = 0
+        path = os.path.join(d, 'library.json')
+        if os.path.exists(path):
+            for l in json.load(open(path))['lemmas']: digests.add(l['statement_digest']); n_lib += 1
+        path = os.path.join(d, 'subproblems.json')
+        if os.path.exists(path):
+            for e in json.load(open(path))['examples']: digests.add(e['statement_digest']); n_sub += 1
+        sources.append({'dataset': os.path.basename(os.path.normpath(d)), 'world_digest': bank.get('world_digest'), 'problems': len(bank['problems']), 'lemmas': n_lib, 'sub_theorems': n_sub})
+    return digests, shapes, sources
+
+
 def cmd_gen(a):
     import synth_gen as SG
     cfg = SG.Config(seed=a.seed, closer_keep=a.closer_keep, area_weights=json.loads(a.area_weights) if a.area_weights else None)
@@ -59,8 +79,12 @@ def cmd_merge(a):
     gens = {json.load(open(p + '.meta.json'))['generator'] for p in shards}
     if gens != {SG.generator_digest()}: print('WARNING: the shards were made by %s, the generator now is %s' % (sorted(gens), SG.generator_digest()))
     exclude = leak_digests(w, a.subproblems)
+    shapes = set(); sources = []
+    if a.exclude_dataset:
+        d2, shapes, sources = dataset_exclusions(a.exclude_dataset); exclude |= d2
+    else: print('WARNING: no --exclude-dataset: the bank problems are not excluded from the synthetic data (a dataset for the experiments must be merged with one)')
     man = SM.merge(shards, a.out, cfg, exclude=exclude, world_digest=B.world_digest(w, w.gid[cfg.limit_name]), generator=sorted(gens)[0] if len(gens) == 1 else sorted(gens), shape_cap=a.shape_cap, skeleton_cap=a.skeleton_cap,
-                   target=a.target, progress=lambda p, kept: print('\r%s: %d kept' % (os.path.basename(p), kept), end='', flush=True))
+                   target=a.target, progress=lambda p, kept: print('\r%s: %d kept' % (os.path.basename(p), kept), end='', flush=True), exclude_shapes=shapes, sources=sources)
     print('\n%d records %s; dropped %s' % (man['records'], man['counts'], man['dropped_in_merge']))
 
 
@@ -91,7 +115,8 @@ def main(argv=None):
     g.add_argument('--attempts', type=int, required=True); g.add_argument('--shard', type=int, default=2000); g.add_argument('--jobs', type=int, default=2)
     g.add_argument('--closer-keep', type=float, default=0.2); g.add_argument('--area-weights', default=None, help='JSON {area: weight}'); g.set_defaults(fn=cmd_gen)
     m = sub.add_parser('merge'); m.add_argument('--out', required=True); m.add_argument('--target', type=int, default=None); m.add_argument('--shape-cap', type=int, default=2); m.add_argument('--skeleton-cap', type=int, default=25)
-    m.add_argument('--subproblems', default=None); m.set_defaults(fn=cmd_merge)
+    m.add_argument('--subproblems', default=None); m.add_argument('--exclude-dataset', action='append', default=[], help='a dataset directory (problems/dataset.py): its bank problems (exactly and by shape), library lemmas and sub-theorems are excluded; repeatable')
+    m.set_defaults(fn=cmd_merge)
     v = sub.add_parser('verify'); v.add_argument('--out', required=True); v.add_argument('--sample', type=int, default=None); v.add_argument('--no-second-opinion', action='store_true')
     v.add_argument('--batch', type=int, default=500); v.set_defaults(fn=cmd_verify)
     c = sub.add_parser('card'); c.add_argument('--out', required=True); c.set_defaults(fn=cmd_card)

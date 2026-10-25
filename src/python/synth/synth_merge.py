@@ -3,8 +3,9 @@
     stats = merge(shards, out_dir, cfg, exclude=set_of_digests, world_digest=..., target=60000)
 
 WHAT HAPPENS TO THE RECORDS (in the order of their indices, so that the result does not depend on how the index space was cut into shards):
-  1. EXCLUSION  a theorem whose statement is the statement of a lemma of the library, a problem of the bank or a sub-theorem of one is dropped (`exclude`: statement digests). A learner trained on the
-     data must not be handed a problem it is tested on, nor a lemma it will be asked to reprove.
+  1. EXCLUSION  a theorem whose statement is the statement of a lemma of the library, a problem of the bank or a sub-theorem of one is dropped (`exclude`: statement digests), and so is one that has
+     the SHAPE of a problem of the bank (`exclude_shapes`: the statement with its numerals and variable names forgotten -- `x * 3 <= y` for `x * 5 <= y`): a learner trained on the data must not be
+     handed a problem it is tested on, nor a variation of it, nor a lemma it will be asked to reprove.
   2. DUPLICATES the same statement (same digest) as an earlier record.
   3. SHAPE CAP  a SHAPE is a statement with its numerals and the names of its variables forgotten; at most `shape_cap` records have the same shape (`x * 3 <= y` and `x * 5 <= y` are the same exercise).
   3b. SKELETON CAP  a SKELETON is a proof with its terms forgotten: the sequence of its steps (kind and lemma). The lemmas of some areas combine in few ways, and the same two-step proof of
@@ -62,10 +63,10 @@ def read_records(path):
         for line in f: yield json.loads(line)
 
 
-def merge(shards, out_dir, cfg, exclude=(), world_digest=None, generator=None, shape_cap=2, skeleton_cap=25, salt='split-v1', permille=(60, 30, 30), target=None, progress=None):
+def merge(shards, out_dir, cfg, exclude=(), world_digest=None, generator=None, shape_cap=2, skeleton_cap=25, salt='split-v1', permille=(60, 30, 30), target=None, progress=None, exclude_shapes=(), sources=None):
     """merge shard files (paths of .jsonl.gz written by synth_gen.run_range, each with its .meta.json) into the dataset in `out_dir`; returns the manifest (also written there)"""
     os.makedirs(out_dir, exist_ok=True)
-    exclude = set(exclude); seen = set(); shapes = collections.Counter(); skeletons = collections.Counter(); dropped = collections.Counter()
+    exclude = set(exclude); exclude_shapes = set(exclude_shapes); seen = set(); shapes = collections.Counter(); skeletons = collections.Counter(); dropped = collections.Counter()
     metas = [json.load(open(p + '.meta.json')) for p in shards]
     order = sorted(range(len(shards)), key=lambda i: metas[i]['range'][0])
     outs = {s: [] for s in SPLITS}; kept = 0
@@ -75,6 +76,7 @@ def merge(shards, out_dir, cfg, exclude=(), world_digest=None, generator=None, s
             if rec['digest'] in exclude: dropped['statement of a library lemma, bank problem or sub-theorem'] += 1; continue
             if rec['digest'] in seen: dropped['duplicate statement'] += 1; continue
             sh = shape_of(rec['pretty'])
+            if sh in exclude_shapes: dropped['shape of a bank problem'] += 1; continue
             if shapes[sh] >= shape_cap: dropped['shape cap'] += 1; continue
             sk = skeleton_of(rec)
             if skeletons[sk] >= skeleton_cap: dropped['skeleton cap'] += 1; continue
@@ -89,6 +91,7 @@ def merge(shards, out_dir, cfg, exclude=(), world_digest=None, generator=None, s
     allrecs = [r for s in SPLITS for r in outs[s]]
     man = {'format': 1, 'name': 'synthetic', 'config': cfg.to_json(), 'config_digest': cfg.digest(), 'generator': generator, 'world_digest': world_digest, 'limit': cfg.limit_name,
            'split_rule': {'salt': salt, 'permille': {'test_comp': permille[0], 'test_iid': permille[1], 'dev': permille[2]}, 'shape_cap': shape_cap, 'skeleton_cap': skeleton_cap},
+           'exclusions': {'digests': len(exclude), 'bank_shapes': len(exclude_shapes), 'sources': sources or []},
            'shards': len(shards), 'attempts': sum(m['range'][1] - m['range'][0] for m in metas), 'records_before_merge': sum(m['records'] for m in metas),
            'rejects': dict(sum((collections.Counter(m['rejects']) for m in metas), collections.Counter())), 'errors': sum(m['n_errors'] for m in metas),
            'disagreements': sum(len(m['disagreements']) for m in metas), 'dropped_in_merge': dict(dropped), 'records': len(allrecs),

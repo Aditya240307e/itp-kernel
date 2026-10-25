@@ -22,59 +22,13 @@ import os as _os, sys as _sys; _sys.path.insert(0, _os.path.join(_os.path.dirnam
 import os, sys, json, time, math, argparse, collections, random
 import numpy as np
 import torch
-import bank_all, bank_split as BS
+import bank_split as BS
 import gym_env as G
-import ml_features as F, ml_data as D, ml_model as M, ml_train as T, ml_protocol as PR
+import ml_features as F, ml_data as D, ml_model as M, ml_train as T, ml_protocol as PR, ml_world as W, ml_meta as MT
+import ml_goals as GL
+from ml_goals import Goals, regime_for, train_goals, chunks, dev_items          # (they moved to ml_goals; the names stay here for the callers that import them from this module)
 import bank_env as BE
 from ml_pool import Pool, WeightsFile
-
-
-# ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ goals
-class Goals:
-    """where the training episodes start.  `bank`: [(name, reference length or None)] of train problems; `subs`: sub-theorem records (subproblems.json, train split); `synth`: synthetic records (code,
-    steps).  `sample(rng)` -> a task dict {'name', 'options', 'source'} that a worker can run; reproducible from the rng."""
-    def __init__(self, bk, bank, subs=(), synth=(), p_sub=0.25, p_synth=0.1, p_hard=0.1, max_ref_len=30, max_actions=40, budget_mult=3.0, synth_premises=None):
-        self.bk = bk; self.p_sub = p_sub if subs else 0.0; self.p_synth = p_synth if synth else 0.0; self.max_actions = max_actions; self.budget_mult = budget_mult
-        self.easy = [n for n, L in bank if L is not None and L <= max_ref_len]
-        self.hard = [n for n, L in bank if L is None or L > max_ref_len]
-        self.p_hard = p_hard if self.hard else 0.0
-        if not self.easy and not self.hard: raise ValueError('no train problems')
-        if not self.easy: self.easy, self.hard, self.p_hard = self.hard, [], 0.0
-        self.subs = list(subs); self.synth = list(synth); self.synth_premises = synth_premises
-
-    def _budget(self, length):
-        return int(min(self.max_actions, max(8, math.ceil(self.budget_mult * length) + 4)))
-
-    def sample(self, rng):
-        u = rng.random()
-        if u < self.p_sub:
-            ex = self.subs[int(rng.integers(len(self.subs)))]
-            return {'name': ex['id'], 'source': 'sub', 'options': {'goal': {'statement_code': ex['statement_code'], 'premises': ex['premises']}, 'name': ex['id'], 'budget': self._budget(ex['length'])}}
-        if u < self.p_sub + self.p_synth:
-            r = self.synth[int(rng.integers(len(self.synth)))]
-            return {'name': r['id'], 'source': 'synth', 'options': {'goal': {'statement_code': r['code'], 'premises': self.synth_premises}, 'name': r['id'], 'budget': self._budget(r['n_steps'])}}
-        pool = self.hard if (self.p_hard and rng.random() < self.p_hard) else self.easy
-        name = pool[int(rng.integers(len(pool)))]
-        return {'name': name, 'source': 'bank', 'options': {'problem': name, 'regime': regime_for(self.bk, name, rng)}}
-
-
-def regime_for(bk, name, rng):
-    pl = bk.placed[name]
-    if not pl.problem.strict or pl.premises('strict') == pl.premises('prefix'): return 'prefix'
-    return 'prefix' if rng.random() < 0.5 else 'strict'
-
-
-def train_goals(bk, ddir, split='train', max_len=30):
-    """(bank, subs): [(name, reference length or None)] of the problems of the split, and the sub-theorem records of the split with proofs of at most `max_len` actions"""
-    bank_json, _ = T.load_dataset(ddir)
-    ref = {r['name']: (r['demonstration']['length'] if 'demonstration' in r else None) for r in bank_json['problems'] if r['split'] == split}
-    bank = sorted(ref.items())
-    subs = []
-    path = os.path.join(ddir, 'subproblems.json')
-    if os.path.exists(path):
-        for ex in json.load(open(path))['examples']:
-            if ex['split'] == split and ex['length'] <= max_len and ex.get('statement_code') is not None: subs.append(ex)
-    return bank, subs
 
 
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ episodes
@@ -139,7 +93,7 @@ def ppo_update(net, opt, steps, adv, demo, a, rng, device):
     """a few epochs of PPO on the steps (advantages `adv`, normalised here); returns the averaged metrics"""
     if len(steps) == 0: return {}
     adv = (adv - adv.mean()) / (adv.std() + 1e-6) if len(adv) > 1 else adv
-    net.train(); sums = collections.Counter(); n_mb = 0
+    net.eval(); sums = collections.Counter(); n_mb = 0                    # (eval mode: the ratio pi_new / pi_old compares the same function -- with dropout on, the first minibatch would already be off-policy)
     idx_all = np.arange(len(steps))
     stop = False
     for epoch in range(a.epochs):
@@ -151,23 +105,23 @@ def ppo_update(net, opt, steps, adv, demo, a, rng, device):
             loss = res['policy_loss'] + a.vf_coef * res['critic_loss'] - a.ent_coef * res['entropy']
             if a.bc_coef > 0 and demo:
                 bsel = rng.choice(len(demo), size=min(a.bc_batch, len(demo)), replace=False)
-                bc = net(D.collate([demo[j] for j in bsel]), aux={'size': 0.2, 'mgr': 0.2}); loss = loss + a.bc_coef * bc['loss']; sums['bc_loss'] += float(bc['policy_loss'])
+                bc = net(D.collate([demo[j] for j in bsel]), aux={'size': 0.2, 'mgr': 0.2}); loss = loss + a.bc_coef * bc['loss']; sums['bc_loss'] += T.num(bc['policy_loss'])
             opt.zero_grad(); loss.backward(); torch.nn.utils.clip_grad_norm_(net.parameters(), a.max_grad_norm); opt.step()
             n_mb += 1
-            for k in ('policy_loss', 'critic_loss'): sums[k] += float(res[k])
-            sums['entropy'] += float(res['entropy']); sums['clip_fraction'] += res['clip_fraction']; sums['approx_kl'] += res['approx_kl']
+            for k in ('policy_loss', 'critic_loss'): sums[k] += T.num(res[k])
+            sums['entropy'] += T.num(res['entropy']); sums['clip_fraction'] += res['clip_fraction']; sums['approx_kl'] += res['approx_kl']
             if a.target_kl and res['approx_kl'] > 1.5 * a.target_kl: stop = True; break
         if stop: break
     out = {k: v / max(n_mb, 1) for k, v in sums.items()}; out['minibatches'] = n_mb
     return out
 
 
-def make_worker_state(bk, ctx, cfg, args):
-    """what a worker holds: its environment over the (shared) world and its own copy of the network"""
+def make_worker_state(bk, ctx, cfg, args, lib=None):
+    """what a worker holds: its environment over the (shared) world and its own copy of the network (`lib`: the lemmas an earlier run proved, a frozen library the tasks are widened by)"""
     def init():
         torch.set_num_threads(1)
         eng = G.Engine(bk.w, kinds=set(G.Kind), strict=False)
-        env = BE.BankEnv(bk, [], ctx=ctx, engine=eng, max_actions=args.max_actions, max_decisions=args.max_decisions, seed=0)
+        env = BE.BankEnv(bk, [], ctx=ctx, engine=eng, max_actions=args.max_actions, max_decisions=args.max_decisions, seed=0, library=lib)
         net = T.make_net(ctx.bags, cfg); net.eval()
         return {'env': env, 'net': net, 'cache': {}, 'ctx': ctx, 'bk': bk}
     return init
@@ -198,15 +152,6 @@ def h_eval(st, payload):
     return rows
 
 
-def chunks(xs, n):
-    xs = list(xs); k = max(1, math.ceil(len(xs) / max(n, 1)))
-    return [xs[i:i + k] for i in range(0, len(xs), k)]
-
-
-def dev_items(bk, names):
-    return [(n, r) for n in names for r, same in PR.regimes_of(bk.placed[n], ('prefix',)) if same is None]
-
-
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('data'); ap.add_argument('--init', required=True); ap.add_argument('--out', required=True)
@@ -222,14 +167,15 @@ def main(argv=None):
     ap.add_argument('--workers', type=int, default=0); ap.add_argument('--seed', type=int, default=0); ap.add_argument('--device', default='cpu'); ap.add_argument('--threads', type=int, default=1)
     ap.add_argument('--eval-every', type=int, default=10); ap.add_argument('--eval-probes', type=int, default=500); ap.add_argument('--eval-seeds', type=int, default=1)
     ap.add_argument('--resume', action='store_true')
+    W.add_args(ap)
     a = ap.parse_args(argv)
-    torch.set_num_threads(a.threads); sys.setrecursionlimit(100000)
+    torch.set_num_threads(a.threads)
     os.makedirs(a.out, exist_ok=True); t0 = time.time()
     torch.manual_seed(a.seed); rng = np.random.default_rng(a.seed)
-    bk = bank_all.load(); ctx = D.DataContext(bk.w)
-    print('world %.0fs' % (time.time() - t0), flush=True)
+    bk, ctx, _eng = W.load(a)
     data = T.build_steps(a.data, bk, ctx, G.Engine(bk.w, kinds=set(G.Kind), strict=True))
     demo = list(data['bank'].get('train', [])) + list(data['lib'].get('train', []))
+    lib = W.load_library(a, bk, _eng, ctx, a.data)                          # (a frozen library: lemmas an earlier run proved, installed before the workers are forked)
     bank, subs = train_goals(bk, a.data, 'train', a.max_ref_len)
     synth = []
     if a.synth:
@@ -239,16 +185,17 @@ def main(argv=None):
     net0, cfg, _ = T.load(a.init, ctx.bags)
     dev = sorted(n for n in bk.placed if BS.split_of(n) == 'dev')
     weights = WeightsFile(os.path.join(a.out, 'weights'))
-    pool = Pool(a.workers, make_worker_state(bk, ctx, cfg, a), {'episodes': h_episodes, 'eval': h_eval})        # (forked before any device is touched)
+    pool = Pool(a.workers, make_worker_state(bk, ctx, cfg, a, lib), {'episodes': h_episodes, 'eval': h_eval})        # (forked before any device is touched)
     device = torch.device(a.device); net = net0.to(device)
     opt = torch.optim.AdamW(net.parameters(), lr=a.lr, weight_decay=0.01)
-    hist = []; start = 0
+    hist = []; start = 0; best = -1; cum_probes = 0
     st_path = os.path.join(a.out, 'state.pt')
     if a.resume and os.path.exists(st_path):
         st = torch.load(st_path, map_location='cpu', weights_only=False)
-        net.load_state_dict(st['net']); opt.load_state_dict(st['opt']); hist = st['hist']; start = st['iter'] + 1; rng.bit_generator.state = st['rng']
+        net.load_state_dict(st['net']); opt.load_state_dict(st['opt']); hist = st['hist']; start = st['iter'] + 1; rng.bit_generator.state = st['rng']; best = st.get('best', -1); cum_probes = st.get('cum_probes', 0)
         print('resumed at iteration %d' % start, flush=True)
     print('%d demonstration steps; %d train problems (%d easy), %d sub-theorems, %d synthetic; %d dev problems; %d workers' % (len(demo), len(bank), len(goals.easy), len(subs), len(synth), len(dev), a.workers), flush=True)
+    MT.write_json(os.path.join(a.out, 'meta.json'), MT.run_meta(vars(a), {'world_globals': bk.w.k.num_globals(), 'dataset_manifest': MT.file_digest(os.path.join(a.data, 'manifest.json')), 'lemma_block': lib.block_digest() if lib is not None else None}))
     logf = open(os.path.join(a.out, 'log.jsonl'), 'a')
     for it in range(start, a.iters):
         t1 = time.time()
@@ -256,23 +203,32 @@ def main(argv=None):
         tasks = [goals.sample(rng) for _ in range(a.episodes)]
         parts = pool.map('episodes', [{'weights': (weights.path, ver), 'tasks': c, 'seed': a.seed * 100003 + it * 997 + j, 'temperature': a.temperature} for j, c in enumerate(chunks(tasks, max(a.workers, 1)))])
         eps = [e for part in parts for e in part]; t_roll = time.time() - t1
-        net.eval(); net_cpu = net
+        net.eval()
         steps, adv, st = episodes_to_batch(net, eps, a, rng)
         upd = ppo_update(net, opt, steps, adv, demo, a, rng, device)
+        probes = st['actions'] + st['refused']; cum_probes += probes                          # (a probe is an action the engine took or refused: the unit of cost of every method)
+        ok_eps = [e for e in eps if e['solved']]
         row = {'iter': it, 'episodes': st['episodes'], 'solved': st['solved'], 'bank': [st['bank_solved'], st['bank']], 'sub': [st['sub_solved'], st['sub']], 'synth': [st['synth_solved'], st['synth']],
-               'actions': st['actions'], 'refused': st['refused'], 'steps': len(steps), 'seconds_rollout': round(t_roll, 1), 'seconds': round(time.time() - t0)}
+               'actions': st['actions'], 'refused': st['refused'], 'probes': probes, 'cum_probes': cum_probes, 'steps': len(steps), 'seconds_rollout': round(t_roll, 1), 'seconds': round(time.time() - t0),
+               'probes_per_solve': (sum(e['actions'] + e['refused'] for e in ok_eps) / len(ok_eps)) if ok_eps else None, 'mean_len': (sum(e['actions'] for e in ok_eps) / len(ok_eps)) if ok_eps else None}
         row.update({k: round(v, 5) for k, v in upd.items()})
         if a.eval_every and (it % a.eval_every == a.eval_every - 1 or it == a.iters - 1):
             ver = weights.save(net); items = dev_items(bk, dev)
             rows = [r for part in pool.map('eval', [{'weights': (weights.path, ver), 'items': c, 'probes': a.eval_probes, 'max_actions': a.max_actions, 'seed': a.seed + s * 1000, 'temperature': 1.0}
                                                     for s in range(a.eval_seeds) for c in chunks(items, max(a.workers, 1))]) for r in part]
-            row['dev_solved'] = PR.solved_within(rows, a.eval_probes) / max(a.eval_seeds, 1); row['dev_total'] = len(items)
+            ok = [r for r in rows if r['solved'] and r['probes'] <= a.eval_probes]
+            row['dev_solved'] = len(ok) / max(a.eval_seeds, 1); row['dev_total'] = len(items)
+            row['dev_solved_proved'] = sum(1 for r in ok if r['proved']) / max(a.eval_seeds, 1); row['dev_total_proved'] = sum(1 for n, _ in items if bk.placed[n].proved)
+            row['dev_mean_len'] = (sum(r['steps'] for r in ok if r.get('steps') is not None) / len(ok)) if ok else None
+            row['dev_mean_probes'] = (sum(r['probes'] for r in ok) / len(ok)) if ok else None
+            if row['dev_solved'] > best:
+                best = row['dev_solved']; T.save(net.cpu() if device.type != 'cpu' else net, cfg, os.path.join(a.out, 'best.pt'), {'iter': it, 'algo': 'ppo', 'dev_solved': best}); net.to(device)
         hist.append(row); logf.write(json.dumps(row) + '\n'); logf.flush()
         print('iter %3d  solved %2d/%2d (bank %d/%d sub %d/%d)  ent %.3f kl %.4f clip %.2f  roll %.0fs  %ds%s' % (it, row['solved'], row['episodes'], row['bank'][0], row['bank'][1], row['sub'][0], row['sub'][1],
               row.get('entropy', 0), row.get('approx_kl', 0), row.get('clip_fraction', 0), t_roll, row['seconds'], ('  | dev %.1f/%d' % (row['dev_solved'], row['dev_total'])) if 'dev_solved' in row else ''), flush=True)
-        T.save(net.cpu() if device.type != 'cpu' else net, cfg, os.path.join(a.out, 'last.pt'), {'iter': it, 'algo': 'ppo'}); net.to(device)
-        torch.save({'net': net.state_dict(), 'opt': opt.state_dict(), 'hist': hist, 'iter': it, 'rng': rng.bit_generator.state}, st_path)
-    json.dump({'args': vars(a), 'history': hist}, open(os.path.join(a.out, 'final.json'), 'w'), indent=1)
+        T.save(net.cpu() if device.type != 'cpu' else net, cfg, os.path.join(a.out, 'last.pt'), {'iter': it, 'algo': 'ppo', 'block_digest': lib.block_digest() if lib is not None else None}); net.to(device)
+        torch.save({'net': net.state_dict(), 'opt': opt.state_dict(), 'hist': hist, 'iter': it, 'rng': rng.bit_generator.state, 'best': best, 'cum_probes': cum_probes}, st_path + '.tmp'); os.replace(st_path + '.tmp', st_path)
+    MT.write_json(os.path.join(a.out, 'final.json'), {'args': vars(a), 'history': hist, 'seconds': round(time.time() - t0), 'peak_rss_mb': MT.peak_rss_mb()})
     pool.close(); weights.cleanup()
 
 

@@ -58,6 +58,10 @@ class ActionStream:
             t0 = time.time()
             logp, oe, hs = self.dec.scores(carry, ch)
             s.t_policy += time.time() - t0; s.expansions += 1
+            if s.kmask != POL.ALL_KINDS and ch.name == 'kind':                       # (the kinds of action this search may not use get no probability)
+                ok = POL._allowed(ch, s.kmask)
+                if not bool(ok.any()): continue
+                logp = torch.log_softmax(logp.masked_fill(~ok, -1e9), dim=-1)
             n = len(logp)
             k = min(n, s.topk)
             vals, idx = torch.topk(logp, k)
@@ -87,12 +91,14 @@ class ActionStream:
 
 class PolicySearcher(S.CostSearcher):
     """IDA* on the policy's costs (see the module documentation). `step_cost`: a price per action on top of its negative log-probability (it bounds the depth and keeps a certain action from being free);
-    `topk`: how many options of one decision are expanded; `cap`: an option less probable than e^-cap is not expanded; `temperature` divides the log-probabilities (a flatter policy for T > 1)."""
-    def __init__(self, eng, net, ctx, max_probes=4000, time_limit=None, step_cost=0.2, topk=24, cap=9.0, temperature=1.0, fuel_step=1.0, rare=True):
+    `topk`: how many options of one decision are expanded; `cap`: an option less probable than e^-cap is not expanded; `temperature` divides the log-probabilities (a flatter policy for T > 1); `kmask`: the
+    kinds of action the search may use (a bit set, `ml_pol.kind_mask`; the default is every kind) -- the worker of the manager-worker agent does not CLAIM."""
+    def __init__(self, eng, net, ctx, max_probes=4000, time_limit=None, step_cost=0.2, topk=24, cap=9.0, temperature=1.0, fuel_step=1.0, rare=True, kmask=POL.ALL_KINDS):
         S._SearcherBase.__init__(self, eng, max_probes, None, time_limit)
-        self.net = net; self.ctx = ctx; self.step_cost = step_cost; self.topk = topk; self.cap = cap; self.temperature = temperature; self.rare = rare
+        self.net = net; self.ctx = ctx; self.step_cost = step_cost; self.topk = topk; self.cap = cap; self.temperature = temperature; self.rare = rare; self.kmask = kmask
         self.fuel_step = fuel_step; self.cache = {}; self.cuts = 0; self.passes = 0
         self.streams = {}; self.expansions = 0; self.t_policy = 0.0
+        self.solved_goals = {}                                               # goal key -> GoalData of every goal the search closed (hindsight: ml_her.from_searcher)
         self.runner = POL.PolicyRunner(eng, net, ctx, rare=rare)            # (the decoders of the goals and the table of the globals: shared with whatever else samples this policy)
 
     def gtab(self): return self.runner.gtab()
@@ -153,7 +159,7 @@ class PolicySearcher(S.CostSearcher):
                     trees.append(t)
                 else:
                     tree = S.Tree(menu.signature(action), trees)
-                    self.solved[g.key] = tree
+                    self.solved[g.key] = tree; self.solved_goals[g.key] = g
                     return tree
             if stream.has_more(): self.cuts += 1
             if f is None or f[0] < rem: self.failed[ck] = (rem, self.cuts > cuts0)

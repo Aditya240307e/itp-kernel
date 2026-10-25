@@ -27,7 +27,7 @@ def load_dataset(ddir):
 def build_steps(ddir, bk, ctx, eng, cache=None, progress=print):
     """{'bank': {split: [Step]}, 'lib': {split: [Step]}} for the dataset in `ddir` (cached in a pickle named by the manifest digest)"""
     man = open(os.path.join(ddir, 'manifest.json')).read()
-    key = hashlib.sha256((man + 'v5').encode()).hexdigest()[:12]
+    key = hashlib.sha256((man + 'v5|' + ','.join(sorted(bk.placed))).encode()).hexdigest()[:12]          # (a world with only some of the problems -- a test, a smoke run -- has steps of its own)
     cpath = cache or os.path.join(ddir, 'steps_%s.pkl' % key)
     if os.path.exists(cpath):
         try:
@@ -37,6 +37,7 @@ def build_steps(ddir, bk, ctx, eng, cache=None, progress=print):
     out = {'bank': collections.defaultdict(list), 'lib': collections.defaultdict(list), 'stats': collections.Counter()}
     t0 = time.time()
     for rec in bank['problems']:
+        if rec['name'] not in bk.placed: continue
         pl = bk.placed[rec['name']]; sp = rec['split']
         for dkey, regime in (('demonstration', 'prefix'), ('demonstration_strict', 'strict')):
             if dkey not in rec: continue
@@ -58,6 +59,11 @@ def build_steps(ddir, bk, ctx, eng, cache=None, progress=print):
     with open(tmp, 'wb') as f: pickle.dump(out, f, protocol=pickle.HIGHEST_PROTOCOL)
     os.replace(tmp, cpath)
     return out
+
+
+def num(x):
+    """a Python float from a number or a tensor (detached: no warning about leaving the graph)"""
+    return float(x.detach()) if hasattr(x, 'detach') else float(x)
 
 
 def batches(steps, size, rng, shuffle=True):
@@ -102,10 +108,14 @@ def save(net, cfg, path, extra=None):
     torch.save({'state': net.state_dict(), 'config': cfg, 'extra': extra or {}}, path)
 
 
+WORLD_BUFFERS = ('all_idx', 'all_off', 'con_idx', 'con_off', 'arity')            # (what a world says about its globals: not weights; a checkpoint made before they were left out of it has them)
+
+
 def load(path, bags):
     ck = torch.load(path, map_location='cpu', weights_only=False)
     net = make_net(bags, ck['config'])
-    missing, unexpected = net.load_state_dict(ck['state'], strict=False)           # (a model saved before the heads of the reinforcement learners existed lacks exactly those)
+    state = {k: v for k, v in ck['state'].items() if k not in WORLD_BUFFERS}
+    missing, unexpected = net.load_state_dict(state, strict=False)                 # (a model saved before the heads of the reinforcement learners existed lacks exactly those)
     bad = [k for k in missing if not k.startswith(NEW_HEADS)] + list(unexpected)
     if bad: raise RuntimeError('%s does not fit the network (missing or unexpected parameters: %s)' % (path, bad[:4]))
     net.eval()

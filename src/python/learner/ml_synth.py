@@ -46,7 +46,7 @@ def _handler(st, recs):
         try: steps = _extract_one(st['ctx'], st['eng'], rec, st['premises'], stats)
         except Exception as e:
             stats['record_error ' + type(e).__name__] += 1; continue
-        for s in steps: s.goal.key = None
+        for s in steps: s.goal.key = None; s.mgr = -1                          # (a synthetic theorem has no claims: it must not teach the manager that claims never happen)
         out.append(steps)
     return out, dict(stats)
 
@@ -73,7 +73,7 @@ def extract_steps(records, bk, ctx, premises, workers=0, chunk=200, progress=Non
 def cached_steps(ddir, split, bk, ctx, limit=None, workers=0, progress=print, cache_dir=None):
     """`extract_steps` for a split, cached in a pickle named by the dataset's manifest, the split, the limit and the step format"""
     man = open(os.path.join(ddir, 'manifest.json')).read()
-    key = hashlib.sha256((man + '|%s|%s|v5|%d' % (split, limit, bk.w.k.num_globals())).encode()).hexdigest()[:12]
+    key = hashlib.sha256((man + '|%s|%s|v6|%d' % (split, limit, bk.w.k.num_globals())).encode()).hexdigest()[:12]
     cpath = os.path.join(cache_dir or ddir, 'steps_%s_%s.pkl' % (split, key))
     if os.path.exists(cpath):
         try:

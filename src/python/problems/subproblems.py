@@ -169,7 +169,7 @@ def build(dataset_dir, progress=None):
     import dataset
     t0 = time.time()
     data = json.load(open(os.path.join(dataset_dir, 'bank.json')))
-    bk = bank_all.load()
+    bk = dataset.world_of(data)
     if B.world_digest(bk.w, bk.k.num_globals()) != data['world_digest']: raise RuntimeError('the world built now is not the world of the dataset')
     eng = G.Engine(bk.w, kinds=set(G.Kind), strict=True)
     ann, sub = build_records(bk, eng, data, progress)
@@ -199,7 +199,7 @@ def verify(dataset_dir, progress=None):
         if fn not in man['files'] or dataset.file_digest(os.path.join(dataset_dir, fn)) != man['files'][fn]: raise RuntimeError('%s is not the file the manifest describes' % fn)
     data = json.load(open(os.path.join(dataset_dir, 'bank.json')))
     ann = json.load(open(os.path.join(dataset_dir, 'annotations.json'))); sub = json.load(open(os.path.join(dataset_dir, 'subproblems.json')))
-    bk = bank_all.load()
+    bk = dataset.world_of(data)
     if B.world_digest(bk.w, bk.k.num_globals()) != data['world_digest'] or ann['world_digest'] != data['world_digest'] or sub['world_digest'] != data['world_digest']:
         raise RuntimeError('the world built now is not the world of the dataset')
     eng = G.Engine(bk.w, kinds=set(G.Kind), strict=True); fresh = G.Engine(bk.w)

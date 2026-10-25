@@ -73,6 +73,26 @@ class Pool:
         if errors: raise WorkerError(errors[0])
         return out
 
+    def imap_unordered(self, name, payloads):
+        """like `map`, but yields (index, result) as the results arrive (any order): a long run can write each result to disk when it comes, instead of holding all of them until the last one.  A worker that raises
+        sends the traceback back; it is raised after the other payloads have finished."""
+        payloads = list(payloads)
+        if self.n <= 0:
+            for i, p in enumerate(payloads): yield i, self.handlers[name](self.state, p)
+            return
+        for i, p in enumerate(payloads): self.tasks.put((i, name, p))
+        errors = []; got = 0
+        while got < len(payloads):
+            try: idx, ok, val = self.results.get(timeout=5.0)
+            except Exception:
+                if any(not p.is_alive() for p in self.procs): self.close(); raise WorkerError('a worker process died (out of memory?)')
+                continue
+            if idx < 0: continue
+            got += 1
+            if ok: yield idx, val
+            else: errors.append(val)
+        if errors: raise WorkerError(errors[0])
+
     def close(self):
         if self._closed: return
         self._closed = True

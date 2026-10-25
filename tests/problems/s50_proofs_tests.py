@@ -296,7 +296,7 @@ def sec_C(c):
     own = collections.Counter(PM.of(P[nm].premises('prefix')).count() - lib for nm in contest)
     expect(all(PM.of(P[nm].premises('prefix')).count() == lib + (P[nm].defs_end - P[nm].start) for nm in contest), 'C4 ... the library and the definitions the statement needs: %s' % dict(own))
     expect(all(P[nm].defs_end == P[nm].start for nm in contest if P[nm].proved), 'C4 a proved contest problem declares nothing before its theorem')
-    expect(sum(1 for nm in contest if not P[nm].proved and P[nm].defs_end > P[nm].start) >= 1, 'C4 some statement-only problems declare definitions, which their premises offer')
+    expect(sum(1 for nm in contest if not P[nm].proved) == len(contest) - N_PROVED_CONTEST, 'C4 %d of the 196 contest problems are statement-only (their statements are checked by the kernel, they have no proof)' % (len(contest) - N_PROVED_CONTEST))
     # ---- C5. the engine agrees with the premises on every global of the world
     bad = []
     for name in list(P)[::9]:
