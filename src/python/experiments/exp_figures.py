@@ -61,13 +61,16 @@ def _dodge(ys, gap):
 
 
 def end_labels(ax, items, xpad=0.0):
-    """items: [(x, y, text, colour)] at the right end of each curve; placed in the margin, pushed apart"""
+    """items: [(x, y, text, colour)] at the right end of each curve; the labels stand in the margin, pushed apart (a thin leader in the curve's colour joins a label that was moved to its curve)"""
     if not items: return
     ymin, ymax = ax.get_ylim(); gap = (ymax - ymin) * 0.055
     ys = _dodge([y for _, y, _, _ in items], gap)
+    log = ax.get_xscale() == 'log'; x0, x1 = ax.get_xlim()
     for (x, y, text, col), yy in zip(items, ys):
-        ax.annotate(text, xy=(x, y), xytext=(4 + xpad, 0), textcoords='offset points', va='center', ha='left', fontsize=6.8, color=INK2, annotation_clip=False,
-                    arrowprops=None)
+        xt = x * (x1 / x0) ** (0.035 + xpad) if log else x + (0.035 + xpad) * (x1 - x0)
+        moved = abs(yy - y) > 1e-9
+        ax.annotate(text, xy=(x, y), xytext=(xt, yy), textcoords='data', va='center', ha='left', fontsize=6.8, color=INK2, annotation_clip=False,
+                    arrowprops=dict(arrowstyle='-', color=col, lw=0.6, shrinkA=1, shrinkB=2) if moved else None)
         ax.plot([x], [y], marker='', linestyle='')
 
 
@@ -133,7 +136,8 @@ def fig_scaling(C, P, out, plt):
         if 'pre' in C.variants('main'):
             m, lo, hi, k = C.rate_ci('main', 'pre', 'sample', split, B, 'all')
             if not math.isnan(m):
-                ax.errorbar([xs[-1]], [m], yerr=[[m - lo if not math.isnan(lo) else 0], [hi - m if not math.isnan(hi) else 0]], fmt='X', color=GREY, markersize=6, capsize=2, label='pre-trained only (%d probes)' % B, zorder=4)
+                lo_ = m if math.isnan(lo) else min(m, max(0.0, lo)); hi_ = m if math.isnan(hi) else max(m, min(1.0, hi))               # (a rate lives in [0, 1]; the t-interval of two seeds does not)
+                ax.errorbar([xs[-1]], [m], yerr=[[m - lo_], [hi_ - m]], fmt='X', color=GREY, markersize=6, capsize=2, label='pre-trained only (%d probes)' % B, zorder=4)
         ax.set_xscale('log'); ax.set_xticks(xs); ax.set_xticklabels(['0'] + [str(n) for n in sizes]); ax.minorticks_off()
         ax.set_xlabel('synthetic theorems used for pre-training'); ax.set_title('%s split' % split); ax.set_ylim(bottom=0); pct_axis(ax)
     axes[0].set_ylabel('problems solved (%)')
@@ -158,6 +162,8 @@ def fig_learning(C, P, out, plt):
     axes[0].set_xlabel('iteration'); axes[0].set_ylabel('dev problems solved (%)'); pct_axis(axes[0]); axes[0].set_ylim(bottom=0)
     axes[1].set_xscale('log'); axes[1].set_xlabel('cumulative probes of rollouts (log)'); pct_axis(axes[1]); axes[1].set_ylim(bottom=0)
     axes[2].set_xlabel('iteration'); axes[2].set_ylabel('steps per dev proof (mean)'); axes[2].set_ylim(bottom=0)
+    import matplotlib.ticker as mt
+    for ax in (axes[0], axes[2]): ax.xaxis.set_major_locator(mt.MaxNLocator(integer=True))                                     # (iterations are whole numbers)
     for ax, t in zip(axes, ('(a) by iteration', '(b) by compute', '(c) proof length')): ax.set_title(t)
     h, l = axes[0].get_legend_handles_labels()
     seen = {}
@@ -189,6 +195,8 @@ def fig_bc(C, P, out, plt):
             band(ax, ep, [s[0] for s in st], [s[1] for s in st], [s[2] for s in st], colour, ls, mk, label, ms=3.5); drawn += 1
     if not drawn: plt.close(fig); return None
     for ax, t, yl in zip(axes, ('(a) training loss', '(b) held-out loss', '(c) held-out action accuracy'), ('loss', 'loss (dev)', 'accuracy')): ax.set_title(t); ax.set_xlabel('epoch'); ax.set_ylabel(yl)
+    import matplotlib.ticker as mt
+    for ax in axes: ax.xaxis.set_major_locator(mt.MaxNLocator(integer=True))                                                  # (epochs are whole numbers)
     h, l = axes[0].get_legend_handles_labels()
     fig.legend(h, l, loc='lower center', ncol=len(h), frameon=False, bbox_to_anchor=(0.5, -0.1))
     fig.tight_layout(); return save(plt, fig, out, 'fig_bc')

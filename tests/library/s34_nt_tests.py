@@ -21,7 +21,7 @@ from math import gcd
 
 sys.setrecursionlimit(200000)
 import itp_env_lnl as E
-import int_lib, nt_lib, imo_lib, ring as R, audit
+import int_lib, nt_lib, imo_lib, ext_lib, ring as R, audit
 from author import AuthorError
 from tactics import Proof
 import indep_checker as ic
@@ -357,8 +357,9 @@ def main():
     t_start = time.time(); rng = random.Random(34)
     t0 = time.time(); w_int = int_lib.build_int(); k = w_int.k; n_int = k.num_globals(); t_int = time.time() - t0
     t0 = time.time(); w = nt_lib.build_nt(w_int); n_nt = k.num_globals(); t_nt = time.time() - t0
-    t0 = time.time(); imo_lib.build_imo(w); n_all = k.num_globals(); t_imo = time.time() - t0
-    trace('built: int %.1f s (%d globals), nt %.1f s (+%d), imo %.1f s (+%d)' % (t_int, n_int, t_nt, n_nt - n_int, t_imo, n_all - n_nt))
+    t0 = time.time(); ext_lib.build_ext(w); n_ext = k.num_globals(); t_ext = time.time() - t0                  # (the library extension: its lemmas have no row in this gate's table; S40, S41, S43, S50 replay them)
+    t0 = time.time(); imo_lib.build_imo(w, ext=False); n_all = k.num_globals(); t_imo = time.time() - t0
+    trace('built: int %.1f s (%d globals), nt %.1f s (+%d), ext %.1f s (+%d), imo %.1f s (+%d)' % (t_int, n_int, t_nt, n_nt - n_int, t_ext, n_ext - n_nt, t_imo, n_all - n_ext))
     TYPE, PROP = w.TYPE, w.PROP; Eq = w.Eq; F = w.forall_; Ex = w['Ex']
     N, Z = w['N'], w['Z']
     zadd, zmul, zneg, zsub, zof = (w[n] for n in ('Z.add', 'Z.mul', 'Z.neg', 'Z.sub', 'Z.of_N'))
@@ -375,7 +376,7 @@ def main():
         expect(w.global_type(name) == ty, 'A  %s has the intended type' % name)
     # nothing added by the number-theory part escapes the table
     known = set(spec) | set(definition_types(w)) | AXIOMS
-    unknown = [k.global_info(g)[0] for g in range(n_int, n_all) if k.global_info(g)[0] not in known and not k.global_info(g)[0].startswith('__same_ctor_')]
+    unknown = [k.global_info(g)[0] for g in list(range(n_int, n_nt)) + list(range(n_ext, n_all)) if k.global_info(g)[0] not in known and not k.global_info(g)[0].startswith('__same_ctor_')]       # (not the library extension in between)
     expect(not unknown, 'A  the number-theory part declares things the table does not cover: %s' % unknown[:8])
     # the definitions unfold as they should
     def numeral(v):
