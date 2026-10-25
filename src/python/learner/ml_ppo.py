@@ -223,9 +223,10 @@ def main(argv=None):
             row['dev_mean_probes'] = (sum(r['probes'] for r in ok) / len(ok)) if ok else None
             if row['dev_solved'] > best:
                 best = row['dev_solved']; T.save(net.cpu() if device.type != 'cpu' else net, cfg, os.path.join(a.out, 'best.pt'), {'iter': it, 'algo': 'ppo', 'dev_solved': best}); net.to(device)
+        row['rss_mb'] = round(MT.rss_mb() or 0)                          # (the memory of this process after the iteration: a run that leaks shows it here, long before the machine does)
         hist.append(row); logf.write(json.dumps(row) + '\n'); logf.flush()
-        print('iter %3d  solved %2d/%2d (bank %d/%d sub %d/%d)  ent %.3f kl %.4f clip %.2f  roll %.0fs  %ds%s' % (it, row['solved'], row['episodes'], row['bank'][0], row['bank'][1], row['sub'][0], row['sub'][1],
-              row.get('entropy', 0), row.get('approx_kl', 0), row.get('clip_fraction', 0), t_roll, row['seconds'], ('  | dev %.1f/%d' % (row['dev_solved'], row['dev_total'])) if 'dev_solved' in row else ''), flush=True)
+        print('iter %3d  solved %2d/%2d (bank %d/%d sub %d/%d)  ent %.3f kl %.4f clip %.2f  roll %.0fs  %ds  rss %d MB%s' % (it, row['solved'], row['episodes'], row['bank'][0], row['bank'][1], row['sub'][0], row['sub'][1],
+              row.get('entropy', 0), row.get('approx_kl', 0), row.get('clip_fraction', 0), t_roll, row['seconds'], row['rss_mb'], ('  | dev %.1f/%d' % (row['dev_solved'], row['dev_total'])) if 'dev_solved' in row else ''), flush=True)
         T.save(net.cpu() if device.type != 'cpu' else net, cfg, os.path.join(a.out, 'last.pt'), {'iter': it, 'algo': 'ppo', 'block_digest': lib.block_digest() if lib is not None else None}); net.to(device)
         torch.save({'net': net.state_dict(), 'opt': opt.state_dict(), 'hist': hist, 'iter': it, 'rng': rng.bit_generator.state, 'best': best, 'cum_probes': cum_probes}, st_path + '.tmp'); os.replace(st_path + '.tmp', st_path)
     MT.write_json(os.path.join(a.out, 'final.json'), {'args': vars(a), 'history': hist, 'seconds': round(time.time() - t0), 'peak_rss_mb': MT.peak_rss_mb(), 'n_params': sum(p.numel() for p in net.parameters())})

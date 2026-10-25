@@ -307,11 +307,12 @@ def main(argv=None):
             if row['dev_solved'] > best:
                 best = row['dev_solved']; T.save(net.cpu() if device.type != 'cpu' else net, cfg, os.path.join(a.out, 'best.pt'), {'iter': it, 'algo': 'ei', 'dev_solved': best, 'lemmas': 'lemmas.json' if lib is not None else None,
                                                                                                                                   'block_digest': lib.block_digest() if lib is not None else None}); net.to(device)
+        row['rss_mb'] = round(MT.rss_mb() or 0)                          # (the memory of this process after the iteration: a run that leaks shows it here, long before the machine does)
         hist.append(row); logf.write(json.dumps(row) + '\n'); logf.flush()
-        print('iter %3d  solved %3d/%3d (bank %d/%d sub %d/%d synth %d/%d)  probes/solve %s  len %s  her +%d  %s  loss %.3f  roll %.0fs upd %.0fs  %ds%s' % (
+        print('iter %3d  solved %3d/%3d (bank %d/%d sub %d/%d synth %d/%d)  probes/solve %s  len %s  her +%d  %s  loss %.3f  roll %.0fs upd %.0fs  %ds  rss %d MB%s' % (
               it, row['solved'], row['episodes'], row['bank'][0], row['bank'][1], row['sub'][0], row['sub'][1], row['synth'][0], row['synth'][1],
               '%.0f' % row['probes_per_solve'] if row['probes_per_solve'] else '-', '%.1f' % row['mean_len'] if row['mean_len'] else '-', row['her_new'],
-              ('lemmas %d (+%d)' % (row['lemmas'], row['lemmas_added'])) if lib is not None else 'no library', row.get('policy_loss', 0), t_roll_total, t_upd, row['seconds'],
+              ('lemmas %d (+%d)' % (row['lemmas'], row['lemmas_added'])) if lib is not None else 'no library', row.get('policy_loss', 0), t_roll_total, t_upd, row['seconds'], row['rss_mb'],
               ('  | dev %.1f/%d' % (row['dev_solved'], row['dev_total'])) if 'dev_solved' in row else ''), flush=True)
         T.save(net.cpu() if device.type != 'cpu' else net, cfg, os.path.join(a.out, 'last.pt'), {'iter': it, 'algo': 'ei', 'actor': a.actor, 'lemmas': 'lemmas.json' if lib is not None else None,
                                                                                                 'block_digest': lib.block_digest() if lib is not None else None}); net.to(device)
