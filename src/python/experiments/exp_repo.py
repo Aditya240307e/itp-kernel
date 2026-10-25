@@ -58,7 +58,7 @@ def dataset_facts(ddir):
     for name, key in (('library.json', 'library_lemmas'), ('subproblems.json', 'subtheorems')):
         try:
             data = json.load(open(os.path.join(ddir, name)))
-            recs = data.get('lemmas') or data.get('problems') or data.get('records') or (data if isinstance(data, list) else [])
+            recs = data.get('lemmas') or data.get('examples') or data.get('problems') or data.get('records') or (data if isinstance(data, list) else [])     # ('examples': subproblems.json)
             out[key] = len(recs)
         except (OSError, ValueError): pass
     return out

@@ -305,7 +305,7 @@ def sec_K():
                 got = set(inner) - {'MANIFEST.sha256', 'RELEASE.txt'}
                 expect(got == want, 'K  the archive holds the files git knows (missing %s, extra %s)' % (sorted(want - got)[:3], sorted(got - want)[:3]))
     finally: shutil.rmtree(tmp, ignore_errors=True)
-    if shutil.which('git'): k_git()
+    if shutil.which('git'): k_git(); k_add()
 
 
 def k_git():
@@ -375,6 +375,52 @@ def k_git():
         x2 = os.path.join(tmp, 'xt2', 'pkg2')
         expect('uncommitted changes' in open(os.path.join(x2, 'RELEASE.txt')).read() and git(x2, 'status', '--porcelain', check=False).stdout.strip() == 'M README.md', 'K  an archive of a tree with uncommitted changes says so and `git status` shows them')
         expect(sorted(os.listdir(os.path.join(tmp, 'out'))) == ['pkg.tar.gz', 'pkg.zip', 'pkg2.tar.gz', 'pkg2.zip'], 'K  make_dist.py --git leaves nothing else in its output directory')
+    finally: shutil.rmtree(tmp, ignore_errors=True)
+
+
+def k_add():
+    """make_dist.py --add: a build product that git does not hold (the PDF of the paper: ignored by .gitignore) goes into the archive at the path it has in the repository, or at another one, with its digest in
+    MANIFEST.sha256 and its name in RELEASE.txt; without --add it is not there; a file that does not exist, a path outside the archive and a file that is in the archive already are refused; the extracted
+    repository is clean (the file is ignored there as well)."""
+    import tarfile, zipfile, hashlib
+    env = dict(os.environ, GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull, GIT_TERMINAL_PROMPT='0')
+    def git(cwd, *args):
+        return subprocess.run(['git', '-C', cwd] + list(args), capture_output=True, text=True, env=env)
+    tmp = tempfile.mkdtemp(prefix='s45_distadd_')
+    try:
+        repo = os.path.join(tmp, 'repo'); os.makedirs(os.path.join(repo, 'tools')); os.makedirs(os.path.join(repo, 'paper'))
+        shutil.copy(os.path.join(ROOT, 'tools', 'make_dist.py'), os.path.join(repo, 'tools', 'make_dist.py'))
+        for rel, text in (('README.md', 'one\n'), ('.gitignore', '/paper/main.pdf\n'), ('paper/main.tex', 'x\n')):
+            with open(os.path.join(repo, rel), 'w') as f: f.write(text)
+        git(repo, 'init', '-q', '-b', 'main'); git(repo, 'config', 'user.name', 'T'); git(repo, 'config', 'user.email', 't@example.org'); git(repo, 'add', '-A'); git(repo, 'commit', '-q', '-m', 'one')
+        pdf = b'%PDF-1.5 a build product\n\x00\x01'
+        with open(os.path.join(repo, 'paper', 'main.pdf'), 'wb') as f: f.write(pdf)
+        elsewhere = os.path.join(tmp, 'elsewhere.pdf')
+        with open(elsewhere, 'wb') as f: f.write(b'%PDF other')
+        def make(name, *extra):
+            r = subprocess.run([sys.executable, os.path.join(repo, 'tools', 'make_dist.py'), '--git', '--out', os.path.join(tmp, 'out'), '--name', name] + list(extra), capture_output=True, text=True, env=env, timeout=300)
+            return r, os.path.join(tmp, 'out', name + '.tar.gz'), os.path.join(tmp, 'out', name + '.zip')
+        r, tp0, _ = make('plain')
+        with tarfile.open(tp0) as tf: names0 = tf.getnames()
+        expect(r.returncode == 0 and 'plain/paper/main.pdf' not in names0, 'K  without --add the ignored PDF is not in the archive')
+        r, tp, zp = make('withpdf', '--add', 'paper/main.pdf', '--add', 'extra/other.pdf=' + elsewhere)
+        expect(r.returncode == 0, 'K  make_dist.py --add fails: %s' % (r.stderr or r.stdout)[-300:])
+        if r.returncode != 0: return
+        x = os.path.join(tmp, 'x'); os.makedirs(x)
+        with tarfile.open(tp) as tf: tf.extractall(x, filter='fully_trusted')
+        d = os.path.join(x, 'withpdf')
+        got = open(os.path.join(d, 'paper', 'main.pdf'), 'rb').read() if os.path.isfile(os.path.join(d, 'paper', 'main.pdf')) else None
+        expect(got == pdf and open(os.path.join(d, 'extra', 'other.pdf'), 'rb').read() == b'%PDF other', 'K  --add puts the file in, byte for byte, at its path in the repository or at the path given (PATH=SOURCE)')
+        man = dict((line.split('  ', 1)[1], line.split('  ', 1)[0]) for line in open(os.path.join(d, 'MANIFEST.sha256')).read().splitlines())
+        expect(man.get('paper/main.pdf') == hashlib.sha256(pdf).hexdigest() and 'extra/other.pdf' in man, 'K  the added files are in MANIFEST.sha256 with their digests')
+        rel = open(os.path.join(d, 'RELEASE.txt')).read()
+        expect('added by hand, not in git: paper/main.pdf, extra/other.pdf' in rel, 'K  RELEASE.txt names the files that were added by hand (%r)' % rel[:300])
+        with zipfile.ZipFile(zp) as zf: expect('withpdf/paper/main.pdf' in zf.namelist(), 'K  the zip holds the added file too')
+        st = git(d, 'status', '--porcelain').stdout
+        expect(st.strip() == '?? extra/' , 'K  the extracted repository shows only the file whose path .gitignore does not cover (%r)' % st[:200])
+        for bad, why in (('paper/missing.pdf', 'a file that does not exist'), ('../outside.pdf=' + elsewhere, 'a path outside the archive'), ('README.md', 'a file that is in the archive already')):
+            rb, _, _ = make('bad', '--add', bad)
+            expect(rb.returncode != 0, 'K  --add refuses %s' % why)
     finally: shutil.rmtree(tmp, ignore_errors=True)
 
 

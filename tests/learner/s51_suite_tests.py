@@ -9,7 +9,7 @@ the experiment matrix is a well-formed graph of commands whose products land whe
   B. THE MATRIX.     The run graph of every profile: unique ids, an acyclic graph whose needs exist, the checks every run promises, the closure of a target, the seeds, the overrides (an unknown field is an error), the
                      machine fields, the synthetic-set exclusion and the training commands (no test data in them), the estimator.
   C. THE COLLECTOR.  A runs directory written by hand (3 seeds, 2 learners, baselines) is read back: solved-within-budget matrices, rates with their intervals, comparisons, the strict view, the subsets, the
-                     report and its numbers, the warnings for a missing result.
+                     report and its numbers, the warnings for a missing result, the contest family of a source and the facts of a report made of the dataset alone (what the paper skeleton prints).
   D. HINDSIGHT.      On a small world (17 problems, a dataset built by dataset.py --only): what the Harvest keeps is exactly what the proof tree says was proved, every theorem replays in a fresh engine of another
                      configuration and its code builds the statement back; the filters do what they say; corrupted proofs are dropped and counted; claims.
   E. THE LIBRARY.    Lemmas the agent proved become premises: every rule of admission (one test per reason), the kernel's acceptance, the independent checker's acceptance of a proof that cites a lemma, the window of
@@ -59,7 +59,7 @@ try:
     import scipy.stats as SS
 except ImportError as e:
     print('S51 needs numpy and scipy: %s' % (e,)); print('S51 TRAINING SUITE GATE: FAIL'); sys.exit(1)
-import exp_stats as ST, exp_spec as SP, exp_run as RUN, exp_estimate as EST, exp_collect as EC, exp_tables as TB, exp_report as REP
+import exp_stats as ST, exp_spec as SP, exp_run as RUN, exp_estimate as EST, exp_collect as EC, exp_tables as TB, exp_report as REP, exp_repo as XR
 
 T975_2 = 4.302652729911275                      # Student-t quantile, 0.975, 2 degrees of freedom
 T975_1 = 12.706204736432095                     # ... 1 degree of freedom
@@ -353,6 +353,17 @@ def sec_C(c):
         t = TB.Table('demo', 'cap_tion 50%', ['a', 'b_c', 'd%'], [['x', '1.0 ± 2', '50%'], ['y', 'q_r', '–']])
         s = t.tex()
         expect('\\_' in s and '\\%' in s and '--' in s and '–' not in s and '\\begin{tabular}' in s, 'C26 LaTeX output escapes underscores, percent signs and dashes')
+        # the contest family of a source, and the facts a report can state before any run (the paper's skeleton prints them: system and benchmark sections)
+        expect(EC.source_class('original, in the manner of the AMC') == 'AMC' and EC.source_class('AIME 2001 I Problem 3') == 'AIME' and EC.source_class('IMO 1959 Problem 1') == 'IMO' and EC.source_class('folklore') == 'folklore'
+               and EC.source_class('classical (Euclid)') == 'other' and EC.source_class(None) == 'other', 'C28 the contest family of a source: the problems written in the manner of the AMC are AMC problems of the bank (not "other")')
+        ddir = os.path.join(itp_paths.ROOT, 'data', 'dataset_v2'); facts = XR.dataset_facts(ddir); sub = json.load(open(os.path.join(ddir, 'subproblems.json')))
+        expect(facts.get('subtheorems') == len(sub['examples']) > 0 and facts.get('library_lemmas', 0) > 0, 'C29 the dataset facts count the sub-theorems (subproblems.json: "examples") and the library lemmas: %s' % facts)
+        facts_runs = os.path.join(tmp, 'facts_runs'); os.makedirs(facts_runs); json.dump({'name': 'facts', 'dataset': ddir}, open(os.path.join(facts_runs, 'PROFILE.json'), 'w'))
+        fo = os.path.join(tmp, 'facts_out'); REP.main([facts_runs, '--out', fo, '--no-figures']); F = json.load(open(os.path.join(fo, 'numbers.json')))
+        bank = json.load(open(os.path.join(ddir, 'bank.json')))['problems']
+        expect(F['bank_problems'] == len(bank) and F['bank_proved'] + F['bank_statement_only'] == len(bank) and F['bank_train'] + F['bank_dev'] + F['bank_test'] == len(bank)
+               and F['bank_with_helpers'] == sum(1 for p in bank if p.get('helpers')) and F['bank_amc'] == sum(1 for p in bank if 'in the manner of the AMC' in p['source']) > 0,
+               'C30 a report made of the dataset alone states the facts of the bank: %s' % {k: v for k, v in F.items() if k.startswith('bank_')})
         try:
             import matplotlib  # noqa: F401
             figs = __import__('exp_figures').make_all(C, os.path.join(out, 'figures'))

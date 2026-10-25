@@ -6,6 +6,7 @@
     python3 tools/make_dist.py --artifacts DIR         also include the files of DIR under artifacts/ (trained models, which are not in git), with a listing and digests
     python3 tools/make_dist.py --out DIR               write into DIR instead of dist/
     python3 tools/make_dist.py --git                   also put the repository's history into the archive as a .git directory: the extracted directory is a working git repository at the commit the archive was made from
+    python3 tools/make_dist.py --add paper/main.pdf    also put this file in, at that path (repeatable; `--add PATH_IN_ARCHIVE=SOURCE` takes it from elsewhere): a build product that git does not hold (the PDF of the paper)
 
 What goes in: the files git knows (tracked and untracked-but-not-ignored) when the repository has a .git directory, otherwise every file except build products and caches.  What stays out: .git (unless
 --git), build/, dist/, __pycache__, *.pyc, *.so.  The archive also holds MANIFEST.sha256 (the SHA-256 of every file in it, in `sha256sum -c` format), and a file RELEASE.txt saying which commit it was made from.
@@ -86,11 +87,20 @@ def sha256(path):
 def main(argv):
     ap = argparse.ArgumentParser()
     ap.add_argument('--name'); ap.add_argument('--out', default=os.path.join(ROOT, 'dist')); ap.add_argument('--artifacts'); ap.add_argument('--git', action='store_true', help='also put the history into the archive (a .git directory)')
+    ap.add_argument('--add', action='append', default=[], metavar='PATH[=SOURCE]', help='also put this file into the archive: a build product that git does not hold (PATH is relative to the repository; SOURCE defaults to it)')
     a = ap.parse_args(argv)
     commit = git('rev-parse', '--short', 'HEAD') or 'nogit'
     dirty = bool(git('status', '--porcelain'))
     name = a.name or 'itp-%s-%s%s' % (datetime.date.today().isoformat(), commit, '-dirty' if dirty else '')
     members = [(n, os.path.join(ROOT, n)) for n in file_list()]
+    a.added = []
+    for spec in a.add:
+        rel, _, src = spec.partition('=')
+        rel = rel.strip().lstrip('/'); src = os.path.join(ROOT, src or rel) if not os.path.isabs(src or rel) else (src or rel)
+        if not rel or rel.startswith('..') or '..' in rel.split('/'): raise SystemExit('make_dist --add: %r is not a path inside the archive' % rel)
+        if not os.path.isfile(src): raise SystemExit('make_dist --add: %s is not a file' % src)
+        if rel in {n for n, _ in members}: raise SystemExit('make_dist --add: %s is in the archive already' % rel)
+        members.append((rel, src)); a.added.append(rel)
     if a.artifacts:
         for f in sorted(os.listdir(a.artifacts)):
             p = os.path.join(a.artifacts, f)
@@ -106,6 +116,7 @@ def main(argv):
 def pack(a, name, members, manifest, dirty, git_members):
     release = 'commit %s%s\nbranch %s\nmade %s\nfiles %d\n' % (git('rev-parse', 'HEAD') or 'unknown', ' (with uncommitted changes)' if dirty else '', git('branch', '--show-current') or 'unknown',
                                                               datetime.datetime.now().astimezone().isoformat(timespec='seconds'), len(members))
+    if getattr(a, 'added', None): release += 'added by hand, not in git: %s\n' % ', '.join(a.added)
     if git_members: release += 'history %s commits, in .git (branches and tags; no remotes, hooks or user identity; `git log`, `git fsck`, `git status`)\n' % (git('rev-list', '--count', 'HEAD') or '?')
     extra = [('MANIFEST.sha256', manifest.encode()), ('RELEASE.txt', release.encode())]
     os.makedirs(a.out, exist_ok=True)

@@ -42,9 +42,10 @@ def splits_doc(names, lemma_names=()):
 
 
 def source_class(source):
-    """the contest family of a source string: IMO, ISL (shortlist), AIME, AMC, folklore or other"""
+    """the contest family of a source string: IMO, ISL (shortlist), AIME, AMC (the problems written for the bank `in the manner of the AMC` -- there is no problem of the AMC itself), folklore or other"""
     for pre, cls in (('IMO', 'IMO'), ('ISL', 'ISL'), ('AIME', 'AIME'), ('AMC', 'AMC'), ('folklore', 'folklore')):
         if source.startswith(pre): return cls
+    if 'in the manner of the AMC' in source: return 'AMC'
     return 'other'
 
 
@@ -80,7 +81,10 @@ def card(data, splits, library=None, extra=None):
     add('')
     for cls in ('IMO', 'ISL', 'AIME', 'AMC'):
         lst = sorted((p['year'] or 0, p['name'], p['source']) for p in probs if source_class(p['source']) == cls)
-        if lst: add('%s problems (%d): ' % (cls, len(lst)) + ', '.join('%s (%s)' % (n, s) for _, n, s in lst) + '.'); add('')
+        if not lst: continue
+        if len({s for _, _, s in lst}) == 1 and len(lst) > 3: add('%s problems (%d, every one with the source "%s"): ' % (cls, len(lst), lst[0][2]) + ', '.join(n for _, n, _ in lst) + '.')
+        else: add('%s problems (%d): ' % (cls, len(lst)) + ', '.join('%s (%s)' % (n, s) for _, n, s in lst) + '.')
+        add('')
     add('## Splits')
     add('')
     add('Splits are by **family** (the two parts of one olympiad problem, a statement in other clothes, an argument with another constant stay together) and are a pure function of the family key '

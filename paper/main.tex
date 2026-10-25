@@ -5,7 +5,7 @@
 \usepackage{tmlr}
 % camera-ready:  \usepackage[accepted]{tmlr}      de-anonymised preprint:  \usepackage[preprint]{tmlr}
 \input{math_commands.tex}
-\usepackage{hyperref}
+\usepackage[colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black]{hyperref}
 \usepackage{url}
 \usepackage{booktabs}
 \usepackage{array}
@@ -37,7 +37,7 @@
 \begin{abstract}
 A learned theorem prover is only as trustworthy as the checker behind it, yet the environments in which provers are trained usually inherit the size of the proof assistant they are built on.
 We present a gym for learning olympiad algebra and number theory against a \emph{small trusted kernel}: a \N{RepoKernelLines}-line C++23 kernel for dependent type theory with definitional proof irrelevance, quotients and a deterministic work budget, a second checker written independently from the typing rules, and an untrusted Python layer with tactics, decision procedures that emit kernel-checkable certificates, and an environment without a text interface in which an agent sees goals as tokens and chooses among the options the engine declares legal.
-We contribute (i) a benchmark of \N{BankProblems} formal problems from the IMO, its shortlists, the AIME, the AMC, the APMO and classical sources, \N{BankProved} of them with kernel-checked reference proofs, split by problem family; (ii) a generator of kernel-checked synthetic theorems and an analysis of how far it saturates; (iii) hindsight relabelling in which every goal an attempt closes is a kernel-checked theorem, used as a training goal, as training data and, after checking, as a lemma of a growing library that never sees a held-out problem; and (iv) a protocol that measures provers in engine probes, with training seeds as replicates, and a study of synthetic pre-training, PPO, expert iteration, hindsight, a bootstrapped library, MCTS and a manager--worker agent over \N{NSeeds} seeds.
+We contribute (i) a benchmark of \N{BankProblems} formal problems from the IMO, its shortlists, the AIME and the APMO, problems written in the manner of the AMC, and classical sources, \N{BankProved} of them with kernel-checked reference proofs, split by problem family; (ii) a generator of kernel-checked synthetic theorems and an analysis of how far it saturates; (iii) hindsight relabelling in which every goal an attempt closes is a kernel-checked theorem, used as a training goal, as training data and, after checking, as a lemma of a growing library that never sees a held-out problem; and (iv) a protocol that measures provers in engine probes, with training seeds as replicates, and a study of synthetic pre-training, PPO, expert iteration, hindsight, a bootstrapped library, MCTS and a manager--worker agent over \N{NSeeds} seeds.
 \todo{two sentences: the main result of Table~\ref{tab:main} and the clearest negative result}
 Kernel, gym, data, scripts and logs are released.
 \end{abstract}
@@ -121,12 +121,12 @@ The benchmark should therefore not be cited as a copy of the official problems; 
 \inputtable{bank}
 
 \paragraph{Splits and leakage.}
-Problems are assigned to train (70\%), dev (10\%) and test (20\%) by a salted hash of their \emph{family}, so variants of one problem are never separated; the split rule is frozen and every statement has an $\alpha$-invariant digest.
+Problems are assigned to train (70\%), dev (10\%) and test (20\%) by a salted hash of their \emph{family}, so variants of one problem are never separated (the rule gives these fractions in expectation; the realised split has \N{BankTrain}, \N{BankDev} and \N{BankTest} problems); the split rule is frozen and every statement has an $\alpha$-invariant digest.
 A three-layer screen (digest equality, an executable-meaning comparison on a grid of values, and manual review) found near-duplicates among the problems; they are grouped into families.
 Nothing from dev or test is a goal, a demonstration or a lemma in training: the synthetic generator excludes their statements by digest and by shape, and the lemma library of \S\ref{sec:methods} refuses any lemma that says what a held-out problem says.
 
 \paragraph{Regimes.}
-In the \emph{prefix} regime every global before the problem is on the menu, including the helper lemmas written for that problem; in the \emph{strict} regime those helpers are hidden. For \N{BankProblems} problems, most have no helper and the two regimes coincide; for the others the prefix regime can be much easier (a helper may \emph{be} the statement).
+In the \emph{prefix} regime the menu holds the library, the definitions of the problem and the helper lemmas written for it, and nothing of any other problem (a late problem never sees the theorems of an earlier one); in the \emph{strict} regime the helpers are hidden. Of the \N{BankProblems} problems only \N{BankWithHelpers} have helper lemmas; for the others the two regimes coincide, and for those the prefix regime can be much easier (a helper may \emph{be} the statement).
 We therefore report the prefix regime on all problems, the subset without helpers (where nothing is given away), and the strict regime where it differs (Table~\ref{tab:strict}).
 
 % ============================================================================================================================================================ 5
@@ -146,7 +146,7 @@ Table~\ref{tab:generator} and Figure~\ref{fig:fig_generator} describe the set th
 \genfigure{fig_generator}{0.98}{The synthetic set: (a) distinct proof skeletons, statement shapes and recipes against the number of theorems drawn, (b) the action kinds in the proofs, (c) the depth of the proof trees.}
 
 \paragraph{What the data are not.}
-The proofs are backward chains: they teach premise selection and term building, and almost no \code{CASES}, \code{INDUCT}, \code{REWRITE}, \code{CLAIM} or \code{FORWARD}. Statements are true by construction and not interesting by design; hypotheses come out of the proof rather than being posed. Whether such data help on olympiad problems is an empirical question that \S\ref{sec:results} answers by varying the amount (Figure~\ref{fig:fig_scaling}).
+The proofs are backward chains: they teach premise selection and term building, and contain no \code{CASES}, \code{INDUCT}, \code{REWRITE}, \code{CLAIM} or \code{FORWARD} (the generator's family uses five of the fifteen action kinds of the reference proofs). Statements are true by construction and not interesting by design; hypotheses come out of the proof rather than being posed. Whether such data help on olympiad problems is an empirical question that \S\ref{sec:results} answers by varying the amount (Figure~\ref{fig:fig_scaling}).
 
 % ============================================================================================================================================================ 6
 \section{Learning methods}\label{sec:methods}

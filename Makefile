@@ -17,7 +17,7 @@ help:
 	@echo "make examples        run the examples"
 	@echo "make mutants-check   check that every mutant of the catalogue still applies to the code (seconds); the mutation run itself: python3 mutants/mutate.py PREFIX"
 	@echo "make sanitize        build the kernel with ASan + UBSan and run the gates under it (long)"
-	@echo "make dist            pack the repository into dist/*.tar.gz and dist/*.zip   (ARTIFACTS=dir adds trained models under artifacts/)"
+	@echo "make dist            pack the repository into dist/*.tar.gz and dist/*.zip   (GIT=1 adds the history as a .git directory; ADD='paper/main.pdf' adds files git does not hold; ARTIFACTS=dir adds trained models under artifacts/)"
 	@echo "make check-env       is this machine ready for the experiments? (python, torch, CUDA, memory, disk)"
 	@echo "make smoke           the whole experiment pipeline on a tiny world (1-2 hours on two cores): do this before a real run"
 	@echo "make experiments     the experiments of the paper, resumable   (PROFILE=small|full  SEEDS=0-4  DEVICE=cuda  JOBS=n ...: scripts/env.sh)"
@@ -57,7 +57,7 @@ sanitize: kernel
 	$(PY) tools/sanitize.py
 
 dist:
-	$(PY) tools/make_dist.py $(if $(ARTIFACTS),--artifacts $(ARTIFACTS),)
+	$(PY) tools/make_dist.py $(if $(GIT),--git,) $(if $(ARTIFACTS),--artifacts $(ARTIFACTS),) $(foreach f,$(ADD),--add $(f))
 
 # the scripts take PROFILE and PY from the call, then from scripts/local.env, then from their defaults: pass on only what the caller set (this Makefile's own default PY is not a setting)
 SETTINGS = $(if $(filter-out file,$(origin PY)),PY=$(PY) )$(if $(PROFILE),PROFILE=$(PROFILE) )

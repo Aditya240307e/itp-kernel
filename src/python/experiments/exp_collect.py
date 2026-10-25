@@ -59,6 +59,7 @@ def source_class(source):
     s = source or ''
     for pre in ('IMO', 'ISL', 'AIME', 'AMC', 'APMO', 'folklore'):
         if s.startswith(pre): return pre
+    if 'in the manner of the AMC' in s: return 'AMC'               # (the 72 problems written for the bank: `original, in the manner of the AMC`)
     return 'other'
 
 

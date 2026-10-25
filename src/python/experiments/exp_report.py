@@ -63,6 +63,7 @@ def numbers(C, T, P):
     if C.bank:
         N['bank_problems'] = len(C.bank); N['bank_proved'] = sum(1 for p in C.bank if 'demonstration' in p); N['bank_statement_only'] = N['bank_problems'] - N['bank_proved']
         for sp in ('train', 'dev', 'test'): N['bank_' + sp] = sum(1 for p in C.bank if p.get('split') == sp)
+        N['bank_with_helpers'] = sum(1 for p in C.bank if p.get('helpers'))                       # (problems whose prefix and strict regimes differ)
         for k in ('IMO', 'ISL', 'AIME', 'AMC', 'APMO'): N['bank_' + k.lower()] = sum(1 for p in C.bank if EC.source_class(p.get('source')) == k)
     for group, variants in (('main', TB.MAIN_ORDER), ('baselines', ['baselines'])):
         for v in variants:
