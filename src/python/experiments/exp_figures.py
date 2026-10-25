@@ -76,7 +76,7 @@ def band(ax, x, mean, low, high, colour, ls, marker, label, ms=4.5, alpha=0.14, 
     ok = ~np.isnan(m)
     ax.plot(x[ok], m[ok], color=colour, linestyle=ls, marker=marker, markersize=ms, label=label, zorder=zorder, markeredgecolor=SURFACE, markeredgewidth=0.6)
     ok2 = ok & ~np.isnan(lo) & ~np.isnan(hi)
-    if ok2.any(): ax.fill_between(x[ok2], lo[ok2], hi[ok2], color=colour, alpha=alpha, linewidth=0, zorder=zorder - 1)
+    if ok2.any(): ax.fill_between(x[ok2], np.clip(lo[ok2], 0.0, 1.0), np.clip(hi[ok2], 0.0, 1.0), color=colour, alpha=alpha, linewidth=0, zorder=zorder - 1)       # (a rate lives in [0, 1]; with two seeds the t-interval does not)
 
 
 def pct_axis(ax, axis='y'):

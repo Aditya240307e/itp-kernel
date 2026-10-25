@@ -20,6 +20,7 @@ import os, sys, json, time, signal, argparse, subprocess, platform, collections
 import exp_spec as SP
 
 ROOT = itp_paths.ROOT
+MACHINE_FIELDS = ('device', 'threads', 'workers', 'mem_scale')          # profile fields about the machine, not the results: they may change between invocations of one runs directory
 
 
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ status
@@ -230,9 +231,11 @@ def main(argv=None):
     prof_path = os.path.join(Rabs, 'PROFILE.json'); prof = SP.effective_profile(a.profile, over, seeds)
     if os.path.exists(prof_path):
         old = json.load(open(prof_path))
-        if old != prof and any(os.path.isdir(os.path.join(Rabs, d)) for d in ('pre', 'ft', 'rl', 'eval')):
-            diff = {k: (old.get(k), prof.get(k)) for k in set(old) | set(prof) if old.get(k) != prof.get(k)}
-            sys.exit('%s holds runs made with another profile: %s\nUse the same --set/--seeds as before, or another --runs directory (a profile change would mix results).' % (R, diff))
+        diff = {k: (old.get(k), prof.get(k)) for k in set(old) | set(prof) if old.get(k) != prof.get(k)}
+        results = {k: v for k, v in diff.items() if k not in MACHINE_FIELDS}
+        if results and any(os.path.isdir(os.path.join(Rabs, d)) for d in ('pre', 'ft', 'rl', 'eval')):
+            sys.exit('%s holds runs made with another profile: %s\nUse the same --set/--seeds as before, or another --runs directory (a profile change would mix results).' % (R, results))
+        if diff and not results: print('note: %s differs from the previous invocation only in machine settings (%s)' % (R, ', '.join(sorted(diff))), flush=True)
     write_json(prof_path, prof); write_json(os.path.join(Rabs, 'GRAPH.json'), {i: r.to_dict() for i, r in runs.items()})
     # --force
     force = []

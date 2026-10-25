@@ -197,7 +197,7 @@ def build(name, seeds=None, runs_dir=None, overrides=None):
         for v in variants:
             for ss in ([[s] for s in seeds] if per_seed else [seeds]):
                 r_id = '%s/%s%s' % (rid, v, ('/s%d' % ss[0]) if per_seed else '')
-                a = py('learner', 'ml_evaluate', D, '--out', out(r_id), '--split', P['eval_splits'], '--probes', P['eval_probes'], '--time-limit', P['eval_time_limit'], '--workers', W_, '--threads', P['threads'])
+                a = py('learner', 'ml_evaluate', D, '--out', out(r_id), '--split', P['eval_splits'], '--regimes', 'prefix,strict', '--probes', P['eval_probes'], '--time-limit', P['eval_time_limit'], '--workers', W_, '--threads', P['threads'])
                 for s in solvers: a += ['--solver', s]
                 needs = [ds]
                 for s in ss:
@@ -214,7 +214,7 @@ def build(name, seeds=None, runs_dir=None, overrides=None):
     evaluation('eval/mw', 'mw', MW_STUDY[0], MW_STUDY[1])
     scale = ['bc_n%d' % n for n in sizes if n != smax]
     if scale: evaluation('eval/scale', 'scale', scale, [MAIN_SOLVER])
-    a = py('learner', 'ml_evaluate', D, '--out', out('eval/baselines'), '--split', P['eval_splits'], '--probes', P['eval_probes'], '--time-limit', P['eval_time_limit'], '--workers', W_, '--threads', P['threads'])
+    a = py('learner', 'ml_evaluate', D, '--out', out('eval/baselines'), '--split', P['eval_splits'], '--regimes', 'prefix,strict', '--probes', P['eval_probes'], '--time-limit', P['eval_time_limit'], '--workers', W_, '--threads', P['threads'])
     for s in BASELINES: a += ['--solver', s]
     add(Run('eval/baselines', 'eval', a, needs=[ds], check=[out('eval/baselines') + '/rows.jsonl'], tags={'group': 'baselines', 'variant': 'baselines', 'solvers': list(BASELINES)}, mem_gb=MEM_GB['eval'] + 0.4 * int(W_), cores=NC))
 

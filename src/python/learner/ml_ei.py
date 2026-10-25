@@ -317,7 +317,7 @@ def main(argv=None):
         if (a.save_every and it % a.save_every == a.save_every - 1) or it == a.iters - 1:
             torch.save({'net': net.state_dict(), 'opt': opt.state_dict(), 'hist': hist, 'iter': it, 'rng': rng.bit_generator.state, 'best': best, 'full': full.state(), 'her': her.state(), 'her_seen': sorted(her_seen),
                         'use_count': dict(use_count), 'totals': dict(totals)}, st_path + '.tmp'); os.replace(st_path + '.tmp', st_path)
-    final = {'args': vars(a), 'history': hist, 'seconds': round(time.time() - t0), 'peak_rss_mb': MT.peak_rss_mb()}
+    final = {'args': vars(a), 'history': hist, 'seconds': round(time.time() - t0), 'peak_rss_mb': MT.peak_rss_mb(), 'n_params': sum(p.numel() for p in net.parameters())}
     if lib is not None: final['library'] = lib.summary(); final['lemma_use'] = {str(k): v for k, v in use_count.most_common()}
     MT.write_json(os.path.join(a.out, 'final.json'), final)
     pool.close(); weights_file.cleanup()

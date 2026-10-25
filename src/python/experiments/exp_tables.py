@@ -4,7 +4,7 @@
     T['main'].md()   T['main'].tex()
 
 Every cell is computed here from the rows of the evaluations and the logs of the training runs; nothing is typed in.  A percentage with two or more replicates is `mean +- half-width` of the 95% Student-t
-interval over replicates (training seeds); with ONE replicate (the model-free baselines) it is the Wilson interval over problems in brackets.  Differences between methods are paired by seed; the p-values
+interval over replicates (training seeds); with ONE replicate (the model-free baselines) it is the Wilson interval over problems in parentheses (low–high).  Differences between methods are paired by seed; the p-values
 of one family of comparisons carry Holm's correction.
 """
 import os as _os, sys as _sys; _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..')); import itp_paths  # noqa: E402,F401
@@ -45,15 +45,27 @@ class Table:
         for r in self.rows: L.append('| ' + ' | '.join(str(c) for c in r) + ' |')
         if self.notes: L += [''] + ['*%s*' % n for n in self.notes]
         return '\n'.join(L) + '\n'
+    def column_widths(self):
+        """relative widths of the columns from their content: the longest unbreakable word of a column is its minimum, the longest cell (capped) its preference"""
+        w = []
+        for k in range(len(self.header)):
+            cells = [str(self.header[k])] + [str(r[k]) for r in self.rows if k < len(r)]
+            lo = max((len(t) for c in cells for t in c.split()), default=1); hi = min(max((len(c) for c in cells), default=1), 36)
+            w.append(max(lo + 1.0, 0.5 * hi))
+        return w
     def tex(self):
         def esc(s):
-            s = str(s).replace('±', r'$\pm$').replace('Δ', r'$\Delta$').replace('%', r'\%').replace('&', r'\&').replace('_', r'\_').replace('≤', r'$\leq$').replace('×', r'$\times$')
+            s = str(s).replace('±', r'$\pm$').replace('Δ', r'$\Delta$').replace('%', r'\%').replace('&', r'\&').replace('_', r'\_').replace('≤', r'$\leq$').replace('×', r'$\times$').replace('~', r'$\sim$').replace('–', '--')
             return s
-        L = [r'\begin{table}[t]', r'\centering', r'\small', r'\caption{%s}\label{tab:%s}' % (esc(self.caption), self.key), r'\begin{tabular}{%s}' % self.align, r'\toprule',
+        w = self.column_widths(); tot = sum(w);
+        size = r'\scriptsize' if tot > 95 else (r'\footnotesize' if tot > 70 else r'\small')
+        spec = ''.join((r'>{\raggedright\arraybackslash}' if (a == 'l' or k == 0) else r'>{\raggedleft\arraybackslash}') + r'p{\dimexpr %.4f\linewidth-2\tabcolsep\relax}' % (w[k] / tot)
+                       for k, a in enumerate(self.align))
+        L = [r'\begin{table}[t]', r'\centering', size, r'\caption{%s}\label{tab:%s}' % (esc(self.caption), self.key), r'\begin{tabular}{%s}' % spec, r'\toprule',
              ' & '.join(esc(h) for h in self.header) + r' \\', r'\midrule']
         for r in self.rows: L.append(' & '.join(esc(c) for c in r) + r' \\')
         L += [r'\bottomrule', r'\end{tabular}']
-        if self.notes: L.append(r'\par\vspace{2pt}{\footnotesize ' + ' '.join(esc(n) for n in self.notes) + '}')
+        if self.notes: L.append(r'\par\vspace{2pt}{\footnotesize\raggedright ' + ' '.join(esc(n) for n in self.notes) + r'\par}')
         L.append(r'\end{table}')
         return '\n'.join(L) + '\n'
     def to_dict(self): return {'key': self.key, 'caption': self.caption, 'header': self.header, 'rows': self.rows, 'notes': self.notes}
@@ -63,7 +75,7 @@ def pct(m, lo, hi, n, digits=1):
     if m is None or (isinstance(m, float) and math.isnan(m)): return '--'
     f = '%%.%df' % digits
     if n >= 2 and not math.isnan(lo): return (f + ' ± ' + f) % (100 * m, 50 * (hi - lo))
-    if n == 1 and not math.isnan(lo): return (f + ' [' + f + ', ' + f + ']') % (100 * m, 100 * lo, 100 * hi)
+    if n == 1 and not math.isnan(lo): return ('%s (%.0f–%.0f)' % (f, 100 * lo, 100 * hi)) % (100 * m)
     return f % (100 * m)
 
 
@@ -107,16 +119,35 @@ def main_table(C, P):
     for group, variant, solver, key in spec:
         if variant not in C.variants(group) or solver not in C.solvers(group, variant): continue
         dev, _ = _cell(C, group, variant, solver, 'dev', B, 'all'); test, n = _cell(C, group, variant, solver, 'test', B, 'all')
-        tp, _ = _cell(C, group, variant, solver, 'test', B, 'proved'); tu, _ = _cell(C, group, variant, solver, 'test', B, 'unproved')
+        tp, _ = _cell(C, group, variant, solver, 'test', B, 'proved'); tu, _ = _cell(C, group, variant, solver, 'test', B, 'unproved'); tf, _ = _cell(C, group, variant, solver, 'test', B, 'free')
         pr, ln = C.efficiency(group, variant, solver, 'test', B)
-        rows.append([LABELS.get(key, key), n, dev, test, tp, tu, num(mean_of(pr), 0), num(mean_of(ln), 1)])
+        rows.append([LABELS.get(key, key), n, dev, test, tp, tu, tf, num(mean_of(pr), 0), num(mean_of(ln), 1)])
     if not rows: return None
     nt = len(C.names('test', 'all')); nd = len(C.names('dev', 'all')); ntp = len(C.names('test', 'proved')); ntu = len(C.names('test', 'unproved'))
     return Table('main', 'Problems solved (%%) within %s probes per problem: dev (%d problems) and test (%d problems; %d with a reference proof in the bank, %d statement-only).' % (B, nd, nt, ntp, ntu),
-                 ['Method', 'seeds', 'dev', 'test', 'test, proved', 'test, statement-only', 'probes / solved', 'steps / proof'], rows,
-                 notes=['mean ± half-width of the 95% t-interval over seeds; a single run (the model-free baselines) shows its Wilson interval over problems.  "Solved" means a proof that the engine replayed and the kernel checked; '
+                 ['Method', 'seeds', 'dev', 'test', 'test, proved', 'test, statement-only', 'test, no helpers', 'probes / solved', 'steps / proof'], rows,
+                 notes=['mean ± half-width of the 95% t-interval over seeds; a single run (the model-free baselines) shows its Wilson interval over problems in parentheses.  "Solved" means a proof that the engine replayed and the kernel checked; '
                         'probes and steps are means over the problems a method solved (so a method that solves more, harder problems can need more).  The test split was not used to choose anything.'],
-                 align='lrrrrrrr')
+                 align='lrrrrrrrr')
+
+
+def strict_table(C, P, variants=('bc_scratch', 'bc', 'ppo', 'ei_her', 'ei_her_boot')):
+    """the problems whose helper lemmas can be hidden: the same models with the helpers on the menu (prefix) and hidden (strict)"""
+    S = C.view('strict'); B = P.get('headline')
+    names = sorted({r['name'] for r in S.rows if r['group'] == 'main' and r.get('split') in ('dev', 'test')})
+    if not names: return None
+    rows = []
+    for v in variants:
+        if v not in C.variants('main'): continue
+        cells = []
+        for view in (C, S):
+            M = view.success('main', v, 'sample', 'dev+test', B, 'all', names=names); r = M.rates(); r = r[~np.isnan(r)]
+            cells.append(pct(*(ST.mean_ci(r) + (len(r),)), digits=1) if len(r) >= 2 else (pct(float(r[0]), NAN, NAN, 1) if len(r) == 1 else '--'))
+        rows.append([LABELS.get(v, v), cells[0], cells[1]])
+    if not rows: return None
+    return Table('strict', 'The %d dev and test problems whose helper lemmas can be hidden: solved (%%) within %s probes with the helpers on the menu (prefix regime) and hidden (strict regime).' % (len(names), B),
+                 ['Method', 'prefix (helpers available)', 'strict (helpers hidden)'], rows,
+                 notes=['Strict is the harder task: the lemmas the reference proof builds its argument on are not given.  Problems without helper lemmas are the same task in both regimes and are not in this table.'], align='lrr')
 
 
 def ablation_table(C, P, split='test'):
@@ -190,6 +221,67 @@ def level_table(C, P, variants=('bc_scratch', 'bc', 'ppo', 'ei_her', 'ei_her_boo
                  notes=['A row with few problems has an interval wider than its entry shows; read it as a profile, not a ranking.'], align='lr' + 'r' * len(present))
 
 
+def bank_table(C):
+    """the benchmark itself: problems by contest family, with or without a reference proof, by split; then by level and by provenance"""
+    probs = C.bank
+    if not probs: return None
+    classes = ['IMO', 'ISL', 'AIME', 'AMC', 'APMO', 'folklore', 'other']
+    def row(label, ps):
+        c = collections.Counter(); 
+        for p in ps: c['proved' if 'demonstration' in p else 'statement'] += 1; c[p.get('split', '?')] += 1
+        return [label, len(ps), c['proved'], c['statement'], c['train'], c['dev'], c['test']]
+    rows = []
+    for k in classes:
+        ps = [p for p in probs if EC.source_class(p.get('source')) == k]
+        if ps: rows.append(row(k, ps))
+    rows.append(row('all problems', probs))
+    for l in sorted({p.get('level') for p in probs if p.get('level') is not None}): rows.append(row('level %s' % l, [p for p in probs if p.get('level') == l]))
+    for field, values, title in (('origin', ('contest', 'adapted', 'style', 'folklore'), 'origin'), ('verified', ('answer-checked', 'recalled', 'none'), 'checked against a public source')):
+        if any(p.get(field) for p in probs):
+            for v in values:
+                ps = [p for p in probs if p.get(field) == v]
+                if ps: rows.append(row('%s: %s' % (title, v), ps))
+    return Table('bank', 'The benchmark: formal problems by contest family, level and provenance, with a kernel-checked reference proof or the statement only, and their split (train / dev / test).',
+                 ['', 'problems', 'with proof', 'statement only', 'train', 'dev', 'test'], rows,
+                 notes=['The split is by problem family (a hash of the family, so variants of one problem are never separated); origin: a problem of a named contest paraphrased (contest), a named problem changed to fit the vocabulary (adapted), '
+                        'written for the bank in the manner of a contest (style), or a classical fact (folklore); "checked" means the statement or answer was compared with a public source.'],
+                 align='lrrrrrr')
+
+
+def system_table(C):
+    r = C.repo or {}
+    if not r.get('kernel_lines'): return None
+    rows = [['trusted kernel (C++23, header)', '%d lines' % r['kernel_lines']], ['Python bindings (nanobind)', '%d lines' % r.get('bindings_lines', 0)],
+            ['independent checker (Python, written from the typing rules)', '%d lines' % r.get('checker_lines', 0)],
+            ['untrusted Python: authoring, libraries, gym, bank, generator, learner', '%d modules, %d lines' % (r.get('python_modules', 0), r.get('python_lines', 0))],
+            ['gate scripts (tests of the kernel, tactics, gym, bank, generator, learner)', '%d scripts, %d lines' % (r.get('gates', 0), r.get('test_lines', 0))],
+            ['mutants of the code in the catalogue (%d listed as equivalent to the original)' % r.get('mutants_equivalent', 0), r.get('mutants', '--')]]
+    if r.get('library_lemmas'): rows.append(['library lemmas whose proofs are recorded as actions (the corpus the learner imitates)', r['library_lemmas']])
+    if r.get('subtheorems'): rows.append(['hindsight sub-theorem goals extracted from the reference proofs', r['subtheorems']])
+    rows.append(['commit', (r.get('commit') or '?')[:10] + (' (modified)' if r.get('dirty') else '')])
+    return Table('system', 'The artefact in numbers (counted from the repository).', ['', 'value'], rows, notes=['Lines are physical lines of the files, comments and blank lines included.'], align='lr')
+
+
+HYPER = [      # (profile key, description)
+    ('seeds', 'training seeds (replicates)'), ('synth_target', 'synthetic theorems kept (pre-training pool)'), ('synth_attempts', 'generator attempts'), ('synth_sizes', 'synthetic theorems used for pre-training (scaling study)'),
+    ('pre_epochs', 'pre-training epochs'), ('pre_batch', 'batch size (decisions)'), ('ft_epochs', 'fine-tuning epochs (after pre-training)'), ('ft_lr', 'fine-tuning peak learning rate'), ('scratch_epochs', 'epochs from scratch (no pre-training)'),
+    ('rl_iters', 'expert-iteration iterations'), ('rl_episodes', 'tasks per iteration'), ('rl_probes', 'probe budget per task during training'), ('ei_updates', 'gradient steps per iteration'), ('boot_per_iter', 'library lemmas admitted per iteration at most'),
+    ('ppo_iters', 'PPO iterations'), ('ppo_episodes', 'PPO episodes per iteration'),
+    ('eval_probes', 'largest probe budget at evaluation'), ('headline', 'budget of the tables'), ('eval_budgets', 'budgets of the curves'), ('eval_time_limit', 'time limit per problem (s)'), ('eval_splits', 'evaluated splits'),
+    ('device', 'device of the training runs'), ('workers', 'worker processes per run'), ('threads', 'torch threads per process')]
+
+
+def hyper_table(C):
+    P = C.profile or {}
+    if not P: return None
+    def show(v):
+        if isinstance(v, (list, tuple)): return ', '.join(str(x) for x in v)
+        return str(v)
+    rows = [[d, show(P[k])] for k, d in HYPER if k in P]
+    rows.insert(0, ['profile', str(P.get('name'))]); rows.insert(1, ['seed list', show(P.get('seed_list') or [])])
+    return Table('hyper', 'Configuration of the experiments (the profile of the runs directory, exp_spec.py).', ['setting', 'value'], rows, align='ll')
+
+
 def generator_table(C):
     st = (C.synth or {}).get('stats'); man = (C.synth or {}).get('manifest')
     if not st or not st.get('total'): return None
@@ -260,8 +352,9 @@ def stage_ok(parts): return len(parts) >= 3 and parts[0] in ('pre', 'ft', 'rl')
 
 def soundness_table(C):
     chk = sum(v['checked'] for v in C.recheck.values()); acc = sum(v['accepted'] for v in C.recheck.values())
-    solved = sum(1 for r in C.rows if r.get('solved')); err = sum(1 for r in C.rows if r.get('error'))
-    rows = [['rows (task x method x seed) evaluated', len(C.rows)], ['rows with a kernel-checked proof', solved], ['rows that raised an error in the solver', err],
+    allr = getattr(C, 'all_rows', C.rows)
+    solved = sum(1 for r in allr if r.get('solved')); err = sum(1 for r in allr if r.get('error'))
+    rows = [['rows (task x method x seed) evaluated', len(allr)], ['rows with a kernel-checked proof', solved], ['rows that raised an error in the solver', err],
             ['proofs given to the independent checker', chk], ['accepted by the independent checker', acc], ['rejected', chk - acc]]
     return Table('soundness', 'Soundness of the evaluation.', ['quantity', 'count'], rows, notes=['A row counts as solved only after the engine replayed its proof and the kernel accepted the term; the independently written checker (recheck.py) re-checks the same terms.'], align='lr')
 
@@ -298,7 +391,7 @@ def throughput_tables(C):
 def discoveries(C, P):
     """statement-only problems of any split that some evaluated run solved: [(name, split, variant, solver, seed, probes, steps)] (new, kernel-checked proofs)"""
     out = {}
-    for r in C.rows:
+    for r in getattr(C, 'all_rows', C.rows):
         if r.get('solved') and not C.info.get(r['name'], {}).get('proved', True):
             key = r['name']; cur = out.get(key)
             if cur is None or r['probes'] < cur[5]: out[key] = (r['name'], r.get('split'), r['variant'], r['solver'], r['seed'], r['probes'], r.get('steps'))
@@ -308,10 +401,10 @@ def discoveries(C, P):
 def all_tables(C):
     P = C.profile or {}
     T = collections.OrderedDict()
-    for key, t in (('main', main_table(C, P)), ('ablations', ablation_table(C, P)),
+    for key, t in (('system', system_table(C)), ('bank', bank_table(C)), ('main', main_table(C, P)), ('strict', strict_table(C, P)), ('ablations', ablation_table(C, P)),
                    ('solvers', solver_table(C, P, 'solvers', 'solvers', 'The same networks under different provers: problems solved (%%) within %s probes.')),
                    ('mw', solver_table(C, P, 'mw', 'mw', 'The manager-worker agent and its ablations: problems solved (%%) within %s probes.')),
-                   ('scaling', scaling_table(C, P)), ('levels', level_table(C, P)), ('generator', generator_table(C)), ('library', library_table(C, P)), ('cost', cost_table(C, P)), ('soundness', soundness_table(C))):
+                   ('scaling', scaling_table(C, P)), ('levels', level_table(C, P)), ('generator', generator_table(C)), ('library', library_table(C, P)), ('cost', cost_table(C, P)), ('soundness', soundness_table(C)), ('hyper', hyper_table(C))):
         if t is not None: T[key] = t
     for k, t in throughput_tables(C).items(): T[k] = t
     return T

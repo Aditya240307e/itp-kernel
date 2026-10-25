@@ -8,3 +8,18 @@ build/
 /artifacts/
 steps_*.pkl
 /dist/
+# experiment outputs (scripts/*.sh write here by default) and machine-local settings
+/runs/
+/scripts/local.env
+# paper build products (the generated tables/figures are rebuilt by `make -C paper`)
+/paper/generated/*
+!/paper/generated/.gitkeep
+/paper/main.pdf
+/paper/*.aux
+/paper/*.bbl
+/paper/*.blg
+/paper/*.fdb_latexmk
+/paper/*.fls
+/paper/*.log
+/paper/*.out
+/paper/*.toc

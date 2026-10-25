@@ -48,7 +48,7 @@ def completeness(C):
     for g, v, s in keys:
         M = C.success(g, v, s, 'dev+test', None, 'all')
         if M.n_missing: W.append('%s / %s / %s: %d of %d (seed, problem) results are missing' % (g, v, s, M.n_missing, M.data.size))
-    errs = collections.Counter((r['variant'], r['solver']) for r in C.rows if r.get('error'))
+    errs = collections.Counter((r['variant'], r['solver']) for r in getattr(C, 'all_rows', C.rows) if r.get('error'))
     for (v, s), n in errs.items(): W.append('%s / %s: %d rows carry a solver error (counted as unsolved)' % (v, s, n))
     return W
 
@@ -58,6 +58,12 @@ def numbers(C, T, P):
     B = P.get('headline')
     N['headline_budget'] = B; N['n_dev'] = len(C.names('dev', 'all')); N['n_test'] = len(C.names('test', 'all')); N['n_test_proved'] = len(C.names('test', 'proved')); N['n_test_unproved'] = len(C.names('test', 'unproved'))
     N['n_seeds'] = len(P.get('seed_list') or [])
+    for k in ('kernel_lines', 'bindings_lines', 'checker_lines', 'python_modules', 'python_lines', 'test_lines', 'gates', 'mutants', 'mutants_equivalent', 'library_lemmas', 'subtheorems'):
+        if (C.repo or {}).get(k) is not None: N['repo_' + k] = C.repo[k]
+    if C.bank:
+        N['bank_problems'] = len(C.bank); N['bank_proved'] = sum(1 for p in C.bank if 'demonstration' in p); N['bank_statement_only'] = N['bank_problems'] - N['bank_proved']
+        for sp in ('train', 'dev', 'test'): N['bank_' + sp] = sum(1 for p in C.bank if p.get('split') == sp)
+        for k in ('IMO', 'ISL', 'AIME', 'AMC', 'APMO'): N['bank_' + k.lower()] = sum(1 for p in C.bank if EC.source_class(p.get('source')) == k)
     for group, variants in (('main', TB.MAIN_ORDER), ('baselines', ['baselines'])):
         for v in variants:
             if v not in C.variants(group): continue
@@ -75,8 +81,10 @@ def numbers(C, T, P):
     st = (C.synth or {}).get('stats')
     if st and st.get('total'):
         N['gen_total'] = st['total']; N['gen_skeletons'] = st['classes']['skeleton']['observed']; N['gen_skeleton_singletons'] = st['classes']['skeleton']['singletons']
-        N['gen_chao1'] = round(st['classes']['skeleton']['chao1']); N['gen_lemmas'] = st['lemmas']['distinct_applied']; N['gen_kinds'] = st['kinds']['distinct_kinds']
+        N['gen_chao'] = round(st['classes']['skeleton']['chao1']); N['gen_lemmas'] = st['lemmas']['distinct_applied']; N['gen_kinds'] = st['kinds']['distinct_kinds']
         N['gen_mean_steps'] = round(st['proofs']['mean_steps'], 2)
+    pm = [f.get('n_params') for f in C.finals.values() if f.get('n_params')] or [((C.bench or {}).get('throughput') or {}).get('world', {}).get('params')]
+    if pm and pm[0]: N['model_params_m'] = round(pm[0] / 1e6, 2)
     chk = sum(v['checked'] for v in C.recheck.values()); acc = sum(v['accepted'] for v in C.recheck.values())
     N['recheck_checked'] = chk; N['recheck_accepted'] = acc
     b = (C.bench or {}).get('throughput')
@@ -115,7 +123,7 @@ def md_report(R, C, T, P, figs, warnings, N):
         if len(warnings) > 60: add('* ... and %d more' % (len(warnings) - 60))
     else: add('None: every evaluation row is present and no solver raised.')
     add('')
-    order = [('main', 'Main results', 'fig_budget'), ('ablations', 'Ablations', 'fig_ablations'), ('scaling', 'Scaling with the amount of synthetic data', 'fig_scaling'), ('solvers', 'Provers on the same networks', 'fig_solvers'),
+    order = [('system', 'The artefact', None), ('bank', 'The benchmark', None), ('main', 'Main results', 'fig_budget'), ('strict', 'Hiding the helper lemmas of a problem', None), ('ablations', 'Ablations', 'fig_ablations'), ('scaling', 'Scaling with the amount of synthetic data', 'fig_scaling'), ('solvers', 'Provers on the same networks', 'fig_solvers'),
              ('mw', 'Manager-worker agent', None), ('levels', 'By difficulty and by contest', 'fig_levels'), ('generator', 'The synthetic theorem set', 'fig_generator'), ('library', 'Bootstrapped library', 'fig_library'),
              ('cost', 'Training cost', 'fig_learning'), ('bench_solvers', 'Throughput', 'fig_throughput'), ('bench_workers', None, None), ('bench_world', None, None), ('bench_kernel', None, None), ('soundness', 'Soundness', None)]
     shown_figs = set()
@@ -141,6 +149,17 @@ def md_report(R, C, T, P, figs, warnings, N):
     return '\n'.join(L)
 
 
+def write_problems(C, out):
+    """problems.csv: one row per problem of the bank"""
+    import csv
+    with open(os.path.join(out, 'problems.csv'), 'w', newline='') as f:
+        w = csv.writer(f); w.writerow(['name', 'source', 'year', 'level', 'split', 'family', 'reference_proof', 'reference_length', 'helpers', 'origin', 'verified', 'statement_digest'])
+        for p in C.bank:
+            d = p.get('demonstration') or {}
+            w.writerow([p.get('name'), p.get('source'), p.get('year'), p.get('level'), p.get('split'), p.get('family'), int('demonstration' in p), d.get('length', ''), len(p.get('helpers') or []),
+                        p.get('origin', ''), p.get('verified', ''), p.get('statement_digest')])
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('runs'); ap.add_argument('--out', default=''); ap.add_argument('--no-figures', action='store_true'); ap.add_argument('--data', default=''); ap.add_argument('--synth', default=''); ap.add_argument('--profile', default='')
@@ -157,6 +176,7 @@ def main(argv=None):
     warnings = completeness(C) + C.warnings
     N = numbers(C, T, P)
     write_numbers(N, out)
+    if C.bank: write_problems(C, out)
     with open(os.path.join(out, 'report.md'), 'w') as f: f.write(md_report(R, C, T, P, figs, warnings, N))
     print('report: %d tables, %d figures, %d numbers, %d warnings -> %s' % (len(T), len(figs), len(N), len(warnings), out))
     return 0

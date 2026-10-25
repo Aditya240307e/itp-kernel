@@ -13,12 +13,15 @@ Definitions (they are the definitions of the paper):
               "solved within B" is read off its rows for every B (exact for sample, ida, mcts, mw and blind; a run stopped by the per-problem time limit counts as unsolved at every larger budget too).
   replicate   a whole run of the pipeline from its seed (pre-training, fine-tuning, reinforcement learning, evaluation).  Intervals over replicates say how much a result depends on the seed;
               intervals over problems (exp_stats.paired_problem_bootstrap) say how much it depends on WHICH problems the benchmark holds.
-  subsets     `all` (every problem of the split) and `proved` (those with a reference proof in the bank: they are solvable with the library, a statement-only problem may or may not be).
+  subsets     `all` (every problem of the split), `proved` (those with a reference proof in the bank: they are solvable with the library, a statement-only problem may or may not be), `unproved` (statement
+              only) and `free` (problems with no helper lemma of their own).
+  regimes     `prefix` (every global before the problem is on the menu, the problem's own helper lemmas included: the default of all tables) and `strict` (the helper lemmas hidden; a different task only for the
+              problems whose reference proof proves its lemmas inline).  A problem without helper lemmas is one task in both.
 """
 import os as _os, sys as _sys; _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..')); import itp_paths  # noqa: E402,F401
 import os, sys, json, glob, collections, math
 import numpy as np
-import exp_stats as ST
+import exp_stats as ST, exp_repo as RP
 
 NAN = float('nan')
 
@@ -40,6 +43,15 @@ def read_jsonl(path):
                 except ValueError: pass
     except OSError: pass
     return out
+
+
+def resolve(path, near=None):
+    """an existing path for `path` (relative to the working directory, to the repository root, or to the directory `near` belongs to), else ''"""
+    if os.path.isabs(path): return path if os.path.exists(path) else ''
+    for base in ('', itp_paths.ROOT, os.path.dirname(os.path.abspath(near)) if near else ''):
+        cand = os.path.join(base, path) if base else path
+        if os.path.exists(cand): return os.path.abspath(cand)
+    return ''
 
 
 def source_class(source):
@@ -104,10 +116,17 @@ class Collected:
                 lem = read_json(os.path.join(rd, 'lemmas.json'))
                 if lem: self.finals.setdefault(rid, {})['lemma_file'] = {'records': len(lem.get('records', [])), 'block_digest': lem.get('block_digest'), 'rejected': lem.get('rejected', {}),
                                                                             'lengths': [r.get('length') for r in lem.get('records', [])], 'origins': [(r.get('origin') or {}).get('kind') for r in lem.get('records', [])]}
+        ddir = resolve((self.profile or {}).get('dataset') or os.path.join(R, 'data'), R)
+        self.dataset_dir = ddir
+        self.bank = (read_json(os.path.join(ddir, 'bank.json'), {}) or {}).get('problems') or [] if ddir else []
+        self.repo = RP.facts(); self.repo.update(RP.dataset_facts(ddir) if ddir else {})
         sd = os.path.join(R, 'synth')
         self.synth = {'stats': read_json(os.path.join(sd, 'stats.json')), 'manifest': read_json(os.path.join(sd, 'manifest.json')), 'verification': read_json(os.path.join(sd, 'verification.json'))}
         bd = os.path.join(R, 'bench')
         self.bench = {'throughput': read_json(os.path.join(bd, 'bench.json')), 'kernel': read_json(os.path.join(bd, 'kernel.json'))}
+        self.all_rows = self.rows
+        self.rows = [r for r in self.all_rows if r.get('regime', 'prefix') == 'prefix']          # the default view: every table is about the prefix regime unless it says otherwise (view('strict'))
+        self.helpers = {p['name']: len(p.get('helpers') or []) for p in self.bank}
         for rid, e in self.eval_runs.items():
             if e['meta']: self.meta = e['meta']; break
         if not self.meta:
@@ -133,7 +152,15 @@ class Collected:
         names = {r['name'] for r in self.rows if (group is None or r['group'] == group) and r.get('split') in sp}
         if subset == 'proved': names = {n for n in names if self.info.get(n, {}).get('proved', True)}
         elif subset == 'unproved': names = {n for n in names if not self.info.get(n, {}).get('proved', True)}
+        elif subset == 'free': names = {n for n in names if not self.helpers.get(n)}                     # problems with no helper lemma of their own: the prefix and the strict regime are one task
         return sorted(names)
+
+    def view(self, regime):
+        """a shallow copy of this object whose rows are those of one regime ('prefix': the default; 'strict': the problem's helper lemmas hidden, only for the problems where that is a different task)"""
+        import copy
+        v = copy.copy(self)
+        v.rows = [r for r in self.all_rows if r.get('regime', 'prefix') == regime]
+        return v
 
     def _rows_of(self, group, variant, solver):
         return [r for r in self.rows if r['group'] == group and r['variant'] == variant and r['solver'] == solver]

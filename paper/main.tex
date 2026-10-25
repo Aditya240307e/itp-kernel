@@ -1,0 +1,285 @@
+% main.tex -- the paper (TMLR format).  Draft skeleton: everything that describes the SYSTEM is written; everything that depends on the RESULTS is pulled from paper/generated/ (made by
+% scripts/07_report.sh from a runs directory) or marked \todo{...}.  A number that is not in generated/numbers.tex prints as a bold ??name instead of stopping the build.
+% Build:  make -C paper      (needs a LaTeX installation with latexmk, or run pdflatex / bibtex / pdflatex / pdflatex by hand)
+\documentclass[10pt]{article}
+\usepackage{tmlr}
+% camera-ready:  \usepackage[accepted]{tmlr}      de-anonymised preprint:  \usepackage[preprint]{tmlr}
+\input{math_commands.tex}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{graphicx}
+\usepackage{amsmath,amssymb}
+\usepackage[table]{xcolor}
+\usepackage{microtype}
+
+% ------------------------------------------------------------------------------------------------------------------------------------------------------------ generated material
+\IfFileExists{generated/numbers.tex}{\input{generated/numbers.tex}}{}
+\newcommand{\N}[1]{\ifcsname num#1\endcsname\csname num#1\endcsname\else\textbf{??#1}\fi}          % \N{TestEiHer}: a number made by exp_report.py (generated/numbers.tex)
+\newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}                                                    % to be removed before submission
+\newcommand{\missing}[1]{\fbox{\parbox{0.85\linewidth}{\centering\small #1 is missing: run \texttt{scripts/07\_report.sh}}}}
+\newcommand{\inputtable}[1]{\IfFileExists{generated/tables/#1.tex}{\input{generated/tables/#1.tex}}{\missing{table \texttt{\detokenize{#1}}}}}
+\newcommand{\genfigure}[3]{%                                                                           % name, width (fraction of the line), caption; the label is fig:name
+  \begin{figure}[t]\centering
+  \IfFileExists{generated/figures/#1.pdf}{\includegraphics[width=#2\linewidth]{generated/figures/#1.pdf}}{\missing{figure \texttt{\detokenize{#1}}}}
+  \caption{#3}\label{fig:#1}\end{figure}}
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\probe}{\emph{probe}}
+
+\title{A Small Trusted Kernel as a Learning Environment: Synthetic Theorems, Hindsight, and Olympiad Algebra and Number Theory}
+\author{\name Anonymous \email anonymous@example.org \\ \addr Anonymous}                              % hidden by the tmlr style unless [accepted] or [preprint]
+\def\month{MM}\def\year{YYYY}\def\openreview{\url{https://openreview.net/forum?id=XXXX}}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+A learned theorem prover is only as trustworthy as the checker behind it, yet the environments in which provers are trained usually inherit the size of the proof assistant they are built on.
+We present a gym for learning olympiad algebra and number theory against a \emph{small trusted kernel}: a \N{RepoKernelLines}-line C++23 kernel for dependent type theory with definitional proof irrelevance, quotients and a deterministic work budget, a second checker written independently from the typing rules, and an untrusted Python layer with tactics, decision procedures that emit kernel-checkable certificates, and an environment without a text interface in which an agent sees goals as tokens and chooses among the options the engine declares legal.
+We contribute (i) a benchmark of \N{BankProblems} formal problems from the IMO, its shortlists, the AIME, the AMC, the APMO and classical sources, \N{BankProved} of them with kernel-checked reference proofs, split by problem family; (ii) a generator of kernel-checked synthetic theorems and an analysis of how far it saturates; (iii) hindsight relabelling in which every goal an attempt closes is a kernel-checked theorem, used as a training goal, as training data and, after checking, as a lemma of a growing library that never sees a held-out problem; and (iv) a protocol that measures provers in engine probes, with training seeds as replicates, and a study of synthetic pre-training, PPO, expert iteration, hindsight, a bootstrapped library, MCTS and a manager--worker agent over \N{NSeeds} seeds.
+\todo{two sentences: the main result of Table~\ref{tab:main} and the clearest negative result}
+Kernel, gym, data, scripts and logs are released.
+\end{abstract}
+
+% ============================================================================================================================================================ 1
+\section{Introduction}\label{sec:intro}
+
+Systems that search for formal proofs are checked by a proof assistant: whatever a neural network proposes, a kernel accepts or refuses, so a wrong guess costs time and cannot make a false statement provable.
+This is the property that makes formal mathematics attractive as a training signal, and it is the reason to keep the kernel small enough to read~\citep{pollack1998believe}.
+The environments in which provers are trained, however, are mostly built on the large proof assistants whose libraries they need (Lean, Coq, Isabelle, HOL Light;~\citealp{demoura2015lean,harrison1996hol,nipkow2002isabelle,yang2019coqgym,bansal2019holist,yang2023leandojo}), and the objects a learner manipulates are the proof assistant's text.
+
+We ask what can be learned when the whole stack is small enough to be audited, instrumented and run on a laptop-class machine: the kernel, the tactics, the library, the environment, the data generator and the learners.
+We build such a stack and use it on a deliberately narrow target, algebra and number theory at the level of olympiads, where statements are short, a large part of the work is calculation that decision procedures can certify, and the part that is not is the choice of lemma and of the next step.
+
+\paragraph{Contributions.}
+\begin{enumerate}
+\item \textbf{A trusted kernel and a gym on top of it} (\S\ref{sec:system}): a \N{RepoKernelLines}-line kernel, a separately written checker, tactics and certified decision procedures (\code{ring}, \code{linarith}, \code{nlinarith}) above the kernel, and a Gymnasium environment in which goals are data, actions are chosen among legal options and the cost of a search is counted in \probe{}s.
+\item \textbf{A benchmark} (\S\ref{sec:bank}) of \N{BankProblems} formal problems with texts, a machine-checked faithfulness test of each formal statement against an executable specification, \N{BankProved} kernel-checked reference proofs, provenance labels, a screen for near-duplicates, and splits by problem family.
+\item \textbf{A synthetic theorem generator} (\S\ref{sec:synth}) that grows proof trees backwards from library lemmas, labels every theorem by depth, lemmas and hypotheses, excludes the benchmark's statements by digest and by shape, and comes with saturation statistics.
+\item \textbf{Hindsight with a kernel} (\S\ref{sec:methods}): every goal closed during an attempt is a theorem with a proof the kernel re-checks; we use these theorems as goals, as training data, and (train side only) as lemmas of a library that grows during training.
+\item \textbf{A protocol and a study} (\S\ref{sec:protocol}, \S\ref{sec:results}) with \N{NSeeds} replicates per method: pre-training on synthetic theorems, behaviour cloning, PPO, expert iteration, hindsight and library ablations, five provers, throughput and memory.
+\end{enumerate}
+
+\paragraph{Scope.}
+This paper does not claim state-of-the-art results on an established benchmark. The benchmark is small and in a purpose-built library; the networks are small (about \N{ModelParamsM}M parameters) and trained from scratch without natural-language pre-training; the real numbers are in \S\ref{sec:results}, and \S\ref{sec:limits} lists what they do not show.
+
+% ============================================================================================================================================================ 2
+\section{Related work}\label{sec:related}
+
+\paragraph{Environments and benchmarks for formal proof.}
+HOList~\citep{bansal2019holist}, CoqGym~\citep{yang2019coqgym}, GamePad~\citep{huang2019gamepad} and LeanDojo~\citep{yang2023leandojo} expose a proof assistant to learners; miniF2F~\citep{zheng2022minif2f} provides olympiad-level statements in several systems; INT~\citep{wu2021int} generates inequality problems synthetically.
+Peano~\citep{poesia2023peano} is closest in spirit: a small dependently typed proof environment whose set of valid next steps is finite, used to learn from scratch.
+Our environment differs in having its own kernel with a second checker, a library from Peano arithmetic to elementary number theory with certified decision procedures, a benchmark of competition problems rather than textbook exercises, and an action interface that is options and typed term-building rather than text.
+
+\paragraph{Neural theorem proving.}
+Language-model provers~\citep{polu2020generative,han2022proof,polu2023formal,xin2024deepseek,ren2025deepseekproverv2,chen2025seedprover}, tree search~\citep{lample2022hypertree,kaliszyk2018reinforcement,loos2017deep} and reinforcement learning at scale~\citep{hubert2025olympiad,trinh2024solving} reach far beyond what we attempt; they work in Lean or in geometry with large models and compute.
+We study the opposite regime: small networks, an explicit probe budget, many seeds, and a trusted stack that fits in one repository.
+
+\paragraph{Synthetic data, curricula, hindsight.}
+Synthetic problems~\citep{wu2021int,wang2020learning,xin2024deepseek}, curricula of statements~\citep{polu2023formal} and self-generated conjectures with hindsight relabelling~\citep{poesia2024learning} supply training signal where human proofs are scarce.
+Hindsight experience replay~\citep{andrychowicz2017hindsight} and expert iteration~\citep{anthony2017thinking,silver2017mastering} are the general ideas; here a relabelled goal is a theorem whose proof the kernel re-checks, so relabelled data are correct by construction, and the theorems can be admitted into the library as lemmas under a leakage filter.
+
+% ============================================================================================================================================================ 3
+\section{The system}\label{sec:system}
+
+\subsection{A small trusted kernel and a second checker}\label{sec:kernel}
+The kernel (\N{RepoKernelLines} lines of C++23 plus \N{RepoBindingsLines} lines of bindings~\citep{jakob2022nanobind}) implements a dependent type theory in the tradition of the calculus of constructions~\citep{coquand1988calculus}: $\Pi$, $\lambda$ and \code{let}; inductive families with parameters and indices (strict positivity, universe rule); structural recursion by a guard checker; a proposition universe with definitional proof irrelevance; quotient types (the integers are the quotient of $\mathbb N\times\mathbb N$); no universe polymorphism; and binary natural numbers so that the numerals of competition problems are cheap.
+Terms are hash-consed nodes; bound variables are de~Bruijn indices and hypotheses are context levels; conversion is by normalisation by evaluation.
+Every kernel call runs under a deterministic \emph{work meter}: a pathological term fails after a bounded number of steps instead of hanging, which a learning loop that submits millions of untrusted terms needs.
+The kernel was developed as a differential twin of an earlier frozen kernel (an oracle that shares no code with it): normalisation, conversion and typing are compared on random terms and on real proofs by the gates of the repository (\code{docs/KERNEL\_DESIGN.md}).
+A \emph{second checker}, \N{RepoCheckerLines} lines of Python written from the typing rules without reading the kernel, re-checks a proof and everything it depends on; the evaluations of \S\ref{sec:results} pass every solved proof through it.
+
+\subsection{An untrusted layer with certificates}\label{sec:authoring}
+Everything convenient lives outside the kernel: a tactic language, the library (unary and binary naturals, the integers, ordered-ring laws, divisibility, B\'ezout, gcd, primes), and the decision procedures \code{ring}, \code{linarith}, \code{nlinarith}, \code{linear\_combination} and \code{interval\_cases}.
+A procedure searches in untrusted code and returns a \emph{proof term}; the kernel checks the term, so a bug in a procedure can only make it fail.
+\inputtable{system}
+
+\subsection{The gym: goals as data, options, probes}\label{sec:gym}
+An episode is an attempt at one statement. The state is a partial proof with open goals, and the agent works on the first one.
+A goal is shown to the agent as integer tokens (hypotheses and target in prefix order, constants by global index, variables by level or de~Bruijn index); there is no text.
+The engine lists the legal action kinds (\code{APPLY}, \code{APPLY\_WITH}, \code{RING}, \code{LINARITH}, \code{NLINARITH}, \code{CASES}, \code{INDUCT}, \code{REWRITE}, \code{CLAIM}, \code{FORWARD}, \code{USE}, \code{REFINE}, \ldots) and, after a kind is chosen, the legal arguments: a premise, a hypothesis, a numeral; when an action needs a term (the witness of \code{USE}, the statement of a \code{CLAIM}) the agent \emph{says} it token by token in a typed term builder that offers only tokens that can still lead to a well-typed term.
+An assembled action is \emph{probed}: the engine tries it on the goal and either applies it or refuses it.
+A \probe{} is one such try, whoever asks; refused tries cost as much as accepted ones, and every budget in this paper is a number of probes, so that provers with very different internals are compared at equal engine work.
+A finished proof term is checked by the kernel, and only then does a task count as solved.
+
+% ============================================================================================================================================================ 4
+\section{The benchmark}\label{sec:bank}
+
+\paragraph{Problems.}
+The bank holds \N{BankProblems} formal problems (Table~\ref{tab:bank}). Each has the problem in words, its source, topics and a level from 1 (one routine step) to 5 (hard olympiad), a formal statement over the integers (natural numbers appear as integers with a nonnegativity hypothesis; ``determine all'' problems are stated as an equivalence with the answer set), and, for \N{BankProved} problems, a reference proof recorded as a sequence of actions that was replayed and kernel-checked.
+The other \N{BankStatementOnly} problems are statement-only: their formal statements are checked and in the benchmark, but no proof is known inside the library; they may not be provable with it, and we report them separately (\S\ref{sec:results}).
+Inequalities that are over the reals in the original are stated for integers, because the library has no real numbers yet.
+
+\paragraph{Faithfulness.}
+A formal statement is only useful if it says what the words say. Each problem carries an executable specification of its meaning, and the statement is evaluated by a semantic evaluator on grids of small values and must agree with the specification; for answer problems the answer is also found by brute force.
+For each problem the catalogue lists deliberately wrong variants of the statement (a dropped hypothesis, a changed bound, a swapped relation) that the check must reject, or documents why a variant means the same.
+
+\paragraph{Provenance.}
+The competition texts are \emph{paraphrases}: the bank was written without a licence to redistribute the official wording, and some items were reconstructed from memory when no source text was at hand. Every problem carries an \code{origin} (a named contest problem paraphrased, a named problem adapted to the vocabulary, a problem written in the manner of a contest, or a classical fact) and a \code{verified} label (statement or answer compared with a public source, recalled, or no check applies).
+The benchmark should therefore not be cited as a copy of the official problems; Table~\ref{tab:bank} lists the composition, and the dataset card lists the label of every problem.
+\inputtable{bank}
+
+\paragraph{Splits and leakage.}
+Problems are assigned to train (70\%), dev (10\%) and test (20\%) by a salted hash of their \emph{family}, so variants of one problem are never separated; the split rule is frozen and every statement has an $\alpha$-invariant digest.
+A three-layer screen (digest equality, an executable-meaning comparison on a grid of values, and manual review) found near-duplicates among the problems; they are grouped into families.
+Nothing from dev or test is a goal, a demonstration or a lemma in training: the synthetic generator excludes their statements by digest and by shape, and the lemma library of \S\ref{sec:methods} refuses any lemma that says what a held-out problem says.
+
+\paragraph{Regimes.}
+In the \emph{prefix} regime every global before the problem is on the menu, including the helper lemmas written for that problem; in the \emph{strict} regime those helpers are hidden. For \N{BankProblems} problems, most have no helper and the two regimes coincide; for the others the prefix regime can be much easier (a helper may \emph{be} the statement).
+We therefore report the prefix regime on all problems, the subset without helpers (where nothing is given away), and the strict regime where it differs (Table~\ref{tab:strict}).
+
+% ============================================================================================================================================================ 5
+\section{Synthetic theorems}\label{sec:synth}
+
+\paragraph{Construction.}
+A theorem is made by growing a proof tree backwards from a goal that is the conclusion of a library lemma, at arguments drawn so that the lemma's premises hold at a random \emph{witness model} (integers for the variables). The engine then applies library lemmas to open goals (\code{APPLY}, or \code{APPLY\_WITH} when a term must be supplied), accepting a step only if every new goal is still true at the model.
+A leaf that holds at every sample point is closed (by a premise-free lemma or a decision procedure); a leaf that does not is \emph{lifted} to a hypothesis of the theorem, unless a decision procedure can derive it from the other hypotheses. The result is a statement $\forall \vec x.\,H_1\to\dots\to H_m\to C$ with a proof in the agent's own action language.
+Each theorem is replayed in a fresh engine and kernel-checked before it exists, and again from its own data by an independent verifier; a bug in the generator can only make a theorem disappear, never make a false one appear. The generator is deterministic given a seed and an index.
+
+\paragraph{Leakage control.}
+Statements of the benchmark (all splits), of library lemmas and of sub-theorem goals are excluded by digest, and statements with the shape of a benchmark statement are excluded as well (\code{--exclude-dataset}). The synthetic set contains no benchmark problem.
+
+\paragraph{Diversity and saturation.}
+Table~\ref{tab:generator} and Figure~\ref{fig:fig_generator} describe the set that was generated for the experiments: depth, steps, the action kinds that occur, the lemmas applied, and the number of distinct proof skeletons observed, with the Good--Turing coverage~\citep{good1953population} and the Chao1 estimate~\citep{chao1984nonparametric} of how many exist.
+\inputtable{generator}
+\genfigure{fig_generator}{0.98}{The synthetic set: (a) distinct proof skeletons, statement shapes and recipes against the number of theorems drawn, (b) the action kinds in the proofs, (c) the depth of the proof trees.}
+
+\paragraph{What the data are not.}
+The proofs are backward chains: they teach premise selection and term building, and almost no \code{CASES}, \code{INDUCT}, \code{REWRITE}, \code{CLAIM} or \code{FORWARD}. Statements are true by construction and not interesting by design; hypotheses come out of the proof rather than being posed. Whether such data help on olympiad problems is an empirical question that \S\ref{sec:results} answers by varying the amount (Figure~\ref{fig:fig_scaling}).
+
+% ============================================================================================================================================================ 6
+\section{Learning methods}\label{sec:methods}
+
+\paragraph{Policy network.}
+The network encodes a goal with a transformer encoder over its tokens~\citep{vaswani2017attention} and assembles an action by a sequence of decisions with a GRU decoder~\citep{cho2014learning}. At each decision it scores the engine's \emph{options} by a dot product with a query built from the goal, the decoder state, the decision's name, the action kind and the type of the hole being filled.
+Options are rows (a global with the symbols of its type and the overlap with the goal, a hypothesis, a numeral, a kind, a structural token), so nothing is learned per problem and a lemma never seen in training can still be scored by what it talks about. Heads predict the value (the number of actions still needed), a critic for MCTS and PPO, a manager decision (will the next action be a \code{CLAIM}) and the size of the statement. The default size has about \N{ModelParamsM}M parameters.
+
+\paragraph{Behaviour cloning and pre-training.}
+Behaviour cloning minimises the cross-entropy over the options of every non-forced decision on the proofs of the train split (reference proofs, library lemmas, sub-theorems), with AdamW and a cosine schedule. \emph{Synthetic pre-training} first trains on the proofs of $N$ synthetic theorems only, then continues on the benchmark's train split; $N$ is varied to give the scaling study.
+
+\paragraph{Provers.}
+All provers return proofs that the engine replays and the kernel checks.
+\textbf{blind}: iterative deepening on the engine's own action costs~\citep{korf1985depth}, no learning; \textbf{uniform}: uniformly random legal actions; \textbf{sample}: the network samples every decision, episode after episode, until the probes are spent (pass@$k$ in probes); \textbf{greedy}: the most probable decision; \textbf{ida}: IDA* on the negative log-probabilities of the policy; \textbf{mcts}: PUCT~\citep{kocsis2006bandit,silver2017mastering} over proof states, with the value head or the critic; \textbf{mw}: the manager--worker prover.
+The manager--worker prover splits the job of saying \emph{what to prove next} from the job of proving it: at a goal the manager head decides whether to propose a \code{CLAIM}; if so it is said token by token, and a worker (the same network with \code{CLAIM} forbidden) proves it in isolation under its own probe budget; a proved claim is transplanted into the real proof by replaying all actions, so nothing the manager or worker says is trusted. All probes of all parts count against one budget.
+
+\paragraph{PPO.}
+Proximal policy optimisation~\citep{schulman2017ppo} on the decisions of the assembler, one time step per \emph{action} (the decisions that assemble an action share its advantage); the only reward is a kernel-checked proof, minus a small price per action and per refused action; GAE advantages from a critic head that also sees the fraction of the budget left; a behaviour-cloning term keeps the policy near the train demonstrations.
+
+\paragraph{Expert iteration.}
+Each iteration draws tasks from the goals below, attacks them with an \emph{actor} (any prover above), and trains on a mixture of the reference proofs of the train split, the proofs of whole tasks that the kernel accepted, and (with hindsight) the sub-theorems that attempts proved on the way~\citep{anthony2017thinking}.
+\emph{Goals} are the train problems of the benchmark, the sub-theorems of train proofs, and synthetic theorems; nothing from dev or test is a goal.
+
+\paragraph{Hindsight.}
+An attempt that fails still proves things: every goal it closed (a subtree of its proof tree, a goal a search closed on the way, a claim a worker proved) is a theorem of its own, the hypotheses and target closed over, with a proof. We replay each such proof in a fresh proof state and let the kernel check it before it is kept; the steps of the proofs are training data and the statements are goals for later iterations. This is hindsight relabelling~\citep{andrychowicz2017hindsight,poesia2024learning} with the guarantee that a relabelled goal is a theorem.
+
+\paragraph{Bootstrapped library.}
+With \code{--bootstrap}, a hindsight theorem that can be said and proved from the base library alone (and the lemmas admitted before it) becomes a global $\code{boot\_}n$ of the world: the kernel checks its proof, and the independent checker reads it like any other lemma. A lemma is refused if it comes from a dev or test problem, is a statement of the benchmark or of the library, says the same as a held-out problem on a grid of values, is shorter than a minimum (a single lemma application is not a lemma) or longer than a maximum. A model trained with a library is evaluated with it.
+
+% ============================================================================================================================================================ 7
+\section{Experimental protocol}\label{sec:protocol}
+
+\paragraph{Tasks and success.}
+A \emph{task} is a problem in a regime (the prefix regime unless stated). A task is \emph{solved within $B$ probes} if some prover returned a proof that the engine replayed and the kernel accepted after at most $B$ probes; for runs with re-checking the independent checker accepted it as well. A prover is run once at the largest budget and every smaller budget is read off the same run (the budget only truncates a run, so this is exact; a run stopped by the per-problem time limit counts as unsolved at every larger budget).
+
+\paragraph{Replicates and statistics.}
+A \emph{replicate} is a whole run of the pipeline from its seed: pre-training, fine-tuning, reinforcement learning and evaluation (the seed also seeds the sampling of the prover). Learners that continue from the behaviour-cloned network share its checkpoint of the same seed, and comparisons are paired by seed.
+We report the mean over seeds with a 95\% Student-$t$ interval; the model-free baselines are single runs and show a Wilson interval~\citep{wilson1927probable} over problems. Differences between methods are paired $t$-tests over seeds with Holm's correction~\citep{holm1979simple} within a family of comparisons, accompanied by a paired bootstrap over problems~\citep{efron1979bootstrap}, which ignores training noise but shows how much the result depends on which problems the benchmark holds. With few seeds the first interval is wide by construction~\citep{henderson2018deep,agarwal2021deep}.
+
+\paragraph{Selection and leakage.}
+The epoch of behaviour cloning is selected on the dev split (teacher-forced loss); reinforcement-learning runs are evaluated at their last iteration, with no selection. No hyper-parameter was tuned on the test split, and the test split is the headline of every table. Dev numbers are optimistic, because dev selects the starting checkpoint.
+
+\paragraph{Configuration and machine.}
+Table~\ref{tab:hyper} (appendix) lists every setting; \todo{machine, from generated/report.md: CPU, cores, memory, GPU, software versions, wall-clock of the whole matrix}.
+
+% ============================================================================================================================================================ 8
+\section{Results}\label{sec:results}
+
+\todo{Write this section after the full runs. Each subsection below has its table or figure in place; the text should say what the table shows, with the numbers from generated/numbers.tex via \texttt{\textbackslash N\{...\}}, and say where the effect is not distinguishable from noise.}
+
+\subsection{Main comparison}
+\inputtable{main}
+\genfigure{fig_budget}{0.98}{Problems solved (\%) against the number of probes per problem (log scale), dev and test. Bands: 95\% $t$-interval over seeds (Wilson interval over problems for the single-run baselines).}
+\todo{what the table and figure show: ordering of methods at the headline budget, how the curves separate with the budget, proved vs.\ statement-only problems, the effect of the problems that have helpers}
+\inputtable{strict}
+
+\subsection{Scaling}
+\genfigure{fig_scaling}{0.98}{Olympiad performance against the number of synthetic theorems used for pre-training (log scale); $0$ is behaviour cloning from scratch, the last point also shows the network that saw only synthetic data (zero-shot).}
+\inputtable{scaling}
+\genfigure{fig_learning}{0.98}{Reinforcement learning: dev problems solved against iterations (a) and against cumulative rollout probes (b), and the mean length of the dev proofs (c).}
+\todo{inference scaling (budget), data scaling, iterations vs.\ proof length; say whether the curves are still rising}
+
+\subsection{Ablations}
+\inputtable{ablations}
+\genfigure{fig_ablations}{0.85}{Differences in problems solved on test (percentage points), first minus second method, with the 95\% interval over seeds.}
+\todo{pre-training, fine-tuning, hindsight, bootstrapped library, sub-theorem goals, actors}
+
+\subsection{Provers and the manager--worker agent}
+\inputtable{solvers}
+\inputtable{mw}
+\genfigure{fig_solvers}{0.98}{The same networks under different provers.}
+\todo{sample vs.\ greedy vs.\ IDA* vs.\ MCTS; whether the manager proposes claims that the worker proves}
+
+\subsection{The bootstrapped library and statement-only problems}
+\inputtable{library}
+\genfigure{fig_library}{0.9}{(a) growth of the bootstrapped library over the iterations of expert iteration; (b) the proof lengths of the lemmas admitted.}
+\todo{how many test proofs use a bootstrapped lemma; list of statement-only problems solved (report.md, ``Statement-only problems solved''), each proof kernel-checked}
+
+\subsection{Difficulty and contest}
+\inputtable{levels}
+
+\subsection{Throughput and memory}
+\inputtable{bench_solvers}
+\inputtable{bench_workers}
+\inputtable{bench_world}
+\genfigure{fig_throughput}{0.9}{(a) probes per second of each prover on one core; (b) scaling of the evaluation with worker processes.}
+\inputtable{bench_kernel}
+\inputtable{cost}
+
+\subsection{Soundness}
+\inputtable{soundness}
+\todo{state the soundness evidence: all solved proofs re-checked by the second checker (\N{RecheckAccepted} of \N{RecheckChecked}), the gates (\N{RepoGates} scripts) and the mutation catalogue (\N{RepoMutants} mutants); run the mutation driver on the final commit if a kill rate is to be quoted}
+
+% ============================================================================================================================================================ 9
+\section{Limitations}\label{sec:limits}
+
+\begin{itemize}
+\item \textbf{Size.} The benchmark has \N{BankProblems} problems and the test split \N{NTest}; intervals over problems are wide, and a few problems decide a percentage point. We report both the interval over seeds and the bootstrap over problems for this reason.
+\item \textbf{Statement-only problems.} \N{BankStatementOnly} problems have no known proof in the library; success rates on them are lower bounds on solvability, and \emph{proved} and \emph{statement-only} are reported separately.
+\item \textbf{Helper lemmas.} In the prefix regime a problem's own helper lemmas are given. We report the helper-free subset and the strict regime for this reason, but the benchmark does not control how much a library lemma gives away.
+\item \textbf{Paraphrased texts.} The problem texts are paraphrases, some from memory (label \code{recalled}), and a part of the ``contest'' items are written in the manner of a contest; the benchmark does not reproduce official problems verbatim and was not checked by the organisers of any competition.
+\item \textbf{Integers, no reals, no geometry or combinatorics.} Inequalities are over the integers; the library has no real numbers, no abstract algebraic structures (no type classes: groups, rings, fields are not in the library), no geometry and no combinatorics beyond what divisibility and induction give. The benchmark is a slice of olympiad algebra and number theory, not of olympiad mathematics.
+\item \textbf{Synthetic data.} The generator's proofs are backward chains; of the \N{GenKinds} action kinds that occur, a few dominate. Saturation statistics show how much of the skeleton space has been seen, not whether the unseen part matters.
+\item \textbf{Compute parity.} PPO and expert iteration are compared at equal iterations and also by cumulative probes in the logs; they are not tuned to equal wall-clock, and no hyper-parameter was tuned per method.
+\item \textbf{Small models, no language pre-training.} The networks have about \N{ModelParamsM}M parameters and are trained from scratch. Nothing here says how the methods behave at the scale of language-model provers.
+\item \textbf{GPU path.} \todo{state whether the GPU was used; the code paths for CUDA training were exercised only on the authors' machine described above}
+\end{itemize}
+
+\section*{Reproducibility statement}
+Everything needed to reproduce the tables and figures is in the repository: the kernel and checker, the gates, the dataset (\code{data/dataset\_v2}, with its card), the generator, the training code, and \code{scripts/}, which runs every experiment (\code{scripts/smoke\_test.sh} runs the whole pipeline on a tiny world; \code{scripts/run\_all.sh} runs the matrix of this paper) and builds the tables, figures and the numbers quoted in the text from the logs; \code{docs/EXPERIMENTS.md} documents the protocol. The commit, the profile and the machine of every run are recorded in the runs directory. \todo{release URL, commit hash, seeds used, archive of the runs directory}
+
+\subsubsection*{Broader Impact Statement}
+The work targets mathematics education and automated reasoning; kernel-checked proofs mean that a wrong output is detected, not trusted. The main risk we see is over-reading: a high solve rate on a small, paraphrased, partly self-written benchmark is not evidence of mathematical ability, and we have tried to make the limitations of \S\ref{sec:limits} visible next to every number.
+
+\subsubsection*{Author Contributions}
+\todo{if desired}
+
+\subsubsection*{Acknowledgments}
+\todo{funding, compute; the official TMLR style files (Apache-2.0) are used unchanged; this work was developed with the assistance of Claude (Anthropic) for code and text drafting, and every claim in the paper must be verified against the released logs}
+
+\bibliography{main}
+\bibliographystyle{tmlr}
+
+% ============================================================================================================================================================ appendix
+\appendix
+\section{Experimental configuration}\label{app:config}
+\inputtable{hyper}
+
+\section{Additional figures}\label{app:figures}
+\genfigure{fig_bc}{0.98}{Behaviour cloning: training loss, held-out loss and held-out action accuracy against the epoch, for pre-training, training from scratch and fine-tuning.}
+\genfigure{fig_levels}{0.9}{Test problems solved (\%) by level and by contest.}
+
+\section{The problems}\label{app:problems}
+The file \code{problems.csv} in the report lists every problem with its source, level, split, whether it has a reference proof, its origin and verification label, and the length of the proof. The dataset card (\code{DATASET\_CARD.md}) describes the construction, the checks and the exclusions.
+
+\end{document}
