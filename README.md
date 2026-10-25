@@ -32,7 +32,7 @@ tested on Linux; the build script also has the macOS flags (untested here).
 make kernel                              # builds build/itp_env_lnl*.so (the kernel) and build/itp_env_ref*.so (the oracle)   [python3 src/python/build_kernel.py]
 python3 examples/01_prove_with_tactics.py
 python3 tests/run_gates.py -j 2          # the 49 default gates, about 45 minutes on two cores;  make gates-all runs all 54 (about an hour)
-make dataset-verify                      # replay every recorded proof of data/dataset_v2 in a fresh engine
+make dataset-verify                      # replay every recorded proof and sub-theorem of data/dataset_v2 in a fresh engine (about 25 minutes)
 ```
 
 The experiments (they need torch; a GPU is optional and makes the networks faster):

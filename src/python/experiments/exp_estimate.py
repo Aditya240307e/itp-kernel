@@ -64,6 +64,7 @@ def estimate(runs, P, counts, rates, train_rate=None, probe_rate=None, synth_mea
         if st == 'data':
             if r.id == 'data/synth_gen': add('data', P['synth_attempts'] / GEN_ATTEMPTS_PER_S / P['synth_jobs'], P['synth_jobs'])           # the first round of `grow`; it adds rounds when the train split falls short of its target
             elif r.id in ('data/synth_verify',): add('data', 60.0 + 0.003 * P['synth_target'])
+            elif r.id == 'data/dataset': add('data', 1400.0 if t.get('verify_only') else 110.0)               # (measured: replaying the released dataset takes 1 362 s, building the smoke dataset 108 s)
             else: add('data', 60.0)
         elif st == 'pre': add('pre', P['pre_epochs'] * t['n_synth'] * synth_mean / tr)
         elif st == 'ft':

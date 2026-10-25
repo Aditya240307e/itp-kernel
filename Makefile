@@ -13,7 +13,7 @@ help:
 	@echo "make gates-repo      the repository gates: S45 layout, S46 examples"
 	@echo "make gates-synth     the synthetic theorem generator's gate S48"
 	@echo "make gates-all       every gate (54; about an hour on two cores)"
-	@echo "make dataset-verify  replay every recorded proof of data/dataset_v2 in a fresh engine (about 1 minute)"
+	@echo "make dataset-verify  replay every recorded proof and sub-theorem of data/dataset_v2 in a fresh engine (about 25 minutes, 3 GB)"
 	@echo "make examples        run the examples"
 	@echo "make mutants-check   check that every mutant of the catalogue still applies to the code (seconds); the mutation run itself: python3 mutants/mutate.py PREFIX"
 	@echo "make sanitize        build the kernel with ASan + UBSan and run the gates under it (long)"

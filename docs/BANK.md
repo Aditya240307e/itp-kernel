@@ -241,8 +241,8 @@ python3 src/python/problems/dataset.py OUT_DIR           # bank.json, splits.jso
 python3 src/python/problems/dataset.py --verify OUT_DIR  # replay every demonstration in a fresh engine over a rebuilt world
 ```
 
-The released copy of dataset v2 is `data/dataset_v2/` (its digests are checked by gate S45, section J; `make dataset-verify` replays every recorded proof and sub-theorem in a fresh engine over a rebuilt world, a few
-minutes; example 07 reads it without the kernel). Dataset v1 (82 problems) is gone from the tree (it is in the git history, in the commits before the one that introduced dataset v2); the result files of the first baseline runs, made on it, are in
+The released copy of dataset v2 is `data/dataset_v2/` (its digests are checked by gate S45, section J; `make dataset-verify` replays every recorded proof and sub-theorem in a fresh engine over a rebuilt world, about 25
+minutes and 3 GB (6 546 replays); example 07 reads it without the kernel). Dataset v1 (82 problems) is gone from the tree (it is in the git history, in the commits before the one that introduced dataset v2); the result files of the first baseline runs, made on it, are in
 `data/results/v1/` and are a historical record (`data/results/README.md`, `docs/TRAINING.md` section 5).
 
 * `bank.json` — section 7's file for all 268 problems, each with its `split`, `family`, `origin` and `verified` (and `proved`: a statement-only problem has no `demonstration`). 187 demonstrations (6 033 actions; mean 32, median 11,

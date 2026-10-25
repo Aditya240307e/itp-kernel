@@ -209,7 +209,7 @@ make status ; make report                        # what is done; tables, figures
 and the single tools the scripts call (each is resumable):
 
 ```
-python3 src/python/problems/dataset.py --verify data/dataset_v2                         # replay every recorded proof in a fresh engine over a freshly built world (about 2 minutes)
+python3 src/python/problems/dataset.py --verify data/dataset_v2                         # replay every recorded proof and sub-theorem in a fresh engine over a freshly built world (about 25 minutes, 3 GB)
 python3 src/python/synth/synth_cli.py grow --out data/synth_v2 --train-target 60000 --exclude-dataset data/dataset_v2 --jobs 4        # the synthetic set (GENERATOR.md)
 python3 src/python/learner/ml_bc.py data/dataset_v2 --out runs/pre/s0 --synth data/synth_v2 --no-bank --epochs 6 --seed 0               # pre-training
 python3 src/python/learner/ml_bc.py data/dataset_v2 --out runs/ft/s0 --init runs/pre/s0/best.pt --lr 3e-4 --epochs 20 --seed 0         # fine-tuning
