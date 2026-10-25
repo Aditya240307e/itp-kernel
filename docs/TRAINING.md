@@ -200,7 +200,7 @@ All commands run from the repository root after `make kernel`. The settings of t
 
 ```
 make check-env                                   # python, torch, CUDA, memory, disk
-make smoke                                       # the whole pipeline on a tiny world (an hour or two on two cores): before every real run
+make smoke                                       # the whole pipeline on a tiny world (about 70 minutes of run time on two cores): before every real run
 PROFILE=small SEEDS=0-2 make experiments        # the shape of every result: the whole bank, 5 000 synthetic train theorems, 3 seeds
 DEVICE=cuda PROFILE=full SEEDS=0-6 make experiments      # the paper: 60 000 synthetic train theorems, 7 seeds (default 5)
 make status ; make report                        # what is done; tables, figures and numbers from the runs so far

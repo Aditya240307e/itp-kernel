@@ -31,7 +31,7 @@ tested on Linux; the build script also has the macOS flags (untested here).
 ```
 make kernel                              # builds build/itp_env_lnl*.so (the kernel) and build/itp_env_ref*.so (the oracle)   [python3 src/python/build_kernel.py]
 python3 examples/01_prove_with_tactics.py
-python3 tests/run_gates.py -j 2          # the 47 kernel gates, about 13 minutes on two cores;  make gates-all runs all 54
+python3 tests/run_gates.py -j 2          # the 49 default gates, about 45 minutes on two cores;  make gates-all runs all 54 (about an hour)
 make dataset-verify                      # replay every recorded proof of data/dataset_v2 in a fresh engine
 ```
 
@@ -39,7 +39,7 @@ The experiments (they need torch; a GPU is optional and makes the networks faste
 
 ```
 make check-env                           # is this machine ready? python, torch, CUDA, memory, disk
-make smoke                               # the whole pipeline on a tiny world: do this before a real run (an hour or two on two cores)
+make smoke                               # the whole pipeline on a tiny world: do this before a real run (about 70 minutes of run time on two cores)
 PROFILE=small SEEDS=0-2 make experiments        # the shape of every result: the whole bank, 5 000 synthetic train theorems, 3 seeds
 DEVICE=cuda PROFILE=full SEEDS=0-6 make experiments      # the paper: 60 000 synthetic train theorems, 7 seeds (default 5); resumable, `make status` says where it is
 ./scripts/run_all.sh --profile full --seeds 0-6 --device cuda      # the same, as options of the script (every setting is one: `--help`)
@@ -77,7 +77,7 @@ src/python/learner/        features, network, training (ml_bc, ml_ei, ml_ppo), p
 src/python/synth/          the synthetic theorem generator: lemma pool, proof trees grown backwards, records, shards, merge and splits, verification from the data alone (docs/GENERATOR.md)
 src/python/experiments/    the experiment graph, scheduler, collector, statistics, tables, figures, throughput benchmarks, report (docs/EXPERIMENTS.md)
 scripts/                   the shell scripts that run the experiments (00_check_env ... 07_report, run_all, smoke_test, status; env.sh and local.env.example hold the settings)
-paper/                     the TMLR paper skeleton (main.tex, bibliography, style) and generated/ (tables and figures from `make report`); a release archive also holds main.pdf as it was before any run (the facts counted from the repository filled in, `??name` where a number needs a run, a box where a table or figure does)
+paper/                     the TMLR paper skeleton (main.tex, bibliography, style) and generated/ (tables and figures from `make report`); a release archive also holds `main.pdf`, a **preview**: compiled from a `make smoke` run, so the tables and figures that depend on runs show the numbers of a tiny test world (19 problems, 2 seeds) and every page says so; the facts about the repository and the benchmark (Tables 1 and 2) are real
 tests/                     the gates by role (kernel, library, environment, problems, learner, synth, repo), shared modules (support), fuzzers, benchmarks, golden files
 mutants/                   the mutation catalogue (1616 mutants) and its driver
 examples/                  runnable examples; examples/repros holds scripts that reproduce fixed defects

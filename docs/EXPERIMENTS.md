@@ -5,7 +5,7 @@ provers on the same problems, measure throughput, and turn the logs into tables,
 measured, how to run it, and what the results can and cannot show.
 
 ```
-scripts/smoke_test.sh              # the whole pipeline on a tiny world: does it run on this machine?   (an hour or two on 2 cores; much less on a big machine)
+scripts/smoke_test.sh              # the whole pipeline on a tiny world: does it run on this machine?   (about 70 minutes of run time on 2 cores, two runs at a time; much less on a big machine)
 PROFILE=small scripts/run_all.sh   # the first real numbers: the whole bank, 5 000 synthetic train theorems, 3 seeds
 PROFILE=full  scripts/run_all.sh   # the paper: 60 000 synthetic train theorems, 5 seeds (SEEDS=0-6 for seven)
 ```
@@ -182,13 +182,18 @@ ones it measured on YOUR machine (`RUNS/bench/bench.json`; on a GPU pass `--trai
 | small | 3 | 77 | 57 | 102 | 13 h |
 | full | 5 | 122 | 344 | 1 111 | 139 h (about six days) |
 
+**One measurement.** The `smoke` profile has been run once from the first stage to the report on the 2-core reference machine (two runs at a time, other jobs competing for the cores): 52 training and evaluation runs
+(data 7 min 25 s, pre-training 3 min 34 s, fine-tuning 3 min 4 s, reinforcement learning 19 min 58 s, evaluation 29 min 45 s; the run times of the runs added up), the two benchmarks (6 min 25 s) and the report
+(10 s): 70 minutes of run time. The estimator with the rates `06_benchmarks.sh` measured there says 0.8 run-hours for the stages before the benchmarks (measured: 1.06) and 1.0 for the benchmarks (measured: 0.11); with its built-in
+rates it said 2.2 for everything. So on this one profile it is within about a third on the training and evaluation stages and pessimistic on the benchmarks. It has not been checked on a larger profile.
+
 `full`, in core-hours: reinforcement learning 797 (40 runs: PPO and the expert-iteration variants), evaluation 215, pre-training 64, fine-tuning 23, data 11, benchmarks 1 -- the RL runs and the evaluation of
 the search solvers are 91 % of it. The cost is linear in the number of seeds (`--seeds 0-6` costs 1.4 times the five-seed training and evaluation, the data and the benchmarks once). To spend less: run the
 `small` profile; fewer seeds; one method (`--target 'rl/ei_her/*'`); fewer iterations or probes (`--set rl_iters=100 --set eval_probes=500`, section 4); a GPU speeds up the network updates only (proof search stays on
 the CPU).
 
 **Memory.** The world of the whole bank takes about 1.2 to 1.4 GB per process when built and up to about 2.8 GB in the runs that were measured (`smoke`); forked workers share it. Pre-training on 60 000
-theorems keeps about 3 GB of steps in memory. (The gate S50, which replays the whole bank's proofs, reaches 4.5 GB: on an 8 GB machine do not run it next to another heavy gate -- `tests/run_gates.py` runs the heavy gates one at a time.) Set `MEM_GB` to what the machine has; the scheduler runs fewer jobs at once rather than more.
+theorems keeps about 3 GB of steps in memory. (The gate S50, which replays the whole bank's proofs, holds 1.5 to 2.8 GB itself and peaks at 4.6 GB while an independent-checker process runs -- measured here, 20 minutes in all; on an 8 GB machine do not run it next to another heavy gate -- `tests/run_gates.py` runs the heavy gates one at a time -- and keep `S50_E_MEM`, the memory one independent check may use (1 500 MB), below what is left.) Set `MEM_GB` to what the machine has; the scheduler runs fewer jobs at once rather than more.
 **Disk.** Measured on `smoke`: about 30 MB per training run (checkpoints) and about 10 KB per generator attempt; extrapolated to `full` that is about 3 GB for its 90 training runs and several GB for the
 450 000 generator attempts. Keep 20 GB free.
 

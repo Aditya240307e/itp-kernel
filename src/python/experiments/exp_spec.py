@@ -5,7 +5,7 @@
 
 A PROFILE sets the sizes (seeds, synthetic theorems, epochs, iterations, budgets):
 
-    smoke    17 problems, ~300 synthetic theorems, 2 seeds: ~1-2 hours on 2 cores.  It checks that the whole pipeline runs and that every table and figure is made; its numbers mean nothing.
+    smoke    17 problems (19 with what they depend on), ~300 synthetic theorems, 2 seeds: about 70 minutes of run time on 2 cores.  It checks that the whole pipeline runs and that every table and figure is made; its numbers mean nothing.
     small    the whole bank, 5 000 synthetic theorems, 3 seeds: the first real numbers; the shape of every result.
     full     the paper: 60 000 synthetic theorems, 5 seeds (`--seeds 0-6` for 7), long budgets.
 

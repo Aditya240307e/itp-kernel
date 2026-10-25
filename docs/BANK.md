@@ -302,7 +302,10 @@ problem that is no proposition, declares a theorem, has helpers, an unknown `ori
 *earlier* problem is on the menu of a later one and one action finishes it; with the mask it is not on the menu, the term builder refuses to say it and the action is refused · C. the mask in the whole bank: the premises of every
 problem are exactly the library and its own block, no theorem or helper of another problem is visible, a proved problem does not see its own theorem · D. the 115 proved contest problems: each reference proof replays as a
 kernel-checked action sequence, survives a JSON round trip, mentions only globals its premises offer, and depends on no axiom (quotient primitives only) · E. the second opinion: the independent checker
-(`recheck.SecondOpinion`, restricted to the globals a proof needs) accepts every one of those proofs and rejects a proof for another problem's statement.
+(`recheck.SecondOpinion`, restricted to the globals a proof needs) accepts the proofs it is given and rejects a proof for another problem's statement. It is a Python program that walks the proof terms and takes about
+a minute for a proof (some need more than 2 GB), so the gate judges **a sample by default (every eighth proof; `S50_E=all` or `S50_E=i/n` choose others)**, each in a process of its own with a memory limit
+(`S50_E_MEM`, 1 500 MB). A proof that does not fit gives *no verdict*, which is not a rejection: the gate fails when the checker rejects a proof or fails, or when fewer than three in five of the proofs it is given
+are accepted (finding F86; `aime1983_p6`, which is in the default sample of 15 proofs, and `aime1997_p3` need more than 1.5 GB: no verdict). Run `S50_E=all S50_E_MEM=6000` on a big machine to have the independent checker judge all 115.
 
 ## 10. Toward ISL N1–N3, A1–A3
 
