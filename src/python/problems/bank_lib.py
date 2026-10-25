@@ -31,11 +31,11 @@ def load(only=None):
 
 
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ problems the library already proves
-BANK.declare('imo1959_p1', text='Prove that the fraction (21n+4)/(14n+3) is irreducible for every natural number n.', source='IMO 1959 P1', year=1959, topics=('number-theory', 'gcd'), level=2,
+BANK.declare('imo1959_p1', text='Prove that the fraction (21n+4)/(14n+3) is irreducible for every natural number n.', source='IMO 1959 P1', verified='answer-checked', year=1959, topics=('number-theory', 'gcd'), level=2,
              spec=Spec(('Z',), (lambda n: n >= 0,), lambda n: math.gcd(21 * n + 4, 14 * n + 3) == 1, atom=(lambda n: 21 * n + 4, lambda n: 14 * n + 3, lambda n: 1)),
              notes='irreducible = the greatest common divisor is 1; natural number = integer >= 0 (the statement is true for every integer)')
 
-BANK.declare('sqrt2_irrational', text='Prove that sqrt(2) is irrational: there are no integers p, q with q /= 0 and p^2 = 2 q^2.', source='Euclid', topics=('number-theory', 'descent', 'parity'), level=3,
+BANK.declare('sqrt2_irrational', text='Prove that sqrt(2) is irrational: there are no integers p, q with q /= 0 and p^2 = 2 q^2.', source='Euclid', origin='folklore', topics=('number-theory', 'descent', 'parity'), level=3,
              helpers=('Z.sqrt2_aux',), strict=False,
              spec=Spec(('Z', 'Z'), (lambda p, q: q != 0,), lambda p, q: p * p != 2 * q * q, atom=(lambda p, q: p * p, lambda p, q: 2 * q * q)),
              notes='irrational = not a quotient of two integers with a non-zero denominator; the reference proof is a descent by strong induction on q')
@@ -54,7 +54,7 @@ def _imo2019_partial(n):
     return 2 * n if n > 1 and (n & (n - 1)) == 0 else 0
 
 
-BANK.declare('imo2019_p1', text='Let Z be the set of integers. Determine all functions f : Z -> Z such that f(2a) + 2f(b) = f(f(a+b)) for all integers a and b.', source='IMO 2019 P1', year=2019,
+BANK.declare('imo2019_p1', text='Let Z be the set of integers. Determine all functions f : Z -> Z such that f(2a) + 2f(b) = f(f(a+b)) for all integers a and b.', source='IMO 2019 P1', verified='answer-checked', year=2019,
              topics=('functional-equation', 'induction'), level=4, kind='answer', answer='f(n) = 0 for all n, and f(n) = 2n + c for all n, for any integer c',
              helpers=('imo2019_p1_fwd', 'imo2019_p1_bwd'), strict=False,
              spec=Spec(('fn',), (), (_imo2019_cond, _imo2019_sol), extra_fns=(_imo2019_partial,),
@@ -247,7 +247,7 @@ def _(w, b):
 
 
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ level 3: olympiad problems
-@BANK.problem('imo1984_p2', text='Find two positive integers a and b such that none of the numbers a, b, a + b is divisible by 7 and (a + b)^7 - a^7 - b^7 is divisible by 7^7.', source='IMO 1984 P2', year=1984,
+@BANK.problem('imo1984_p2', text='Find two positive integers a and b such that none of the numbers a, b, a + b is divisible by 7 and (a + b)^7 - a^7 - b^7 is divisible by 7^7.', source='IMO 1984 P2', verified='answer-checked', year=1984,
               topics=('number-theory', 'divisibility', 'construction'), level=3, kind='exists', answer='a = 18, b = 1 (and the pairs equivalent to it modulo 7^3)',
               spec=Spec((), (), lambda: any(a > 0 and b > 0 and a % 7 != 0 and b % 7 != 0 and (a + b) % 7 != 0 and ((a + b) ** 7 - a ** 7 - b ** 7) % 7 ** 7 == 0 for a in range(-22, 23) for b in range(-22, 23)),
                         windows={'ex': 22, 'atom': 3},
@@ -280,7 +280,7 @@ def _prime(n):
     return True
 
 
-@BANK.problem('imo1969_p1', text='Prove that there exist infinitely many positive integers a such that n^4 + a is not a prime number for any positive integer n.', source='IMO 1969 P1', year=1969,
+@BANK.problem('imo1969_p1', text='Prove that there exist infinitely many positive integers a such that n^4 + a is not a prime number for any positive integer n.', source='IMO 1969 P1', verified='answer-checked', year=1969,
               topics=('number-theory', 'prime', 'construction', 'identity'), level=3, helpers=('germain_not_prime',),
               spec=Spec(('Z',), (lambda m: m >= 0,), lambda m: any(a > m and all(not _prime(n ** 4 + a) for n in range(1, 9)) for a in range(-70, 71)), windows={'z': 8, 'ex': 70, 'atom': 3},
                         body=(('Z',), lambda m, a: a > m and all(not _prime(n ** 4 + a) for n in range(1, 9))),
@@ -310,7 +310,7 @@ def _(w, b):
             p.apply('germain_not_prime'); p.exact('hn'); p.linarith()
 
 
-@BANK.problem('imo1964_p1b', text='Prove that there is no positive integer n for which 2^n + 1 is divisible by 7.', source='IMO 1964 P1 (b)', year=1964,
+@BANK.problem('imo1964_p1b', text='Prove that there is no positive integer n for which 2^n + 1 is divisible by 7.', source='IMO 1964 P1 (b)', verified='answer-checked', year=1964,
               topics=('number-theory', 'divisibility', 'modular', 'induction'), level=3, helpers=('pow2_mod7',),
               spec=Spec(('N',), (lambda n: n > 0,), lambda n: (2 ** n + 1) % 7 != 0, windows={'n': 16}, atom=(lambda n: 7, lambda n: 2 ** n + 1)),
               notes='the powers of 2 leave the remainders 1, 2, 4 upon division by 7 (the lemma pow2_mod7); positivity of n is not needed')
@@ -342,7 +342,7 @@ def _(w, b):
             p.cases('c2', names=['c3', 'c4']); refute(p); refute(p)
 
 
-@BANK.problem('imo1964_p1a', text='Find all positive integers n for which 2^n - 1 is divisible by 7.', source='IMO 1964 P1 (a)', year=1964,
+@BANK.problem('imo1964_p1a', text='Find all positive integers n for which 2^n - 1 is divisible by 7.', source='IMO 1964 P1 (a)', verified='answer-checked', year=1964,
               topics=('number-theory', 'divisibility', 'modular', 'induction'), level=3, kind='answer', answer='exactly the multiples of 3', helpers=('pow2_iff',),
               spec=Spec(('N',), (lambda n: n > 0,), (lambda n: (2 ** n - 1) % 7 == 0, lambda n: n % 3 == 0), windows={'n': 16}, atoms=[(lambda n: 7, lambda n: 2 ** n - 1), (lambda n: 3, lambda n: n)]),
               notes='formalised as an equivalence of the condition with the answer: 7 divides 2^n - 1 iff 3 divides n; the proof is an induction in steps of three')

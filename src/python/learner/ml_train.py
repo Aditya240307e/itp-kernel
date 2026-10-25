@@ -27,7 +27,7 @@ def load_dataset(ddir):
 def build_steps(ddir, bk, ctx, eng, cache=None, progress=print):
     """{'bank': {split: [Step]}, 'lib': {split: [Step]}} for the dataset in `ddir` (cached in a pickle named by the manifest digest)"""
     man = open(os.path.join(ddir, 'manifest.json')).read()
-    key = hashlib.sha256((man + 'v4').encode()).hexdigest()[:12]
+    key = hashlib.sha256((man + 'v5').encode()).hexdigest()[:12]
     cpath = cache or os.path.join(ddir, 'steps_%s.pkl' % key)
     if os.path.exists(cpath):
         try:
@@ -91,6 +91,9 @@ def evaluate(net, steps, size=32):
             'per_name': {k: (v[0] / max(v[1], 1), v[1]) for k, v in per.items()}, 'by_kind': {k: (v[0] / max(v[1], 1), v[1]) for k, v in by_kind.items()}}
 
 
+NEW_HEADS = ('critic.', 'mgr.', 'size.')
+
+
 def make_net(bags, cfg):
     return M.PolicyNet(bags, d=cfg['d'], layers=cfg['layers'], heads=cfg['heads'], ff=cfg['ff'], dropout=cfg['dropout'])
 
@@ -101,7 +104,11 @@ def save(net, cfg, path, extra=None):
 
 def load(path, bags):
     ck = torch.load(path, map_location='cpu', weights_only=False)
-    net = make_net(bags, ck['config']); net.load_state_dict(ck['state']); net.eval()
+    net = make_net(bags, ck['config'])
+    missing, unexpected = net.load_state_dict(ck['state'], strict=False)           # (a model saved before the heads of the reinforcement learners existed lacks exactly those)
+    bad = [k for k in missing if not k.startswith(NEW_HEADS)] + list(unexpected)
+    if bad: raise RuntimeError('%s does not fit the network (missing or unexpected parameters: %s)' % (path, bad[:4]))
+    net.eval()
     return net, ck['config'], ck.get('extra', {})
 
 

@@ -49,7 +49,7 @@ LIBRARY_LIMIT = 'imo1959_p1'          # the first global that is not library: th
 # where a problem comes from.  contest: a problem of a named contest, formalised as it is; adapted: a named contest problem changed to fit the vocabulary (an integer variant of a statement about
 # reals, one part of several); style: written for this bank in the manner of a contest; folklore: a classical fact or exercise with no contest behind it
 ORIGINS = ('contest', 'adapted', 'style', 'folklore')
-VERIFIED = ('answer-checked', 'recalled', 'none')        # answer-checked: the formal statement's answer agrees with the contest's published answer (brute force); recalled: the source is from memory
+VERIFIED = ('answer-checked', 'recalled', 'none')        # answer-checked: compared with a public source (the published answer of a 'determine' problem, also found by brute force; the published statement of a 'prove' problem); recalled: source and wording are from memory, not compared; none: no check applies (written for the bank, a classical fact)
 
 
 class Problem:

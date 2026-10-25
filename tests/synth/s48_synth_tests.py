@@ -36,7 +36,7 @@ ONLY = set(os.environ['S48_ONLY'].split(',')) if os.environ.get('S48_ONLY') else
 GOLDEN = os.path.join(itp_paths.GOLDEN, 's48_golden.json')
 SEED = 48
 RANGE = (0, 240)                                          # the indices the gate generates in this process
-SUBPROBLEMS = os.path.join(itp_paths.DATA, 'dataset_v1', 'subproblems.json')
+SUBPROBLEMS = os.path.join(itp_paths.DATA, 'dataset_v2', 'subproblems.json')
 
 
 def trace(msg):

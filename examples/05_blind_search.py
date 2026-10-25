@@ -19,7 +19,7 @@ bank = bank_all.load()
 engine = G.Engine(bank.w)
 
 # ---------------------------------------------------------------------------------------------------------------------------------------- 1. one problem
-name = 'sum_squares_zero'
+name = 'quad_form_zero'
 placed = bank.placed[name]
 engine.premises = placed.premises('strict')
 proof, tree, searcher = S.prove_statement(engine, placed.stmt, max_depth=6, max_probes=4000)
@@ -28,7 +28,7 @@ print('solved: %s   probes: %d   tree: %d actions, depth %d, kinds %s' % (proof 
 assert proof is not None                               # (`prove_statement` has already had the kernel check the proof against the statement)
 
 # ---------------------------------------------------------------------------------------------------------------------------------------- 2. a handful of problems
-names = ['ident_diff_squares', 'quad_form_zero', 'ineq_am_gm_two', 'coprime_consecutive', 'two_pow_gt_n']
+names = ['ident_diff_squares', 'ident_sophie_germain', 'ineq_am_gm_two', 'coprime_consecutive', 'two_pow_gt_n']
 rows = bank_baseline.baseline(bank, names, regimes=('strict',), probes=1500, time_limit=15.0, engine=engine)
 print('\nblind search, strict regime, 1500 probes (what it cannot do -- an inequality that needs the hint (a-b)^2, an induction, a witness -- is what a learned policy is for):')
 print(bank_baseline.table(rows))

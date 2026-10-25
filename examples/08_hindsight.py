@@ -1,6 +1,6 @@
 """08 -- hindsight: what an attempt proved, even when it did not finish.
 
-    python3 examples/08_hindsight.py [problem_name [n_actions]]       (about 40 s; default: sum_squares_zero, stopped after 7 of its 13 actions)
+    python3 examples/08_hindsight.py [problem_name [n_actions]]       (about 40 s; default: quad_form_zero, stopped after 7 of its 13 actions)
 
 A proof attempt that fails is full of things that WERE proved: a case that closed, a fact that a lemma derived.  With `Episode(..., track=True)` the engine keeps a record of the attempt (src/python/environment/
 gym_tree.py): one node per goal an action was applied to.  From it come
@@ -18,13 +18,13 @@ import bank_all
 import gym_env as G, gym_acts as A, gym_tree as T
 import recheck
 
-NAME = sys.argv[1] if len(sys.argv) > 1 else 'sum_squares_zero'
+NAME = sys.argv[1] if len(sys.argv) > 1 else 'quad_form_zero'
 bank = bank_all.load()
 w = bank.w
 if NAME not in bank.placed: raise SystemExit('no such problem; the bank has %s ...' % ', '.join(list(bank.placed)[:6]))
-record = next(p for p in json.load(open(os.path.join(itp_paths.DATA, 'dataset_v1', 'bank.json')))['problems'] if p['name'] == NAME)
+record = next(p for p in json.load(open(os.path.join(itp_paths.DATA, 'dataset_v2', 'bank.json')))['problems'] if p['name'] == NAME)
 steps = record['demonstration']['steps']
-N = int(sys.argv[2]) if len(sys.argv) > 2 else (7 if NAME == 'sum_squares_zero' else max(1, len(steps) // 2))
+N = int(sys.argv[2]) if len(sys.argv) > 2 else (7 if NAME == 'quad_form_zero' else max(1, len(steps) // 2))
 N = min(N, len(steps))
 engine = G.Engine(w, kinds=set(G.Kind), strict=True)
 placed = bank.placed[NAME]

@@ -72,7 +72,8 @@ class BankEnv(gym.Env):
         self.actions = 0; self.fails = 0; self.decisions = 0; self.solved = False; self.term = None; self.budget = max_actions; self._achieved = []
         self.trajectory = []                           # per action: (GoalFeat, overlap, [(Choice, index)], taken) -- what a learner needs to recompute the log-probabilities; taken is True (the engine took
                                                        # the action), False (it refused it) or None (the episode ended before the action was complete)
-        self._cur = []
+        self.meta = []                                 # per trajectory entry: (actions of budget left, open goals) when its assembly began -- what a critic needs besides the goal
+        self._cur = []; self._cur_meta = (max_actions, 1)
 
     # ------------------------------------------------------------------------------------------------------------------------------------------------------------------ episodes
     def reset(self, seed=None, options=None):
@@ -92,7 +93,7 @@ class BankEnv(gym.Env):
         if ep.done: raise ValueError('%s: the engine closes this statement by itself, before any action: there is nothing to prove' % (name,))
         self.budget = self.max_actions if budget is None else int(budget)
         self.name = name; self.ep = ep
-        self.actions = 0; self.fails = 0; self.decisions = 0; self.solved = False; self.term = None; self.trajectory = []; self._cur = []; self._achieved = []
+        self.actions = 0; self.fails = 0; self.decisions = 0; self.solved = False; self.term = None; self.trajectory = []; self.meta = []; self._cur = []; self._achieved = []
         self._begin_goal()
         return self._obs(), self._info()
 
@@ -116,17 +117,17 @@ class BankEnv(gym.Env):
         if ep.done: self.choice = None; return
         g = ep.goal(); m = ep.menu()
         self.gf = F.goal_features(self.ctx.ser, g); self.ov = self.ctx.bags.overlap(self.gf.symbols)
-        self.asm = P.Assembler(self.eng, g, m, rare=True); self._cur = []
+        self.asm = P.Assembler(self.eng, g, m, rare=True); self._cur = []; self._cur_meta = (self._remaining(), ep.n_goals)
         self.choice = self.asm.start()
         if self.choice is None: self._refused(None)
 
     def _refused(self, action):
         """the assembled action cannot be taken: the same goal again, a new assembly"""
         self.fails += 1
-        if self.rich and self._cur: self.trajectory.append((self.gf, self.ov, self._cur, False))
+        if self.rich and self._cur: self.trajectory.append((self.gf, self.ov, self._cur, False)); self.meta.append(self._cur_meta)
         self._cur = []
         if self.actions + self.fails >= self.budget: self.choice = None; return
-        ep = self.ep
+        ep = self.ep; self._cur_meta = (self._remaining(), ep.n_goals)
         self.asm = P.Assembler(self.eng, ep.goal(), ep.menu(), rare=True); self.choice = self.asm.start()
         if self.choice is None: self.choice = None
 
@@ -158,7 +159,7 @@ class BankEnv(gym.Env):
             if taken:
                 self.actions += 1; reward -= self.action_penalty
                 if self.track: self._achieved = [{'kind': kind, 'node': n.id, 'step': n.step, 'depth': n.depth, 'length': (n.last - n.step + 1) if n.closed else 1} for kind, n in self.ep.events]
-                if self.rich: self.trajectory.append((self.gf, self.ov, self._cur, True))
+                if self.rich: self.trajectory.append((self.gf, self.ov, self._cur, True)); self.meta.append(self._cur_meta)
                 self._cur = []
                 if self.ep.done:
                     try:
@@ -173,7 +174,7 @@ class BankEnv(gym.Env):
         truncated = (not terminated) and (self.choice is None or self.decisions >= self.max_decisions)
         if self.decisions >= self.max_decisions: self.choice = None if not terminated else self.choice
         if self.choice is None and self._cur and self.rich:                         # the episode ended in the middle of an action: its decisions were made, the action never was
-            self.trajectory.append((self.gf, self.ov, self._cur, None)); self._cur = []
+            self.trajectory.append((self.gf, self.ov, self._cur, None)); self.meta.append(self._cur_meta); self._cur = []
         obs = self._obs() if self.choice is not None else self._empty_obs()
         return obs, reward, terminated, truncated, self._info()
 

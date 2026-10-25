@@ -29,7 +29,7 @@ print('first question:     "%s", %d options, %d of them legal (mask)' % (info['c
 assert env.observation_space.contains(obs)
 
 # ---------------------------------------------------------------------------------------------------------------------------------------- play the recorded proof, decision by decision
-record = next(p for p in json.load(open(os.path.join(itp_paths.DATA, 'dataset_v1', 'bank.json')))['problems'] if p['name'] == NAME)
+record = next(p for p in json.load(open(os.path.join(itp_paths.DATA, 'dataset_v2', 'bank.json')))['problems'] if p['name'] == NAME)
 engine, placed = env.eng, bank.placed[NAME]
 total, trace, n_decisions = 0.0, [], 0
 for step in record['demonstration']['steps']:

@@ -1,9 +1,6 @@
 {
 "statements": {
-"N.induction3": "faeaac377dff0109",
 "coprime_consecutive": "6d05af21e1b02237",
-"cube_minus_n_div6": "cc1e6adbee156941",
-"cube_mod_nine": "580190795d76bcd6",
 "ident_brahmagupta": "86c3b1b629864c68",
 "ident_consecutive_four": "e7360c2a2b467806",
 "ident_diff_squares": "c99611a628f6789c",
@@ -20,13 +17,9 @@
 "ineq_four_ab": "2a36596f5d2cd000",
 "ineq_square_sum_three": "ecbb8e6c87b90400",
 "no_square_between": "05092f4ba69bebc3",
-"not_dvd_between": "a7fcf8e7024fc79c",
 "odd_square_mod_eight": "bd11e5d3221d27f2",
 "pow_sub_dvd": "846f4290bec1b1e6",
 "sqrt2_irrational": "e014f93aa4c99b0d",
-"square_mod_four": "2f1dea7f7b95c294",
-"sum_squares_zero": "8d9cc0778fe56c9a",
-"sum_two_squares_mod4": "ab4d993ad552c846",
-"three_dvd_sum_squares": "5cca7e3284a95d8a"
+"sum_two_squares_mod4": "ab4d993ad552c846"
 }
 }

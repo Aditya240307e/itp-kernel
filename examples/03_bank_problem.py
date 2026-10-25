@@ -7,7 +7,7 @@ The bank (src/python/problems/) holds formal olympiad problems.  Each one is a t
   * its text in words and its source (`IMO 1959 P1`), topics and level;
   * its intended meaning as a Python predicate (`semantic.Spec`): the formal statement is READ BACK into a syntax tree, evaluated on a box of integers and compared with the predicate, and every mutated
     statement (one plausible slip each) must differ from it -- so a mis-formalised problem cannot enter unnoticed;
-  * a reference proof written as a sequence of ACTIONS of the gym's action language, checked by the kernel (data/dataset_v1/bank.json holds them in a portable, JSON form).
+  * a reference proof written as a sequence of ACTIONS of the gym's action language, checked by the kernel (data/dataset_v2/bank.json holds them in a portable, JSON form).
 
 Below: the statement, the faithfulness check, the replay of the recorded proof by the kernel, and the verdict of the independent checker on the resulting proof term.
 """
@@ -37,7 +37,7 @@ print('the statement is sayable as a typed term of %d tokens: %s' % (len(report.
 assert report.ok, report.errors
 
 # ---------------------------------------------------------------------------------------------------------------------------------------- the recorded proof, replayed
-data = json.load(open(os.path.join(itp_paths.DATA, 'dataset_v1', 'bank.json')))
+data = json.load(open(os.path.join(itp_paths.DATA, 'dataset_v2', 'bank.json')))
 record = next(p for p in data['problems'] if p['name'] == NAME)
 steps = record['demonstration']['steps']
 print('\nthe recorded proof: %d actions   (split: %s, family: %s)' % (len(steps), record['split'], record['family']))

@@ -68,7 +68,8 @@ def card(data, splits, library=None, extra=None):
     add('kinds: ' + ', '.join('%s %d' % (k, kd[k]) for k in sorted(kd)) + '.  sources: ' + ', '.join('%s %d' % kv for kv in sorted(src.items())) + '.')
     add('')
     add('origin: ' + ', '.join('%s %d' % kv for kv in sorted(org.items())) + ' (contest: a problem of a named contest, paraphrased; adapted: a named problem changed to fit the vocabulary; style: written for the bank in the manner of a contest; '
-        'folklore: a classical fact).  Source check: ' + ', '.join('%s %d' % kv for kv in sorted(ver.items())) + ' (answer-checked: the formal statement\'s answer agrees with the contest\'s published answer; recalled: the source is from memory and has not been compared with the official statement).')
+        'folklore: a classical fact).  Source check: ' + ', '.join('%s %d' % kv for kv in sorted(ver.items())) + ' (answer-checked: compared with a public source -- the published answer of a "determine" problem (the formal answer is also found by brute force), the published statement of a "prove" problem; '
+        'recalled: the source and the wording are from memory and could not be compared with the official statement; none: no check applies, the problem was written for the bank or is a classical fact).')
     add('')
     add('topics: ' + ', '.join('%s %d' % kv for kv in sorted(tp.items())) + '.')
     add('')

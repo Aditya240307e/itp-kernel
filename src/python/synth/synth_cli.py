@@ -1,7 +1,7 @@
 """synth_cli.py -- generate, merge and verify the synthetic theorem dataset.
 
     python3 src/python/synth/synth_cli.py gen    --out DIR --seed 1 --attempts 160000 --shard 2000 --jobs 2     # shards of records: DIR/shards/shard_<first index>.jsonl.gz
-    python3 src/python/synth/synth_cli.py merge  --out DIR [--target 60000] [--shape-cap 2] [--skeleton-cap 25] [--subproblems data/dataset_v1/subproblems.json]   # DIR/{train,dev,test_iid,test_comp}.jsonl.gz, manifest.json
+    python3 src/python/synth/synth_cli.py merge  --out DIR [--target 60000] [--shape-cap 2] [--skeleton-cap 25] [--subproblems data/dataset_v2/subproblems.json]   # DIR/{train,dev,test_iid,test_comp}.jsonl.gz, manifest.json
     python3 src/python/synth/synth_cli.py verify --out DIR [--sample 1] [--no-second-opinion]                       # replay every record from its data in a fresh process
     python3 src/python/synth/synth_cli.py card   --out DIR                                                          # DIR/DATASET_CARD.md from the manifest
 

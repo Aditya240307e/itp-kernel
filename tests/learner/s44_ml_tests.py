@@ -50,7 +50,7 @@ import gym_env as G, gym_policy as P, gym_acts as ACTS
 from gym_env import Kind
 import ml_features as F, ml_data as D, ml_model as M, ml_search as MS, ml_train as T, ml_rl as RL, bank_env as BE
 
-DEMOS = ('ident_diff_squares', 'ineq_am_gm_two', 'imo1959_p1', 'ineq_cauchy_three', 'coprime_consecutive', 'not_dvd_between')
+DEMOS = ('ident_diff_squares', 'ineq_am_gm_two', 'imo1959_p1', 'ineq_cauchy_three', 'coprime_consecutive', 'pow_sub_dvd')
 ONE_STEP = ('ident_diff_squares', 'ident_cube_sum')           # proved by one `ring`: any policy finds them within a few attempts
 STRICT = ('imo1969_p1',)                                        # a problem with a lemma of its own: another proof in the strict regime
 CFG = {'d': 32, 'layers': 1, 'heads': 2, 'ff': 64, 'dropout': 0.0}
@@ -338,7 +338,7 @@ def sec_D(c):
     expect(term and env.solved and env.name == 'alias' and info['problem'] == 'alias', 'D4 a statement with its premises, given as a lemma, is played like a problem')
     # random play: the counts add up, the mask is right, nothing raises
     rng = np.random.default_rng(7)
-    for n in ('coprime_consecutive', 'not_dvd_between', 'ineq_am_gm_two'):
+    for n in ('coprime_consecutive', 'pow_sub_dvd', 'ineq_am_gm_two'):
         env = BE.BankEnv(bk, names=[n], ctx=ctx, engine=eng, max_actions=12, max_decisions=150)
         obs, info = env.reset(options={'problem': n}); steps = 0; ok = True; cur = None
         while True:
@@ -383,7 +383,7 @@ def sec_E(c):
     with torch.no_grad(): gtab = net.global_table()
     env = BE.BankEnv(bk, names=list(DEMOS), ctx=ctx, engine=eng, max_actions=10, max_decisions=120)
     worst = 0.0; n_roll = 0; n_dec = 0
-    for seed, name in enumerate(('coprime_consecutive', 'ident_diff_squares', 'ineq_am_gm_two', 'not_dvd_between', 'imo1959_p1')):
+    for seed, name in enumerate(('coprime_consecutive', 'ident_diff_squares', 'ineq_am_gm_two', 'pow_sub_dvd', 'imo1959_p1')):
         rng = np.random.default_rng(seed); rec = []
         solved, steps, info = RL.rollout(env, net, ctx, gtab, name, 'prefix', rng, 1.0, False, rec)
         expect(solved == env.solved and info['decisions'] == len(rec), 'E1 %s: a rollout records one log-probability per decision (%d)' % (name, len(rec)))
@@ -426,9 +426,9 @@ def sec_F(c):
     import json
     import gym_tree as GTR
     fx = c['fx']; ctx = fx.ctx; eng = fx.eng; bk = fx.bk; w = fx.w
-    data = {p['name']: p for p in json.load(open(os.path.join(__import__('itp_paths').ROOT, 'data', 'dataset_v1', 'bank.json')))['problems']}
-    mk = lambda **kw: BE.BankEnv(bk, names=['imo1959_p1', 'sum_squares_zero'], ctx=ctx, engine=eng, max_actions=60, max_decisions=900, **kw)
-    steps4 = data['imo1959_p1']['demonstration']['steps']; steps13 = data['sum_squares_zero']['demonstration']['steps']
+    data = {p['name']: p for p in json.load(open(os.path.join(__import__('itp_paths').ROOT, 'data', 'dataset_v2', 'bank.json')))['problems']}
+    mk = lambda **kw: BE.BankEnv(bk, names=['imo1959_p1', 'quad_form_zero'], ctx=ctx, engine=eng, max_actions=60, max_decisions=900, **kw)
+    steps4 = data['imo1959_p1']['demonstration']['steps']; steps13 = data['quad_form_zero']['demonstration']['steps']
     expect(len(steps4) == 4 and len(steps13) == 13, 'F0 (the two proofs the section plays: %d and %d actions)' % (len(steps4), len(steps13)))
     # ---- F1. the budget is observed and counts the actions
     env = mk()
@@ -468,7 +468,7 @@ def sec_F(c):
     raises('F4 hindsight before any episode', lambda: mk(track=True).hindsight(), RuntimeError)
     # ---- F5. tracked: what each action achieved
     env = mk(track=True)
-    obs, info = env.reset(options={'problem': 'sum_squares_zero'})
+    obs, info = env.reset(options={'problem': 'quad_form_zero'})
     expect(info['achieved'] == [], 'F5 nothing is achieved before the first action')
     solved = []; derived = []; per_step = []
     for st in steps13:
@@ -483,7 +483,7 @@ def sec_F(c):
     expect(all(a['length'] == 1 for a in derived), 'F5 a derived fact is one action')
     expect(term and env.solved, 'F5 (the proof is finished)')
     # ---- F6. hindsight of an unfinished episode
-    obs, info = env.reset(options={'problem': 'sum_squares_zero'})
+    obs, info = env.reset(options={'problem': 'quad_form_zero'})
     total, nd, obs, info, term, trunc = decide(env, info, steps13[:7])
     expect(not term and not env.solved and info['actions'] == 7, 'F6 seven of thirteen actions')
     part = env.hindsight(); keys_part = {e.key for e in part}
@@ -492,7 +492,7 @@ def sec_F(c):
     expect(all(e.length <= 1 for e in short) and len(short) <= len(part), 'F6 the keywords of `examples` pass through (max_len=1: %d)' % len(short))
     rec = env.episode_record()
     expect(json.loads(json.dumps(rec)) == rec and rec['actions'] == 7 and len(rec['steps']) == 7 and rec['steps'] == steps13[:7] and not rec['solved'], 'F6 the tracked record has the portable steps taken')
-    obs, info = env.reset(options={'problem': 'sum_squares_zero'})
+    obs, info = env.reset(options={'problem': 'quad_form_zero'})
     total, nd, obs, info, term, trunc = decide(env, info, steps13)
     full = env.hindsight(); keys_full = {e.key for e in full}
     expect(term and keys_part <= keys_full and len(full) == 18, 'F6 ... and they are among the %d theorems of the whole proof' % len(full))
@@ -507,12 +507,12 @@ def sec_F(c):
         try: w.check(env.term, env.ep.stmt)
         except Exception as e: bad.append((i, 'term refused by the kernel', str(e)[:60])); continue
         n_ok += 1
-    expect(n_ok == len(full) and not bad, 'F7 all %d hindsight examples of sum_squares_zero are solved through the environment from their own data, with a term the kernel accepts (%s)' % (len(full), bad[:3]))
+    expect(n_ok == len(full) and not bad, 'F7 all %d hindsight examples of quad_form_zero are solved through the environment from their own data, with a term the kernel accepts (%s)' % (len(full), bad[:3]))
     d = full[0].to_dict()
     obs, info = env.reset(options={'goal': d, 'name': 'mine'}); expect(env.name == 'mine' and info['problem'] == 'mine', 'F7 the goal can be given a name')
     obs, info = env.reset(options={'goal': dict(d, name='theirs')}); expect(info['problem'] == 'theirs', 'F7 ... or brings its own')
     obs, info = env.reset(seed=3)
-    expect(info['problem'] in ('imo1959_p1', 'sum_squares_zero') and env.ep.tree is not None and len(env.ep.tree.nodes) == 1 and info['actions'] == 0, 'F7 reset without options is back to the bank, with a fresh tree')
+    expect(info['problem'] in ('imo1959_p1', 'quad_form_zero') and env.ep.tree is not None and len(env.ep.tree.nodes) == 1 and info['actions'] == 0, 'F7 reset without options is back to the bank, with a fresh tree')
     expect(not env.ep.tree.by_step and info['achieved'] == [], 'F7 ... which has recorded nothing')
     # a statement of this world, with its premises
     pl = bk.placed['imo1959_p1']

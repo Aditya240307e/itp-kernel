@@ -48,6 +48,16 @@ def raises(what, fn, exc):
 GOLDEN = os.path.join(itp_paths.GOLDEN, 's41_golden.json')
 
 
+def n_offered(x):
+    """how many globals premises `x` (an int or a gym_premises.Premises) offers"""
+    return x.count() if hasattr(x, 'count') else x
+
+
+def top_of(x):
+    """the exclusive upper bound of the ids premises `x` offers"""
+    return x.upto if hasattr(x, 'upto') else x
+
+
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ fixture
 class Fixture:
     def __init__(self):
@@ -111,7 +121,7 @@ def sec_A(c):
     expect(SEM.audit_prims(w) == [], 'A2 ... and the table is restored')
     # ---- A3. every theorem of the library in the fragment is TRUE under the table (the kernel proved it from the definitions)
     t0 = time.time(); r = SEM.audit_theorems(w)
-    again = SEM.audit_theorems(w, names=[nm for nm, _ in r['inconclusive']], window_ex=40) if r['inconclusive'] else None
+    again = SEM.audit_theorems(w, names=[nm for nm, _ in r['inconclusive']], window_z=3, window_n=4, window_ex=300) if r['inconclusive'] else None
     expect(r['checked'] >= 380 and not r['failed'], 'A3 the %d theorems of the library inside the fragment come out true at all %d points of the windows (failed: %s)' % (r['checked'], r['points'], r['failed'][:3]))
     expect(again is None or (not again['failed'] and not again['inconclusive'] and again['checked'] == len(r['inconclusive'])), 'A3 ... those with a witness out of the small window are decided with a larger one (%s)' % (None if again is None else (again['failed'][:2], again['inconclusive'][:2]),))
     expect(r['unsupported'] > 100 and len(r['names']) == r['checked'], 'A3 the others are reported as outside the fragment (%d)' % r['unsupported'])
@@ -178,11 +188,11 @@ def sec_A_reader(c):
         r = spec_of(weak, sp(), mutate=False); expect(not r.ok and 'numbers in atom 0' in r.errors[0], 'A7 ... the numbers of the atoms can (%s)' % (r.errors[:1],))
         r = spec_of(good, sp(), mutate=True)
         expect(r.ok and r.mutants >= 10 and r.caught == r.mutants, 'A7 every mutant of 2ab <= a^2 + b^2 is told from it (%d of %d)' % (r.caught, r.mutants))
-        dv = F([Z, lambda a: D(lit(3), a)], lambda a, h: D(lit(3), a * a))
-        spd = lambda **kw: Spec(('Z',), (lambda a: a % 3 == 0,), lambda a: (a * a) % 3 == 0, atom=(lambda a: 3, lambda a: a * a), **kw)
+        dv = F([Z, lambda a: zle(lit(0), a * a)], lambda a, h: zle(lit(0), a * a * a * a))
+        spd = lambda **kw: Spec(('Z',), (lambda a: True,), lambda a: True, atom=(lambda a: 0, lambda a: a * a * a * a), **kw)
         r = spec_of(dv, spd(), mutate=True)
-        expect(not r.ok and r.survivors and all('Z.dvd' in sv for sv in r.survivors), 'A7 a mutant that means the same as the statement (3 | x and -3 | x) is reported unless the spec explains it (%s)' % (r.survivors,))
-        r2 = spec_of(dv, spd(skip_mutants={'constant 3 -> -3 in (Z.dvd 3': 'a divisor and its negative divide the same integers'}), mutate=True)
+        expect(not r.ok and r.survivors and all('Z.le 0 (Z.mul x0 x0)' in sv for sv in r.survivors), 'A7 a mutant that means the same as the statement (a^2 >= -1 for a^2 >= 0, in the hypothesis, where no atom sees it) is reported unless the spec explains it (%s)' % (r.survivors,))
+        r2 = spec_of(dv, spd(skip_mutants={'constant 0 -> -1 in (Z.le 0 (Z.mul x0 x0))': 'every square is at least -1 as well as at least 0: on the box the hypothesis is the same'}), mutate=True)
         expect(r2.ok and r2.equivalent >= 1, 'A7 ... and accepted once the spec explains it (%s)' % (r2.errors[:1],))
         r3 = spec_of(dv, spd(), mutate=True, strict=False); expect(r3.ok and r3.survivors, 'A7 non-strict mode reports the survivors without failing')
         # ---- A8. the body of a leading existential
@@ -212,7 +222,7 @@ def sec_A_reader(c):
 def sec_B(c):
     fx = c['fx']; bk = fx.bk; w = fx.w
     P = bk.placed
-    expect(len(P) >= 28, 'B1 the bank has its problems (%d)' % len(P))
+    expect(len(P) >= 21, 'B1 the bank has its problems (%d)' % len(P))
     expect(list(P) == list(B.BANK.problems) and len(set(P)) == len(P), 'B1 ... each once, in the order they were registered')
     lv = collections.Counter(pl.problem.level for pl in P.values()); kd = collections.Counter(pl.problem.kind for pl in P.values())
     expect(all(lv[i] >= 3 for i in (1, 2, 3)), 'B1 every level 1..3 has problems (%s)' % dict(lv))
@@ -223,7 +233,7 @@ def sec_B(c):
     expect(all(pl.problem.text.isascii() and len(pl.problem.text) > 20 for pl in P.values()), 'B1 every problem has its text, in ASCII')
     # ---- B2. every problem
     no_spec = [n for n, pl in P.items() if pl.problem.spec is None]
-    expect(no_spec == ['N.induction3'], 'B2 every problem has a spec of its meaning but the induction principle, which quantifies over predicates (%s)' % (no_spec,))
+    expect(no_spec == [], 'B2 every problem has a spec of its meaning (%s)' % (no_spec,))
     t0 = time.time(); bad = []; stats = collections.Counter()
     for n, pl in P.items():
         rep = bk.check(n)
@@ -232,7 +242,7 @@ def sec_B(c):
         if rep.code is not None: stats['sayable'] += 1
     expect(not bad, 'B2 every problem passes its check: statement read, meaning agrees with the spec on the box, every mutant caught or explained, statement sayable (%s)' % (bad[:2],))
     expect(stats['sayable'] == len(P), 'B2 every statement is sayable in the typed term builder (%d of %d)' % (stats['sayable'], len(P)))
-    expect(stats['mutants'] >= 650 and stats['caught'] == stats['mutants'], 'B2 the negative controls: %d mutants of the statements, all of them caught (%d), %d more explained as equivalent' % (stats['mutants'], stats['caught'], stats['equivalent']))
+    expect(stats['mutants'] >= 500 and stats['caught'] == stats['mutants'], 'B2 the negative controls: %d mutants of the statements, all of them caught (%d), %d more explained as equivalent' % (stats['mutants'], stats['caught'], stats['equivalent']))
     trace('B2 checks %.1f s, %s' % (time.time() - t0, dict(stats)))
     # ---- B3. the explanations of equivalent mutants are few and have reasons
     skips = [(n, d, why) for n, pl in P.items() if pl.problem.spec is not None for d, why in pl.problem.spec.skip_mutants.items()]
@@ -255,9 +265,9 @@ def sec_C(c):
     bad = {n: r.gap for n, r in res.items() if not r.ok}
     expect(not bad, 'C1 the reference proof of every problem replays as a sequence of kernel-checked actions (%s)' % (list(bad.items())[:2],))
     steps = sum(len(r.actions) for r in res.values() if r.ok)
-    expect(steps >= 400, 'C1 ... %d actions in all' % steps)
+    expect(steps >= 200, 'C1 ... %d actions in all' % steps)
     kinds = collections.Counter(); [kinds.update(r.kinds) for r in res.values() if r.ok]
-    expect(len(kinds) >= 14 and kinds['CLAIM'] >= 8 and kinds['INDUCT_WITH'] >= 3 and kinds['INTERVAL_CASES'] >= 4, 'C1 ... they use many kinds of action, among them claims, induction by a chosen principle, interval cases (%s)' % dict(kinds))
+    expect(len(kinds) >= 14 and kinds['CLAIM'] >= 8 and kinds['INDUCT_WITH'] >= 3 and kinds['INTERVAL_CASES'] >= 1, 'C1 ... they use many kinds of action, among them claims, induction by a chosen principle, interval cases (%s)' % dict(kinds))
     # ---- C2. the strict regime: the proofs that carry their lemmas inline replay with the lemmas hidden
     with_helpers = [n for n, pl in P.items() if pl.problem.helpers and pl.problem.build is not None]
     expect(len(with_helpers) >= 3 and set(with_helpers) <= set(fx.strict), 'C2 every problem with lemmas of its own that claims a self-contained proof was replayed in the strict regime (%s)' % (with_helpers,))
@@ -265,7 +275,8 @@ def sec_C(c):
     expect(not sbad, 'C2 ... and they replay (%s)' % (list(sbad.items())[:2],))
     for n in with_helpers[:3]:
         pl = P[n]
-        expect(pl.premises('strict') < pl.premises('prefix') and pl.premises('prefix') == pl.gid, 'C2 the strict regime of %s offers fewer globals than the prefix regime (%d < %d)' % (n, pl.premises('strict'), pl.premises('prefix')))
+        ps, pp = pl.premises('strict'), pl.premises('prefix')
+        expect(n_offered(ps) < n_offered(pp) and top_of(pp) == pl.gid, 'C2 the strict regime of %s offers fewer globals than the prefix regime (%d < %d)' % (n, n_offered(ps), n_offered(pp)))
     # a proof that uses a hidden lemma does not replay when it is hidden
     n = 'sqrt2_irrational'; r = bk.demonstrate(n, engine=fx.eng2, regime='strict')
     expect(not r.ok, 'C2 the reference proof of %s uses a lemma written for it: with the lemma hidden it does not replay (and the problem says so: strict=%s)' % (n, P[n].problem.strict))
@@ -283,7 +294,7 @@ def sec_C(c):
         if n in ('ineq_cauchy_two', 'imo1969_p1') and n != 'imo1964_p1b':
             expect(not fx.ic_check(term, other)[0], 'C3 the independent checker rejects the proof of %s as a proof of another problem' % n)
     trace('C3 independent checker: %.1f s for %d proofs' % (time.time() - t_c3, n_ic))
-    expect(n_ic >= 24 and not bad_ic, 'C3 the independent checker accepts the proofs by actions of %d problems (%s)' % (n_ic, bad_ic[:2]))
+    expect(n_ic >= 17 and not bad_ic, 'C3 the independent checker accepts the proofs by actions of %d problems (%s)' % (n_ic, bad_ic[:2]))
     # ---- C4. from JSON, in a fresh engine over a freshly built world
     t_c4 = time.time()
     data = fx.data; bk2 = fx.bk2; eng_f = G.Engine(bk2.w, kinds=set(G.Kind), strict=True); bad_j = []; n_j = 0
@@ -327,8 +338,8 @@ def sec_D(c):
     # ---- D1. premises
     for n in ('imo1964_p1b', 'imo1969_p1', 'ineq_am_gm_two'):
         pl = P[n]
-        ep = bk.episode(n, 'prefix'); expect(eng.premises == pl.gid, 'D1 the prefix regime of %s offers the globals before the theorem (%d)' % (n, pl.gid))
-        ep = bk.episode(n, 'strict'); expect(eng.premises == pl.defs_end and pl.defs_end <= pl.gid, 'D1 the strict regime of %s offers the globals before its lemmas (%d <= %d)' % (n, pl.defs_end, pl.gid))
+        ep = bk.episode(n, 'prefix'); expect(eng.premises == pl.premises('prefix') and top_of(eng.premises) == pl.gid, 'D1 the prefix regime of %s offers the library and the block up to the theorem (%d)' % (n, pl.gid))
+        ep = bk.episode(n, 'strict'); expect(eng.premises == pl.premises('strict') and top_of(eng.premises) == pl.defs_end and pl.defs_end <= pl.gid, 'D1 the strict regime of %s offers the library and the block up to its lemmas (%d <= %d)' % (n, pl.defs_end, pl.gid))
     raises('D1 there is no other regime', lambda: bk.episode('ineq_am_gm_two', 'lenient'), ValueError)
     # ---- D2. a helper is on the menu in the prefix regime and hidden in the strict one
     for n, h in (('imo1964_p1b', 'pow2_mod7'), ('imo1969_p1', 'germain_not_prime'), ('imo1964_p1a', 'pow2_iff')):
@@ -346,7 +357,7 @@ def sec_D(c):
     raises('D3 an unfinished episode cannot be finished', ep.finish, G.ActionError)
     # ---- D4. the reference actions, played step by step through the Episode API, finish the episode
     done = 0; bad = []
-    for n in ('ineq_cauchy_two', 'sum_squares_zero', 'pow_sub_dvd', 'no_square_between', 'imo1984_p2', 'imo1964_p1a'):
+    for n in ('ineq_cauchy_two', 'ident_brahmagupta', 'pow_sub_dvd', 'no_square_between', 'imo1984_p2', 'imo1964_p1a'):
         pl = P[n]; steps = fx.results[n].portable
         for regime in ('prefix', 'strict'):
             if regime == 'strict' and n not in fx.strict and pl.premises('strict') != pl.premises('prefix'): continue
@@ -474,9 +485,9 @@ def sec_F(c):
     # F7. a spec that says something else than the statement (a wrong constant in the intended identity)
     wrong('wrong_constant', 'For every integer n: (n + 1)^2 = n^2 + 2n + 1.', Spec(('Z',), (), lambda n: (n + 1) ** 2 == n * n + 2 * n + 2, atom=(lambda n: (n + 1) ** 2, lambda n: n * n + 2 * n + 2)),
           lambda w, s: ([s.Z], lambda n: s.Eq((n + 1) ** 2, n ** 2 + 2 * n + 1)), lambda p: (p.intro('n'), p.ring()))
-    # F8. a right spec, and a mutant of the statement that means the same (a divisor and its negative) that the spec does not explain
-    wrong('wrong_unexplained', 'For every integer n: if 3 divides n then 3 divides n^2.', Spec(('Z',), (lambda n: n % 3 == 0,), lambda n: (n * n) % 3 == 0, atom=(lambda n: 3, lambda n: n * n)),
-          lambda w, s: ([s.Z, lambda n: s.D(3, n)], lambda n, h: s.D(3, n * n)), lambda p: (p.intro('n', 'h'), p.cases('h', names=['k', 'hk']), p.exists(p.T('n k', lambda n, k: n * k)), p.rw('hk'), p.ring()))
+    # F8. a right spec, and a mutant of the statement that means the same (a^2 >= -1 for the hypothesis a^2 >= 0, where no atom sees it) that the spec does not explain
+    wrong('wrong_unexplained', 'For every integer a: if a^2 >= 0 then a^4 >= 0.', Spec(('Z',), (lambda a: True,), lambda a: True, atom=(lambda a: 0, lambda a: a * a * a * a)),
+          lambda w, s: ([s.Z, lambda a: s.zle(0, a * a)], lambda a, h: s.zle(0, a * a * a * a)), lambda p: (p.intro('a', 'h'), p.nlinarith(('Z.sq_nonneg', lambda q: q.h('a') * q.h('a')))))
     w, placed = B.build_world(bank_lib.base, bad_bank)
     lb = B.LoadedBank(w, placed, bad_bank, bank_lib.base)
     for n in ('wrong_weaker', 'wrong_exists', 'wrong_strict', 'wrong_vacuous', 'wrong_unreadable', 'wrong_params', 'wrong_constant', 'wrong_unexplained'):

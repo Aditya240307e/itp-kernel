@@ -246,7 +246,7 @@ _A, _B, _C = (lambda a, b, c: a), (lambda a, b, c: b), (lambda a, b, c: c)
                                        lambda a, b, c: b * b == a * c),
                    lambda a, b, c: 124 <= 100 * a + 10 * b + c <= 964 and _geo_ok(1, 2, 4) and _geo_ok(9, 6, 4), domains=(range(-1, 11), range(-1, 11), range(-1, 11)), points=2000,
                    hatoms=_geo_atoms(_A, _B, _C), atoms=[(_const(124), lambda a, b, c: 100 * a + 10 * b + c), (lambda a, b, c: 100 * a + 10 * b + c, _const(964))] + _geo_atoms(_const(1), _const(2), _const(4)) + _geo_atoms(_const(9), _const(6), _const(4)),
-                   skip_mutants={'Z.mul -> Z.add in ((Z.mul 2 2) = (Z.mul 1 4))': '2 + 2 = 2 * 2'}),
+                   skip_mutants={'Z.mul -> Z.add in ((Z.mul 2 2) = (Z.mul 1 4))': 'the sum 2 + 2 and the product 2 * 2 are both 4: the mutant states the same equation'}),
          notes='formalised as: every geometric number lies between 124 and 964, and 124 = 1 2 4, 964 = 9 6 4 are geometric. For a = 1: b^2 = c leaves b = 2, 3; for a = 9: b^2 = 9 c leaves b = 3, 6')
 def _(w, b):
     v = K.Vocab(w); Eq = v.Eq

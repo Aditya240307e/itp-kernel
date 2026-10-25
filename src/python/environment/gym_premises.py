@@ -27,7 +27,11 @@ class Premises:
             if a == b: continue
             if merged and a <= merged[-1][1]: merged[-1] = (merged[-1][0], max(merged[-1][1], b))
             else: merged.append((a, b))
-        self.upto = upto; self.hidden = tuple((a, min(b, upto)) for a, b in merged if a < upto)
+        object.__setattr__(self, 'upto', upto); object.__setattr__(self, 'hidden', tuple((a, min(b, upto)) for a, b in merged if a < upto))
+
+    def __setattr__(self, name, value): raise AttributeError('Premises is immutable (it is a value: it is hashed)')
+    def __delattr__(self, name): raise AttributeError('Premises is immutable (it is a value: it is hashed)')
+    def __reduce__(self): return (Premises, (self.upto, self.hidden))                    # (pickle, copy: through the constructor, which normalises)
 
     def sees(self, gid):
         if not 0 <= gid < self.upto: return False

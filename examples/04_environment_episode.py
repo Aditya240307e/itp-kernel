@@ -41,7 +41,7 @@ except G.ActionError as e:
     print('RING on this goal: refused (%s); goals open: %d, steps taken: %d' % (e, episode.n_goals, len(episode.steps)))
 
 # play the recorded proof, action by action, as an agent would
-record = next(p for p in json.load(open(os.path.join(itp_paths.DATA, 'dataset_v1', 'bank.json')))['problems'] if p['name'] == NAME)
+record = next(p for p in json.load(open(os.path.join(itp_paths.DATA, 'dataset_v2', 'bank.json')))['problems'] if p['name'] == NAME)
 print('\nplaying the recorded proof (%d actions):' % len(record['demonstration']['steps']))
 for step in record['demonstration']['steps']:
     menu = episode.menu()                                       # the menu of the current first goal

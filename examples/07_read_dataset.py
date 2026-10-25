@@ -1,4 +1,4 @@
-"""07 -- the dataset on disk: what is in data/dataset_v1, how it is split, and how to check it.
+"""07 -- the dataset on disk: what is in data/dataset_v2, how it is split, and how to check it.
 
     python3 examples/07_read_dataset.py                      (a second; no kernel needed)
 
@@ -18,7 +18,7 @@ This script reads them without the kernel, prints the shape of the data, and che
 import os as _os, sys as _sys; _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'src', 'python')); import itp_paths  # noqa: E402,F401
 import collections, hashlib, json, os
 
-D = os.path.join(itp_paths.DATA, 'dataset_v1')
+D = os.path.join(itp_paths.DATA, 'dataset_v2')
 load = lambda name: json.load(open(os.path.join(D, name)))
 
 

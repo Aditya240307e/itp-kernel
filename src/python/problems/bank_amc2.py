@@ -493,36 +493,38 @@ def _(w, b):
             p.linarith()
 
 
-@problem('amc_ineq_02', text='Show that x^2 + y^2 + z^2 >= xy + yz + zx for all integers x, y, z.', topics=('inequality',), level=2,
-         spec=spec(('Z', 'Z', 'Z'), [], LE(lambda x, y, z: x * y + y * z + z * x, lambda x, y, z: x * x + y * y + z * z), domains=(range(-4, 5),) * 3))
+@problem('amc_ineq_02', text='Show that a^2 + b^2 + c^2 + d^2 >= ab + bc + cd + da for all integers a, b, c, d.', topics=('inequality',), level=2,
+         spec=spec(('Z', 'Z', 'Z', 'Z'), [], LE(lambda a, b, c, d: a * b + b * c + c * d + d * a, lambda a, b, c, d: a * a + b * b + c * c + d * d), domains=(range(-3, 4),) * 4))
 def _(w, b):
     v = K.Vocab(w)
     with v.ints():
-        lit = v.lit
-        @K.theorem(w, 'amc_ineq_02', [v.Z, v.Z, v.Z], [], lambda x, y, z: v.le(x * y + y * z + z * x, x ** 2 + y ** 2 + z ** 2))
-        def _(p):                                                                  # twice the difference is (x - y)^2 + (y - z)^2 + (z - x)^2
-            p.intro('x', 'y', 'z')
-            p.have('s1', ('Z.sq_nonneg', p.T('x y', lambda x, y: x - y)))
-            p.have('s2', ('Z.sq_nonneg', p.T('y z', lambda y, z: y - z)))
-            p.have('s3', ('Z.sq_nonneg', p.T('x z', lambda x, z: z - x)))
+        @K.theorem(w, 'amc_ineq_02', [v.Z, v.Z, v.Z, v.Z], [], lambda a, b_, c, d: v.le(a * b_ + b_ * c + c * d + d * a, a ** 2 + b_ ** 2 + c ** 2 + d ** 2))
+        def _(p):                                                                  # twice the difference is (a - b)^2 + (b - c)^2 + (c - d)^2 + (d - a)^2
+            p.intro('a', 'b', 'c', 'd')
+            p.have('s1', ('Z.sq_nonneg', p.T('a b', lambda a, b_: a - b_)))
+            p.have('s2', ('Z.sq_nonneg', p.T('b c', lambda b_, c: b_ - c)))
+            p.have('s3', ('Z.sq_nonneg', p.T('c d', lambda c, d: c - d)))
+            p.have('s4', ('Z.sq_nonneg', p.T('a d', lambda a, d: d - a)))
             p.linarith()
 
 
-@problem('amc_ineq_03', text='Show that a^3 + b^3 + c^3 >= 3abc for all non-negative integers a, b, c.', topics=('inequality', 'identity'), level=3,
-         spec=spec(('Z', 'Z', 'Z'), [LE(0, X(0)), LE(0, X(1)), LE(0, X(2))], LE(lambda a, b, c: 3 * a * b * c, lambda a, b, c: a ** 3 + b ** 3 + c ** 3), domains=(range(-4, 5),) * 3))
+@problem('amc_ineq_03', text='Show that a^3 + b^3 + c^3 >= a^2 b + b^2 c + c^2 a for all non-negative integers a, b, c.', topics=('inequality',), level=3,
+         spec=spec(('Z', 'Z', 'Z'), [LE(0, X(0)), LE(0, X(1)), LE(0, X(2))], LE(lambda a, b, c: a * a * b + b * b * c + c * c * a, lambda a, b, c: a ** 3 + b ** 3 + c ** 3), domains=(range(-3, 5),) * 3))
 def _(w, b):
     v = K.Vocab(w)
     with v.ints():
-        lit = v.lit
-        @K.theorem(w, 'amc_ineq_03', [v.Z, v.Z, v.Z], [lambda a, b_, c: v.nonneg(a), lambda a, b_, c: v.nonneg(b_), lambda a, b_, c: v.nonneg(c)], lambda a, b_, c: v.le(3 * a * b_ * c, a ** 3 + b_ ** 3 + c ** 3))
-        def _(p):                                                                  # a^3 + b^3 + c^3 - 3abc = (a + b + c)((a - b)^2 + (b - c)^2 + (c - a)^2) / 2
+        @K.theorem(w, 'amc_ineq_03', [v.Z, v.Z, v.Z], [lambda a, b_, c: v.nonneg(a), lambda a, b_, c: v.nonneg(b_), lambda a, b_, c: v.nonneg(c)], lambda a, b_, c: v.le(a * a * b_ + b_ * b_ * c + c * c * a, a ** 3 + b_ ** 3 + c ** 3))
+        def _(p):                    # 2 a^3 + b^3 - 3 a^2 b = (a - b)^2 (2a + b); the three of them add up to 3 (a^3 + b^3 + c^3 - a^2 b - b^2 c - c^2 a)
             p.intro('a', 'b', 'c', 'ha', 'hb', 'hc')
-            p.have('s', p.T('a b c', lambda a, b_, c: v.nonneg(a + b_ + c)), lambda q: q.linarith())
-            p.have('s1', ('Z.sq_nonneg', p.T('a b', lambda a, b_: a - b_)))
-            p.have('s2', ('Z.sq_nonneg', p.T('b c', lambda b_, c: b_ - c)))
-            p.have('s3', ('Z.sq_nonneg', p.T('a c', lambda a, c: c - a)))
-            p.have('u', p.T('a b c', lambda a, b_, c: v.nonneg((a - b_) * (a - b_) + (b_ - c) * (b_ - c) + (c - a) * (c - a))), lambda q: q.linarith())
-            p.have('t', ('Z.mul_nonneg', p.T('a b c', lambda a, b_, c: a + b_ + c), p.T('a b c', lambda a, b_, c: (a - b_) * (a - b_) + (b_ - c) * (b_ - c) + (c - a) * (c - a)), 's', 'u'))
+            p.have('l1', p.T('a b', lambda a, b_: v.nonneg(2 * a + b_)), lambda q: q.linarith())
+            p.have('l2', p.T('b c', lambda b_, c: v.nonneg(2 * b_ + c)), lambda q: q.linarith())
+            p.have('l3', p.T('a c', lambda a, c: v.nonneg(2 * c + a)), lambda q: q.linarith())
+            p.have('u1', p.T('a b', lambda a, b_: v.nonneg((a - b_) * (a - b_))), lambda q: q.nlinarith())
+            p.have('u2', p.T('b c', lambda b_, c: v.nonneg((b_ - c) * (b_ - c))), lambda q: q.nlinarith())
+            p.have('u3', p.T('a c', lambda a, c: v.nonneg((c - a) * (c - a))), lambda q: q.nlinarith())
+            p.have('t1', ('Z.mul_nonneg', p.T('a b', lambda a, b_: (a - b_) * (a - b_)), p.T('a b', lambda a, b_: 2 * a + b_), 'u1', 'l1'))
+            p.have('t2', ('Z.mul_nonneg', p.T('b c', lambda b_, c: (b_ - c) * (b_ - c)), p.T('b c', lambda b_, c: 2 * b_ + c), 'u2', 'l2'))
+            p.have('t3', ('Z.mul_nonneg', p.T('a c', lambda a, c: (c - a) * (c - a)), p.T('a c', lambda a, c: 2 * c + a), 'u3', 'l3'))
             p.linarith()
 
 
@@ -539,17 +541,17 @@ def _(w, b):
             p.have('s', ('Z.sq_nonneg', 'n')); p.linarith()                        # n < 1, so n <= 0 <= n^2
 
 
-@problem('amc_ineq_05', text='Show that a^3 + b^3 >= a^2 b + a b^2 for all non-negative integers a and b.', topics=('inequality', 'identity'), level=2,
-         spec=spec(('Z', 'Z'), [LE(0, X(0)), LE(0, X(1))], LE(lambda a, b: a * a * b + a * b * b, lambda a, b: a ** 3 + b ** 3), domains=(range(-5, 6),) * 2))
+@problem('amc_ineq_05', text='Show that if a >= b and x >= y are integers, then ax + by >= ay + bx.', topics=('inequality',), level=2,
+         spec=spec(('Z', 'Z', 'Z', 'Z'), [LE(X(1), X(0)), LE(X(3), X(2))], LE(lambda a, b, x, y: a * y + b * x, lambda a, b, x, y: a * x + b * y), domains=(range(-3, 4),) * 4))
 def _(w, b):
     v = K.Vocab(w)
     with v.ints():
-        lit = v.lit
-        @K.theorem(w, 'amc_ineq_05', [v.Z, v.Z], [lambda a, b_: v.nonneg(a), lambda a, b_: v.nonneg(b_)], lambda a, b_: v.le(a * a * b_ + a * b_ * b_, a ** 3 + b_ ** 3))
-        def _(p):                                                                  # a^3 + b^3 - a^2 b - a b^2 = (a + b)(a - b)^2
-            p.intro('a', 'b', 'ha', 'hb')
-            p.have('s', p.T('a b', lambda a, b_: v.nonneg(a + b_)), lambda q: q.linarith())
-            p.have('t', ('Z.mul_nonneg', p.T('a b', lambda a, b_: a + b_), p.T('a b', lambda a, b_: (a - b_) * (a - b_)), 's', ('Z.sq_nonneg', p.T('a b', lambda a, b_: a - b_))))
+        @K.theorem(w, 'amc_ineq_05', [v.Z, v.Z, v.Z, v.Z], [lambda a, b_, x, y: v.le(b_, a), lambda a, b_, x, y: v.le(y, x)], lambda a, b_, x, y: v.le(a * y + b_ * x, a * x + b_ * y))
+        def _(p):                                                                  # ax + by - ay - bx = (a - b)(x - y)
+            p.intro('a', 'b', 'x', 'y', 'h1', 'h2')
+            p.have('d1', p.T('a b', lambda a, b_: v.nonneg(a - b_)), lambda q: q.linarith())
+            p.have('d2', p.T('x y', lambda x, y: v.nonneg(x - y)), lambda q: q.linarith())
+            p.have('t', ('Z.mul_nonneg', p.T('a b', lambda a, b_: a - b_), p.T('x y', lambda x, y: x - y), 'd1', 'd2'))
             p.linarith()
 
 
@@ -854,17 +856,16 @@ def _(w, b):
 
 
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ more divisibility, digits and algebra
-@problem('amc_div_07', text='Show that the product of two consecutive integers, n(n + 1), is even.', topics=('number-theory', 'parity', 'divisibility'), level=1,
-         spec=spec(('Z',), [], DVD(2, lambda n: n * (n + 1)), domains=(range(-9, 10),)))
+@problem('amc_div_07', text='Show that if n is an even integer, then n^2 is divisible by 4.', topics=('number-theory', 'parity', 'divisibility'), level=1,
+         spec=spec(('Z',), [DVD(2, X(0))], DVD(4, lambda n: n * n), domains=(range(-9, 10),)))
 def _(w, b):
     v = K.Vocab(w); D = v.dvd
     with v.ints():
         lit = v.lit
-        @K.theorem(w, 'amc_div_07', [v.Z], [], lambda n: D(lit(2), n * (n + 1)))
+        @K.theorem(w, 'amc_div_07', [v.Z], [lambda n: D(lit(2), n)], lambda n: D(lit(4), n * n))
         def _(p):
-            p.intro('n'); p.obtain(['k', 'c'], ('Z.even_or_odd', 'n')); p.cases('c', names=['c', 'c'])
-            p.rw('c'); p.exists(p.T('k', lambda k: k * (2 * k + 1))); p.ring()
-            p.rw('c'); p.exists(p.T('k', lambda k: (2 * k + 1) * (k + 1))); p.ring()
+            p.intro('n', 'h'); p.cases('h', names=['k', 'hk'])
+            p.rw('hk'); p.exists(p.T('k', lambda k: k * k)); p.ring()
 
 
 @problem('amc_div_08', text='Show that a - b divides a^2 - b^2 for all integers a and b.', topics=('number-theory', 'divisibility', 'identity'), level=1,

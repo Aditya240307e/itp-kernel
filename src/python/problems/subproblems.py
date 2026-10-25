@@ -221,5 +221,5 @@ if __name__ == '__main__':
     if args and args[0] == '--verify':
         print('replayed %d sub-theorems' % verify(args[1], progress=print))
     else:
-        info = build(args[0] if args else os.path.join(itp_paths.DATA, 'dataset_v1'), progress=lambda m: print(m, flush=True))
+        info = build(args[0] if args else os.path.join(itp_paths.DATA, 'dataset_v2'), progress=lambda m: print(m, flush=True))
         print(json.dumps(info, indent=1))

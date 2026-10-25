@@ -14,7 +14,7 @@ and fragile in exactly the ways this gate watches:
   G. requirements.txt names exactly the third-party packages the code imports;
   H. the required directories and files exist, and nothing else is lying around at the top level;
   I. the Makefile parses (`make -n` on each target) and its targets are the documented ones;
-  J. the dataset on disk (data/dataset_v1): the manifest's digests are those of the files, and the files agree with each other;
+  J. the dataset on disk (data/dataset_v2): the manifest's digests are those of the files, and the files agree with each other;
   K. the release archive: tools/make_dist.py makes a tar and a zip that hold every file once, a manifest that checks, and nothing of the build or the machine;
   L. the copies of the tree in which the mutation driver and the sanitizer run the gates are complete (an unmutated copy passes a gate).
 """
@@ -56,7 +56,7 @@ NOT_GATES = ('bench', 'fuzz', 'support')                        # scripts and he
 
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ A. the registry
 def sec_A():
-    cmds = list(REG.GATE_CMDS) + list(REG.ML_GATE_CMDS) + list(REG.REPO_GATE_CMDS) + list(REG.SYNTH_GATE_CMDS)
+    cmds = list(REG.GATE_CMDS) + list(REG.BANK_GATE_CMDS) + list(REG.ML_GATE_CMDS) + list(REG.REPO_GATE_CMDS) + list(REG.SYNTH_GATE_CMDS)
     paths = [c[0] for c in cmds]
     for c in cmds: expect(os.path.isfile(os.path.join(itp_paths.TESTS, c[0])), 'A  registered gate %s does not exist' % c[0])
     expect(len(paths) == len(set(paths)), 'A  a gate is registered twice: %s' % sorted(p for p, n in collections.Counter(paths).items() if n > 1))
@@ -66,6 +66,8 @@ def sec_A():
     expect(not (on_disk - set(paths)), 'A  scripts under tests/ that no registry lists: %s' % sorted(on_disk - set(paths)))
     expect(len(REG.GATE_CMDS) >= 46 and len(REG.ML_GATE_CMDS) >= 1 and len(REG.REPO_GATE_CMDS) >= 2, 'A  the registry has the kernel gates (%d), the learner gate and the repository gates' % len(REG.GATE_CMDS))
     expect(all(c in REG.REPO_GATE_CMDS for c in cmds if c[0].startswith('repo/')), 'A  the gates under tests/repo are the REPO_GATE_CMDS')
+    expect(set(REG.HEAVY_GATES) <= set(base), 'A  every heavy gate (never run together with another one) is a registered gate (%s)' % sorted(set(REG.HEAVY_GATES) - set(base)))
+    expect(len(REG.BANK_GATE_CMDS) >= 2 and all(c[0].startswith('problems/') for c in REG.BANK_GATE_CMDS) and not set(REG.BANK_GATE_CMDS) & set(REG.GATE_CMDS), 'A  the gates of the contest problems (BANK_GATE_CMDS) are registered apart from the mutation driver\'s GATE_CMDS')
     for c in REG.REPO_GATE_CMDS: expect(c[0].startswith('repo/'), 'A  %s is registered as a repository gate but does not live in tests/repo' % c[0])
 
 
@@ -138,7 +140,7 @@ def sec_E():
             if path and not os.path.exists(os.path.normpath(os.path.join(os.path.dirname(p), path))):
                 expect(False, 'E  %s links to %s, which does not exist' % (rel(p), target))
     readme = read(os.path.join(itp_paths.TESTS, 'README.md'))
-    for c in list(REG.GATE_CMDS) + list(REG.ML_GATE_CMDS) + list(REG.REPO_GATE_CMDS):
+    for c in list(REG.GATE_CMDS) + list(REG.BANK_GATE_CMDS) + list(REG.ML_GATE_CMDS) + list(REG.REPO_GATE_CMDS) + list(REG.SYNTH_GATE_CMDS):
         expect(os.path.basename(c[0]) in readme, 'E  tests/README.md does not list the gate %s' % c[0])
 
 
@@ -182,7 +184,7 @@ REQUIRED_FILES = ['README.md', 'Makefile', 'requirements.txt', '.gitignore',
                   'src/python/itp_paths.py', 'src/python/build_kernel.py',
                   'tests/README.md', 'tests/run_gates.py', 'tests/gate_registry.py', 'mutants/README.md', 'mutants/mutate.py', 'mutants/catalogue.py', 'legacy/README.md', 'tools/sanitize.py',
                   'docs/FINDINGS.md', 'docs/ROADMAP.md', 'docs/BANK.md', 'docs/ACTIONS.md', 'docs/KERNEL_DESIGN.md', 'docs/ARCHITECTURE_RL.md', 'docs/TRAINING.md', 'docs/GENERATOR.md',
-                  'data/dataset_v1/bank.json', 'data/dataset_v1/splits.json', 'data/dataset_v1/library.json', 'data/dataset_v1/manifest.json', 'data/dataset_v1/DATASET_CARD.md']
+                  'data/dataset_v2/bank.json', 'data/dataset_v2/splits.json', 'data/dataset_v2/library.json', 'data/dataset_v2/manifest.json', 'data/dataset_v2/DATASET_CARD.md']
 REQUIRED_DIRS = ['src/python/authoring', 'src/python/checker', 'src/python/library', 'src/python/environment', 'src/python/problems', 'src/python/learner', 'src/python/synth',
                  'tests/kernel', 'tests/library', 'tests/environment', 'tests/problems', 'tests/learner', 'tests/synth', 'tests/repo', 'tests/support', 'tests/golden', 'examples', 'data/results']
 TOP_LEVEL = {'README.md', 'Makefile', 'requirements.txt', '.gitignore', '.git', 'build', 'dist', 'artifacts', 'src', 'tests', 'mutants', 'examples', 'docs', 'data', 'legacy', 'tools', '.venv',
@@ -215,14 +217,14 @@ def sec_I():
 
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ J. the dataset on disk
 def sec_J():
-    d = os.path.join(ROOT, 'data', 'dataset_v1')
+    d = os.path.join(ROOT, 'data', 'dataset_v2')
     man = json.load(open(os.path.join(d, 'manifest.json')))
     for name, want in man['files'].items():
         h = hashlib.sha256(open(os.path.join(d, name), 'rb').read()).hexdigest()[:16]
         expect(h == want, 'J  %s differs from the manifest (%s, not %s)' % (name, h, want))
     bank, splits = json.load(open(os.path.join(d, 'bank.json'))), json.load(open(os.path.join(d, 'splits.json')))
     names = [p['name'] for p in bank['problems']]
-    expect(len(names) == len(set(names)) and len(names) >= 80, 'J  bank.json: %d distinct problems' % len(set(names)))
+    expect(len(names) == len(set(names)) == 268, 'J  bank.json: %d distinct problems (268 in dataset v2)' % len(set(names)))
     in_splits = [n for s in splits['problems'].values() for n in s]
     expect(sorted(in_splits) == sorted(names), 'J  splits.json lists exactly the problems of bank.json, each once')
     by_split = collections.defaultdict(list)
@@ -231,13 +233,19 @@ def sec_J():
     fam = collections.defaultdict(set)
     for p in bank['problems']: fam[p['family']].add(p['split'])
     expect(all(len(s) == 1 for s in fam.values()), 'J  the problems of one family are in one split (%s)' % [f for f, s in fam.items() if len(s) > 1])
-    expect(all('demonstration' in p and p['demonstration']['length'] == len(p['demonstration']['steps']) >= 1 for p in bank['problems']), 'J  every problem has a recorded proof')
+    proved = [p for p in bank['problems'] if p.get('proved', True)]
+    expect(len(proved) == 187 and all('demonstration' in p and p['demonstration']['length'] == len(p['demonstration']['steps']) >= 1 for p in proved), 'J  every proved problem (%d) has a recorded proof' % len(proved))
+    expect(all('demonstration' not in p and p['gid'] is None for p in bank['problems'] if not p.get('proved', True)), 'J  a statement-only problem has no recorded proof and no theorem')
+    expect(all(p.get('origin') in ('contest', 'adapted', 'style', 'folklore') and p.get('verified') in ('answer-checked', 'recalled', 'none') for p in bank['problems']), 'J  every problem says where it comes from (origin) and whether its text or answer was compared with a source (verified)')
     card = read(os.path.join(d, 'DATASET_CARD.md'))
     expect(('%d problems' % len(names)) in card, 'J  the dataset card states the number of problems (%d)' % len(names))
+    # the result files of the first runs (dataset v1) are a historical record under data/results/v1: they say so, and they are not read as results on v2
+    rd = os.path.join(ROOT, 'data', 'results')
+    expect(os.path.isfile(os.path.join(rd, 'README.md')) and 'dataset v1' in read(os.path.join(rd, 'README.md')), 'J  data/results/README.md says that the result files are those of dataset v1')
+    expect(sorted(os.listdir(os.path.join(rd, 'v1'))) == ['bc1_history.json', 'blind_dev.json', 'blind_test.json', 'blind_train.json', 'rl_smoke_history.json', 'smoke_policy.json'], 'J  data/results/v1 holds the six result files of the first runs')
     for f in ('blind_train', 'blind_dev', 'blind_test'):
-        rows = json.load(open(os.path.join(ROOT, 'data', 'results', f + '.json')))['rows']
-        split = f.split('_')[1]
-        expect(rows and {r['name'] for r in rows} <= set(splits['problems'][split]), 'J  data/results/%s.json describes problems of the %s split only' % (f, split))
+        res = json.load(open(os.path.join(rd, 'v1', f + '.json')))
+        expect(res['rows'] and res['args']['data'] == 'data/dataset_v1' and all('name' in r for r in res['rows']), 'J  data/results/v1/%s.json describes a run on dataset v1' % f)
 
 
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ K. the release archive

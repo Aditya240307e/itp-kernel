@@ -1,7 +1,7 @@
-"""S43 gate: the extended problem bank -- the 54 problems of bank_lib2.py on top of the 28 of S41, and the infrastructure that they needed.
+"""S43 gate: the extended problem bank -- the 51 problems of bank_lib2.py on top of the 21 of S41, and the infrastructure that they needed.
 
-S41 pins the first 28 problems (their statements, their faithfulness checks, their reference proofs); this gate does the same for the problems added after them, in the same world (the world below a problem
-never changes when problems are added after it: every digest of s41_golden.json is still the one of the 28), and for what the new problems taught the machinery:
+S41 pins the first 21 problems (their statements, their faithfulness checks, their reference proofs); this gate does the same for the problems added after them, in the same world (the world below a problem
+never changes when problems are added after it: every digest of s41_golden.json is still the one of the 21), and for what the new problems taught the machinery:
 
   A. THE MACHINERY.  `Spec(hatoms=..)`: the numbers of the atoms of the HYPOTHESES (a Diophantine hypothesis `x^2 + y^2 = 3 z^2` has the same solutions as `... = -3 z^2` over the integers: only the numbers see
      the slip); the recorder's handling of a claim made under the hypotheses of the outer goal (those are retired, not extras: `sqrt3_irrational`, `x2_y2_3z2`) and of a `linarith` hint that is the goal
@@ -11,7 +11,8 @@ never changes when problems are added after it: every digest of s41_golden.json 
   C. THE REFERENCE PROOFS.  Every new problem has a reference proof that replays as a sequence of kernel-checked actions; one that proves its lemmas inline replays again with the lemmas hidden (STRICT regime);
      the independent checker takes the proofs; they replay from their JSON in a fresh engine over a rebuilt world.
   D. REGIMES AND EPISODES.  The helper lemmas written for the new problems are on the menu in the prefix regime and hidden in the strict one; the reference actions played one by one finish the episode.
-  E. THE DATASET.  The whole bank (bank_all.py): the splits (a pure function of the problem's family; no family straddles two splits; every split covers the levels), the export, the dataset card.
+  E. THE DATASET.  The whole bank (bank_all.py, with the problems of the contest modules after these two; gate S49 checks those): the splits (a pure function of the problem's family; no family straddles two splits;
+     every split covers the levels), the export, the dataset card.
 """
 import os as _os, sys as _sys; _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', '..', 'src', 'python')); import itp_paths  # noqa: E402,F401
 import os, sys, io, time, json, math, copy, collections, tempfile, traceback
@@ -21,16 +22,22 @@ import bank as B, bank_lib, bank_lib2, bank_all, semantic as SEM, recorder as RE
 import gym_env as G, gym_build as GB, gym_acts as A
 from gym_env import Kind, Action
 from author import AuthorError
-import indep_checker as ic
-from harness import parse_raw
+import recheck as RC
 from nt_lib import _syms
 from lnl_base import thm
 from semantic import Spec
 
 FAIL = []; CHECKS = [0]
 TRACE = bool(os.environ.get('S43_TRACE'))
+def rss_mb():
+    """the resident memory of this process, in MB (Linux); 0 where /proc is not there"""
+    try:
+        for line in open('/proc/self/status'):
+            if line.startswith('VmRSS:'): return int(line.split()[1]) // 1024
+    except OSError: pass
+    return 0
 def trace(msg):
-    if TRACE: print('   [trace %s]' % msg, flush=True)
+    if TRACE: print('   [trace %s | %d MB]' % (msg, rss_mb()), flush=True)
 def expect(cond, what):
     CHECKS[0] += 1
     if not cond: FAIL.append(what)
@@ -43,6 +50,19 @@ def raises(what, fn, exc):
 
 GOLDEN = os.path.join(itp_paths.GOLDEN, 's43_golden.json')
 NEW = list(bank_lib2.NAMES)
+N_FIRST = 21                                    # the problems of bank_lib.py (S41); bank_lib2's come next, then the contest modules of bank_all.py
+
+
+def n_offered(x):
+    """how many globals premises `x` (an int or a gym_premises.Premises) offers"""
+    return x.count() if hasattr(x, 'count') else x
+
+
+def top_of(x):
+    """the exclusive upper bound of the ids premises `x` offers"""
+    return x.upto if hasattr(x, 'upto') else x
+
+
 # the proofs the independent checker needs more than ~15 s for (case enumerations with large certificates, up to minutes); S43_HEAVY=1 checks them too
 HEAVY = ('three_squares_mod_eight', 'n5_minus_n_div30', 'pythag_three', 'cube_sum_not_4_mod_9', 'five_dvd_fifth_power', 'schur_nonneg', 'imo1988_p6')
 
@@ -62,7 +82,7 @@ class Fixture:
             self.results[n] = self.bk.demonstrate(n, engine=self.eng2)
             if pl.problem.strict and pl.premises('strict') != pl.premises('prefix'): self.strict[n] = self.bk.demonstrate(n, engine=self.eng2, regime='strict')
         trace('recordings and replays: %d new proofs (%d strict), %.1f s' % (len(self.results), len(self.strict), time.time() - t0))
-        self._ic = None; self._data = None; self._bk2 = None
+        self._data = None; self._bk2 = None
     @property
     def data(self):
         """the new problems as the JSON file the export writes, read back"""
@@ -77,18 +97,14 @@ class Fixture:
         """the bank built AGAIN, from scratch (another world, the same library)"""
         if self._bk2 is None: self._bk2 = bank_all.load()
         return self._bk2
-    @property
-    def indep(self):
-        if self._ic is None:
-            k = self.k2; env = ic.Env()
-            for gid in range(k.num_globals()):
-                name, ty, val, cf, ci, ctors, rec = k.global_info(gid)
-                env.add(gid, name, parse_raw(k.dump_raw(ty), True), None if val is None else parse_raw(k.dump_raw(val), True), cf, ci, ctors, k.quot_role(gid), k.is_inductive(gid), recursion=k.recursive_info(gid), reserved=k.reserved_kind(gid))
-            self._ic = ic.Checker(env, params=True, fuel=400_000_000, prop_elim=True)
-        return self._ic
-    def ic_check(self, term, stmt):
-        k, w = self.k2, self.w2
-        return self.indep.check_closed(parse_raw(k.dump_raw(term.n), True), parse_raw(k.dump_raw(w.term(stmt, 'statement').n), True))
+    def second_opinion(self, roots):
+        """the independent checker over the globals that the closed terms `roots` need (recheck.SecondOpinion): the proofs of the other 700 problems of the world are not parsed"""
+        return RC.SecondOpinion(self.k2, fuel=400_000_000, needed_by=roots)
+    def release_recordings(self):
+        """let go of the world of the recordings and of everything that holds on to it (a whole bank's world is more than a gigabyte): the later sections build another"""
+        for r in list(self.results.values()) + list(self.strict.values()): r.rec = None                      # (a Result keeps its recording, and through it the world)
+        self.bk._recs = None; self.recs = None; self.eng2 = None; self.w2 = None; self.k2 = None
+        import gc; gc.collect()
 
 
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ A. the machinery
@@ -112,7 +128,7 @@ def sec_A(c):
     r3 = SEM.check_spec(sem, ast, sp3, mutate=False)
     expect(not r3.ok and 'arguments' in ' '.join(r3.errors), 'A1 an atom with the wrong number of sides is rejected (%s)' % (r3.errors[:1],))
     # a problem without Diophantine hypotheses is not asked for them
-    expect(all(P[n].problem.spec.hatoms is None or len(P[n].problem.spec.hatoms) >= 1 for n in P if P[n].problem.spec is not None), 'A1 ... hatoms are never an empty list')
+    expect(all(P[n].problem.spec.hatoms is None or len(P[n].problem.spec.hatoms) >= 1 for n in list(P)[:N_FIRST + len(NEW)] if P[n].problem.spec is not None), 'A1 ... hatoms are never an empty list (in the 72 graded problems; the contest problems are S49\'s)')
     # ---- A2. a claim made under the hypotheses of the outer goal: the hypotheses are retired, not extras
     for n in ('sqrt3_irrational', 'x2_y2_3z2'):
         r = fx.results[n]
@@ -149,15 +165,15 @@ def sec_A(c):
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ B. the problems
 def sec_B(c):
     fx = c['fx']; bk = fx.bk; w = fx.w; P = bk.placed
-    expect(len(P) == 82 and len(NEW) == 54 and list(P)[28:] == NEW, 'B1 the bank has 82 problems: the 28 of S41 and the 54 of bank_lib2, after them (%d, %d)' % (len(P), len(NEW)))
+    expect(len(NEW) == 51 and list(P)[N_FIRST:N_FIRST + len(NEW)] == NEW and len(P) == len(bank_all.names()) >= 268, 'B1 the bank has the 21 problems of S41, the 51 of bank_lib2 after them, and the problems of the contest modules (%d, %d)' % (len(P), len(NEW)))
     expect(len(set(NEW)) == len(NEW) and all(n in P for n in NEW), 'B1 ... each once')
     lv = collections.Counter(P[n].problem.level for n in NEW); kd = collections.Counter(P[n].problem.kind for n in NEW)
     expect(all(lv[i] >= 5 for i in (1, 2, 3)) and lv[4] >= 3 and lv[5] >= 1, 'B1 the new problems cover the levels 1..5 (%s)' % dict(lv))
     expect(kd['prove'] >= 35 and kd['answer'] >= 6, 'B1 ... and the kinds (%s)' % dict(kd))
     topics = collections.Counter(t for n in NEW for t in P[n].problem.topics)
     expect(all(t in B.TOPICS for t in topics) and {'descent', 'functional-equation', 'inequality', 'diophantine', 'modular'} <= set(topics), 'B1 ... and the topics (%d: %s)' % (len(topics), dict(topics)))
-    imo = [n for n in P if P[n].problem.source.startswith('IMO')]
-    expect(len(imo) == 9 and sum(1 for n in imo if n in NEW) == 3, 'B1 the bank has 9 IMO problems, 3 of them new (%s)' % (imo,))
+    imo = [n for n in list(P)[:N_FIRST + len(NEW)] if P[n].problem.source.startswith('IMO')]
+    expect(len(imo) == 9 and sum(1 for n in imo if n in NEW) == 3, 'B1 the first 72 problems have 9 IMO problems, 3 of them new (%s)' % (imo,))
     expect(all(P[n].problem.text.isascii() and len(P[n].problem.text) > 20 for n in NEW), 'B1 every problem has its text, in ASCII')
     expect(all(P[n].problem.spec is not None for n in NEW), 'B2 every new problem has a spec of its meaning')
     t0 = time.time(); bad = []; stats = collections.Counter()
@@ -181,7 +197,7 @@ def sec_B(c):
     expect(not diff, 'B4 the statements are those in %s: %d of %d differ (%s) -- if the change is intended: S43_UPDATE_GOLDEN=1 python3 s43_bank2_tests.py' % (os.path.basename(GOLDEN), len(diff), len(digests), diff[:4]))
     old = json.load(open(os.path.join(itp_paths.GOLDEN, 's41_golden.json')))['statements']
     allp = {n: B.statement_digest(w, P[n].stmt) for n in P}
-    expect(all(allp[n] == old[n] for n in old if n in allp) and len(set(allp.values())) == len(allp), 'B4 the first 28 statements are still those of s41_golden.json, and no two problems of the whole bank have the same statement')
+    expect(set(old) <= set(allp) and all(allp[n] == old[n] for n in old) and len(set(allp.values())) == len(allp), 'B4 the first 21 statements are still those of s41_golden.json, and no two problems of the whole bank have the same statement')
     # the world below the first new problem is the world of S41: adding problems after them changed nothing below
     first = P[NEW[0]]
     expect(first.start == first.defs_end or first.start <= first.gid, 'B5 the new problems come after the old ones in the world')
@@ -204,7 +220,8 @@ def sec_C(c):
     expect(not sbad, 'C2 ... and they replay (%s)' % (list(sbad.items())[:2],))
     for n in with_helpers:
         pl = P[n]
-        expect(pl.premises('strict') < pl.premises('prefix') and pl.premises('prefix') == pl.gid, 'C2 the strict regime of %s offers fewer globals than the prefix regime (%d < %d)' % (n, pl.premises('strict'), pl.premises('prefix')))
+        ps, pp = pl.premises('strict'), pl.premises('prefix')
+        expect(n_offered(ps) < n_offered(pp) and top_of(pp) == pl.gid, 'C2 the strict regime of %s offers fewer globals than the prefix regime (%d < %d)' % (n, n_offered(ps), n_offered(pp)))
     # every new problem whose build function declares a lemma of its own lists it as a helper (the strict regime hides exactly those)
     undeclared = []
     for n in NEW:
@@ -216,17 +233,26 @@ def sec_C(c):
     t_c3 = time.time()
     eng3 = G.Engine(fx.w2, kinds=set(G.Kind), strict=True); n_ic = 0; bad_ic = []
     other = fx.recs['ineq_cauchy_three'].stmt
+    terms = {}
     for n in NEW:
         if n in HEAVY and not os.environ.get('S43_HEAVY'): continue
         r = res[n]; rec = fx.recs[n]; t1 = time.time()
-        term = A.replay_portable(eng3, rec.stmt, r.portable, rec.gid)
-        good, msg = fx.ic_check(term, rec.stmt); n_ic += 1
+        terms[n] = A.replay_portable(eng3, rec.stmt, r.portable, rec.gid)
+        trace('C3 %s replayed %.1f s' % (n, time.time() - t1))
+    t1 = time.time()
+    so = fx.second_opinion([t for t in terms.values()] + [fx.recs[n].stmt for n in terms] + [other])          # (made after the replays: a replay may add derived globals)
+    trace('C3 the independent checker\'s environment: %d globals of %d, %.1f s' % (len(so.checker.g), fx.k2.num_globals(), time.time() - t1))
+    for n, term in terms.items():
+        t1 = time.time(); stmt = fx.recs[n].stmt
+        good, msg = so.accepts(term, stmt); n_ic += 1
         if not good: bad_ic.append((n, msg))
-        trace('C3 %s %.1f s' % (n, time.time() - t1))
+        trace('C3 %s checked %.1f s' % (n, time.time() - t1))
         if n in ('ineq_chebyshev_cubes', 'schur_nonneg'):
-            expect(not fx.ic_check(term, other)[0], 'C3 the independent checker rejects the proof of %s as a proof of another problem' % n)
+            expect(not so.accepts(term, other)[0], 'C3 the independent checker rejects the proof of %s as a proof of another problem' % n)
     trace('C3 independent checker: %.1f s for %d proofs' % (time.time() - t_c3, n_ic))
     expect(n_ic >= len(NEW) - len(HEAVY) and not bad_ic, 'C3 the independent checker accepts the proofs by actions of %d new problems (%s)' % (n_ic, bad_ic[:2]))
+    del so, terms, eng3, other
+    fx.release_recordings()
     # ---- C4. from JSON, in a fresh engine over a freshly built world
     t_c4 = time.time()
     data = fx.data; bk2 = fx.bk2; eng_f = G.Engine(bk2.w, kinds=set(G.Kind), strict=True); bad_j = []; n_j = 0
@@ -306,7 +332,7 @@ def sec_E(c):
     # ---- E1. the splits
     sp = BS.splits(names)
     flat = [n for ns in sp.values() for n in ns]
-    expect(sorted(flat) == sorted(names) and len(flat) == len(set(flat)) == 82, 'E1 the splits partition the 82 problems: every problem is in exactly one split (%s)' % {s: len(ns) for s, ns in sp.items()})
+    expect(sorted(flat) == sorted(names) and len(flat) == len(set(flat)) == len(names), 'E1 the splits partition the %d problems: every problem is in exactly one split (%s)' % (len(names), {s: len(ns) for s, ns in sp.items()}))
     assign = {n: s for s, ns in sp.items() for n in ns}
     expect(BS.straddling(assign) == [], 'E1 no family straddles two splits (no train problem is a variant of a test problem)')
     multi = collections.defaultdict(list)
@@ -331,7 +357,7 @@ def sec_E(c):
     data = fx.data
     for rec in data['problems']: rec['split'] = BS.split_of(rec['name']); rec['family'] = BS.family(rec['name'])
     card1 = DS.card(data, spd); card2 = DS.card(data, spd)
-    expect(card1 == card2 and '82 problems' in card1 and data['world_digest'] in card1 and all(('**%s**' % s) in card1 for s in ('train', 'dev', 'test')), 'E2 the dataset card is deterministic and states the counts, the splits and the world digest')
+    expect(card1 == card2 and ('%d problems' % len(names)) in card1 and data['world_digest'] in card1 and all(('**%s**' % s) in card1 for s in ('train', 'dev', 'test')), 'E2 the dataset card is deterministic and states the counts, the splits and the world digest')
     expect(all(('`%s`' % n) in card1 for n in names), 'E2 ... and names every problem under its split')
     # ---- E3. the library corpus: lemmas of the base library as action sequences, replayable in a fresh engine
     t0 = time.time()

@@ -612,7 +612,7 @@ def _(w, b):
 
 
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ descent
-@BANK.problem('sqrt3_irrational', text='Prove that sqrt(3) is irrational: there are no integers p, q with q /= 0 and p^2 = 3 q^2.', source='Euclid', topics=('number-theory', 'descent', 'divisibility'), level=3,
+@BANK.problem('sqrt3_irrational', text='Prove that sqrt(3) is irrational: there are no integers p, q with q /= 0 and p^2 = 3 q^2.', source='Euclid', origin='folklore', topics=('number-theory', 'descent', 'divisibility'), level=3,
               helpers=('Z.sqrt3_aux',),
               spec=Spec(('Z', 'Z'), (lambda p, q: q != 0,), lambda p, q: p * p != 3 * q * q, atom=(lambda p, q: p * p, lambda p, q: 3 * q * q)),
               notes='descent by strong induction on q >= 0: p^2 = 3 q^2 makes 3 divide p, then q, and p/3, q/3 solve the same equation')
@@ -945,7 +945,7 @@ def _i82_e5(n): return n if n >= 2 else 0                                     # 
 
 
 @BANK.problem('imo1982_p1', text='The function f(n) is defined for all positive integers n and takes non-negative integer values. Also, for all m, n: f(m + n) - f(m) - f(n) = 0 or 1, and f(2) = 0, f(3) > 0, f(9999) = 3333. Determine f(1982).',
-              source='IMO 1982 P1', year=1982, topics=('functional-equation', 'inequality', 'induction', 'bounding'), level=4, kind='answer', answer='f(1982) = 660',
+              source='IMO 1982 P1', verified='answer-checked', year=1982, topics=('functional-equation', 'inequality', 'induction', 'bounding'), level=4, kind='answer', answer='f(1982) = 660',
               spec=Spec(('fn',), (_i82_h1, _i82_h2, lambda f: f(2) == 0, lambda f: f(3) > 0, lambda f: f(9999) == 3333), lambda f: f(1982) == 660, extra_fns=(_i82_e1, _i82_e2, _i82_e3, _i82_e4, _i82_e5),
                         atom=(lambda f: f(1982), lambda f: 660)),
               notes='f is superadditive, so f(3k) >= k by induction; f(9999) = 3333 forces f(1980) = 660; and f(1982) >= 661 would give f(9999) >= 5 f(1982) + f(89) >= 3334')
@@ -996,7 +996,7 @@ def _(w, b):
 
 
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ IMO 1988 P6 (Vieta jumping)
-@BANK.problem('imo1988_p6', text='Let a and b be positive integers such that ab + 1 divides a^2 + b^2. Show that (a^2 + b^2) / (ab + 1) is the square of an integer.', source='IMO 1988 P6', year=1988,
+@BANK.problem('imo1988_p6', text='Let a and b be positive integers such that ab + 1 divides a^2 + b^2. Show that (a^2 + b^2) / (ab + 1) is the square of an integer.', source='IMO 1988 P6', verified='answer-checked', year=1988,
               topics=('number-theory', 'divisibility', 'descent', 'diophantine', 'induction'), level=5, helpers=('imo1988_jump', 'imo1988_descent'),
               spec=Spec(('Z', 'Z'), (lambda a, b: a > 0, lambda a, b: b > 0, lambda a, b: _dvd(a * b + 1, a * a + b * b)), lambda a, b: any(a * a + b * b == m * m * (a * b + 1) for m in range(-12, 13)), windows={'z': 8, 'ex': 12},
                         body=(('Z',), lambda a, b, m: a * a + b * b == m * m * (a * b + 1)),
@@ -1116,7 +1116,7 @@ def _(w, b):
             p.exact(('dvd_coprime_product', lit(6), lit(5), p.T('n', lambda n_: n_ ** 5 - n_), 'cop', 'd6', 'd5'))
 
 
-@BANK.problem('imo1964_p2', text='Suppose a, b, c are the sides of a triangle. Prove that a^2 (b + c - a) + b^2 (c + a - b) + c^2 (a + b - c) <= 3abc.', source='IMO 1964 P2', year=1964, topics=('inequality',), level=3,
+@BANK.problem('imo1964_p2', text='Suppose a, b, c are the sides of a triangle. Prove that a^2 (b + c - a) + b^2 (c + a - b) + c^2 (a + b - c) <= 3abc.', source='IMO 1964 P2', verified='answer-checked', year=1964, topics=('inequality',), level=3,
               spec=Spec(('Z', 'Z', 'Z'), (lambda a, b, c: a > 0, lambda a, b, c: b > 0, lambda a, b, c: c > 0, lambda a, b, c: a < b + c, lambda a, b, c: b < c + a, lambda a, b, c: c < a + b),
                         lambda a, b, c: a * a * (b + c - a) + b * b * (c + a - b) + c * c * (a + b - c) <= 3 * a * b * c, windows={'z': 8}, points=5000,
                         atom=(lambda a, b, c: a * a * (b + c - a) + b * b * (c + a - b) + c * c * (a + b - c), lambda a, b, c: 3 * a * b * c),

@@ -7,8 +7,8 @@ A model that is evaluated on problems it trained on has learned the answers, not
   * a PURE FUNCTION of the family: the split of a family is a hash of its key under a fixed salt, so adding problems to the bank never moves an existing problem from one split to another (a model
     trained on version 1 of the dataset is still evaluated on problems it has not seen when version 2 comes).  70 % train, 10 % dev, 20 % test, in expectation.
   * CHECKED for coverage: every split has problems of the levels 1..3, the test split has olympiad (IMO) problems and several topics, ... (`coverage`).  The salt (`SALT_NUMBER`) was searched ONCE, as the smallest
-    number whose split satisfies those requirements for the 82 problems of dataset version 1, and is frozen: it is part of the dataset, not a tuning knob.  A later version of the bank keeps it (its new
-    problems fall where their hashes put them; the requirements are re-checked, and are about the whole bank, not about the new problems).
+    number whose split satisfies those requirements for the 82 problems of dataset version 1, and is frozen: it is part of the dataset, not a tuning knob.  Dataset version 2 (the whole bank, 268 problems: the
+    AMC/AIME and the IMO tier on top of the first 72) keeps it: its new problems fall where their hashes put them, and the requirements are re-checked for the whole bank (`coverage`, gate S43 E1 / S49).
 
 The library theorems the learner may also imitate (proofs of lemmas written for the library, not for the bank) are split the same way, by their own name (`lemma_split`).
 
@@ -19,8 +19,8 @@ The library theorems the learner may also imitate (proofs of lemmas written for 
 import os as _os, sys as _sys; _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..')); import itp_paths  # noqa: E402,F401
 import hashlib, collections
 
-DATASET_VERSION = 1                   # informational: the splits do not depend on it (they must not move when the bank grows)
-SALT_NUMBER = 25                      # FROZEN: found once, for the 82 problems of dataset version 1 (`find_salt`); never changed afterwards
+DATASET_VERSION = 2                   # informational: the splits do not depend on it (they must not move when the bank grows)
+SALT_NUMBER = 25                      # FROZEN: found once, for the 82 problems of dataset version 1 (`find_salt`); never changed afterwards (version 2 keeps it)
 FRACTIONS = (('train', 70), ('dev', 10), ('test', 20))      # percent
 
 FAMILIES = {
@@ -38,6 +38,30 @@ FAMILIES = {
     'n5_minus_n_div30': 'n5_minus_n',                        # (five_dvd_fifth_power, the other member, became a library lemma)
     'five_dvd_six_pow_minus_one': 'dvd_by_induction', 'three_dvd_four_pow_plus_five': 'dvd_by_induction',
     'no_square_between': 'between_squares', 'no_square_pronic': 'between_squares',
+    # dataset version 2 (the new modules): the parts of one problem, a problem and its converse, a lemma and the problem that uses it, one argument with another constant
+    'imo1982_p4a': 'imo1982_p4', 'imo1982_p4b': 'imo1982_p4',
+    'imo2016_p4a': 'imo2016_p4', 'imo2016_p4b': 'imo2016_p4',
+    'isl2007_n6': 'imo2007_p5',                              # the key lemma of IMO 2007 P5
+    'classic_wilson_converse': 'classic_wilson',
+    'classic_pyth_60': 'classic_pythagorean',
+    'classic_y2_x3_2': 'classic_x2_y3_1',
+    'classic_2x1_3y': 'classic_3x_2y', 'classic_2x_3y_square': 'classic_3x_2y',
+    'classic_fact_sum_fact': 'classic_fact_product_sum',
+    'n5_n4_1_composite': 'n4_n2_1_composite',
+    'mersenne_composite_exponent': 'mersenne_base_2',
+    'amc_ind_01': 'dvd_by_induction', 'amc_ind_02': 'two_pow_gt_n',
+    'amc_fe_04': 'fe_additive', 'fe_ring_hom': 'fe_additive',
+    'amc_sum_02': 'amc_sum_01', 'amc_sum_03': 'amc_sum_01', 'amc_sum_04': 'amc_sum_01',
+    'amc_seq_02': 'amc_seq_01', 'amc_seq_03': 'amc_seq_01',
+    # found by the duplicate screen (bank_dups.py, gate S49 E): the same argument with other numbers, a special case of a general statement, a lemma and the problems that use it
+    'ident_pell_product': 'ident_brahmagupta',               # multiplicativity of the norm of a sum of two squares / of x^2 - 2y^2
+    'classic_fe_n2_1': 'classic_fe_sum_prod',                # f(x + y) + f(xy + c) = f(x) f(y) + d, two constants
+    'amc_dig_02': 'amc_div_05',                              # the digit rules for 9 and for 11
+    'amc_fe_05': 'fe_additive',                              # g(x + y) = g(x) + g(y) + 2xy: subtract x^2 and it is Cauchy's equation
+    'amc_div_08': 'pow_sub_dvd',                             # a - b | a^2 - b^2 is the case n = 2 of a - b | a^n - b^n
+    'amc_div_10': 'odd_square_mod_eight',                    # 8 | n^2 - 1 for odd n, in the other direction
+    'amc_prime_05': 'ident_sophie_germain', 'classic_n4_4n': 'ident_sophie_germain',      # the identity a^4 + 4b^4 = (a^2 + 2ab + 2b^2)(a^2 - 2ab + 2b^2) and the two problems that use it
+    'amc_ineq_02': 'ineq_squares_sum',                       # sum of squares of differences, one more variable
 }
 
 

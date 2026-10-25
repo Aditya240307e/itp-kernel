@@ -16,7 +16,7 @@ import torch
 import itp_env_lnl as E
 import gym_env as G, gym_search as S, gym_policy as P
 from gym_env import Kind, ST_OK, ST_REFUSED, ST_FUEL
-import ml_features as F, ml_model as M
+import ml_features as F, ml_model as M, ml_pol as POL
 
 
 class ActionStream:
@@ -24,7 +24,7 @@ class ActionStream:
     cost <= rem; a later call with a larger `rem` continues where the stream stopped."""
     def __init__(self, searcher, g, menu):
         self.s = searcher; self.g = g; self.menu = menu
-        self.dec = M.Decoder(searcher.net, searcher.ctx, g, searcher.gtab())
+        self.dec = searcher.decoder_of(g)
         self.heap = []; self.tie = 0; self.out = []; self.seen = set(); self.exhausted = False
         asm = P.Assembler(searcher.eng, g, menu, rare=searcher.rare)
         ch = asm.start()
@@ -92,12 +92,12 @@ class PolicySearcher(S.CostSearcher):
         S._SearcherBase.__init__(self, eng, max_probes, None, time_limit)
         self.net = net; self.ctx = ctx; self.step_cost = step_cost; self.topk = topk; self.cap = cap; self.temperature = temperature; self.rare = rare
         self.fuel_step = fuel_step; self.cache = {}; self.cuts = 0; self.passes = 0
-        self.streams = {}; self._gtab = None; self.expansions = 0; self.t_policy = 0.0
+        self.streams = {}; self.expansions = 0; self.t_policy = 0.0
+        self.runner = POL.PolicyRunner(eng, net, ctx, rare=rare)            # (the decoders of the goals and the table of the globals: shared with whatever else samples this policy)
 
-    def gtab(self):
-        if self._gtab is None:
-            with torch.no_grad(): self._gtab = self.net.global_table()
-        return self._gtab
+    def gtab(self): return self.runner.gtab()
+
+    def decoder_of(self, g): return self.runner.decoder(g)
 
     def stream_of(self, g, menu):
         st = self.streams.get(g.key)

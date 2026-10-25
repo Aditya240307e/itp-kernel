@@ -6,7 +6,7 @@ so what this gate protects is that the relabelling is EXACT: an example is a the
 independent checker accept that proof -- and nothing the record gets wrong can make an example that is not.
 
   A. DIRECTIONS.   Every kind of action has a direction; the kinds that add facts are the FORWARD ones.
-  B. THE TREE.     All 82 reference proofs of the bank are replayed with `track=True`.  After every step the record agrees with the proof state (one open node per open goal); at the end there is one node per
+  B. THE TREE.     All the reference proofs of the bank (its proved tier; the statement-only problems have none) are replayed with `track=True`.  After every step the record agrees with the proof state (one open node per open goal); at the end there is one node per
                    action, all closed; the actions of a closed subtree are CONTIGUOUS and in the order of a depth-first walk (so they are a proof of the subtree's goal on their own); the events of a step
                    are what the step achieved; each goal is said by a closed statement (`forall hyps, target`) that a fresh episode turns into the same goal.
   C. EXAMPLES.     Pinned yields for named problems (and for the whole bank, in the tree).  Every example is verified, has a statement code that builds the statement back, is plain data (JSON), and its
@@ -59,7 +59,7 @@ PINS = {
     'ident_diff_squares': (1, 0, 0, {}),
     'ineq_am_gm_two':    (2, 1, 1, {}),
     'two_pow_gt_n':      (7, 6, 1, {}),
-    'sum_squares_zero':  (13, 12, 6, {}),
+    'quad_form_zero':  (13, 12, 6, {}),
     'sqrt2_irrational':  (14, 13, 2, {}),
     'frobenius_3_5':     (37, 33, 2, {'too_long': 2, 'duplicates': 1}),
     'n4_n2_1_composite': (7, 6, 0, {'context_changed': 1, 'pi_fact': 1}),
@@ -69,7 +69,7 @@ PINS = {
 BANK_ACTIONS = 1816
 BANK_DERIVED_EVENTS = 247
 BANK_BY_DIRECTION = {'BACKWARD': 453, 'CLAIM': 177, 'CLOSE': 604, 'FORWARD': 252, 'SPLIT': 330}
-SMALL = ('imo1959_p1', 'imo2019_p1', 'ineq_am_gm_two', 'two_pow_gt_n', 'sum_squares_zero', 'sqrt2_irrational')      # every example of these is judged by the second checker
+SMALL = ('imo1959_p1', 'imo2019_p1', 'ineq_am_gm_two', 'two_pow_gt_n', 'quad_form_zero', 'sqrt2_irrational')      # every example of these is judged by the second checker
 JUDGE = []                                  # (what, proof, statement): handed to the independent checker at the end
 
 
@@ -79,8 +79,10 @@ class Fixture:
         self.bk = bank_all.load(); self.w = self.bk.w; self.k = self.w.k
         self.eng = G.Engine(self.w, kinds=set(Kind), strict=True)
         self.eng_plain = G.Engine(self.w)                                   # another configuration (the bank's own: the first language's kinds, not strict): examples are data and replay in either
-        self.data = {p['name']: p for p in json.load(open(os.path.join(itp_paths.ROOT, 'data', 'dataset_v1', 'bank.json')))['problems']}
+        self.data = {p['name']: p for p in json.load(open(os.path.join(itp_paths.ROOT, 'data', 'dataset_v2', 'bank.json')))['problems']}
         expect(set(self.data) == set(self.bk.placed), 'fixture: the dataset has the problems of the bank')
+        self.proved = [n for n, pl in self.bk.placed.items() if pl.proved]
+        expect(set(self.proved) == {n for n, p in self.data.items() if 'demonstration' in p}, 'fixture: exactly the proved problems have a demonstration in the dataset (%d)' % len(self.proved))
         trace('world %.1f s (%d globals)' % (time.time() - t0, self.k.num_globals()))
         self.runs = {}
 
@@ -124,7 +126,7 @@ def sec_A(c):
 def sec_B(c):
     fx = c['fx']; w = fx.w
     bad = collections.defaultdict(list); tot = collections.Counter(); by_dir = collections.Counter(); t0 = time.time()
-    for name in fx.bk.placed:
+    for name in fx.proved:
         ep, events, errs = fx.run(name); tree = ep.tree; steps = fx.data[name]['demonstration']['steps']
         if errs: bad['B1 record vs proof state'].append((name, errs[:2]))
         if not (ep.done and not tree.broken and not tree.open): bad['B1 finished, record complete'].append(name)
@@ -159,7 +161,7 @@ def sec_B(c):
             if any(kind not in ('solved', 'derived') for kind, n in evs): bad['B6 event kinds'].append((name, i))
         if n_solved != len(nodes): bad['B6 every node is solved exactly once'].append((name, n_solved, len(nodes)))
         tot['actions'] += len(steps); tot['derived'] += n_derived; tot['nodes'] += len(nodes)
-    trace('B: %d problems %.1f s' % (len(fx.bk.placed), time.time() - t0))
+    trace('B: %d problems %.1f s' % (len(fx.proved), time.time() - t0))
     for what, lst in sorted(bad.items()): expect(False, '%s (%d: %s)' % (what, len(lst), lst[:3]))
     for what in ('B1 record vs proof state', 'B1 finished, record complete', 'B2 one node per action, in order of the actions', 'B2 every node was acted on and is closed', 'B3 the root', 'B4 parents, children, depth',
                  'B4 closed iff all children are', 'B4 the last action of a subtree', 'B4 the recorded portable action is the dataset\'s', 'B5 the actions of a subtree are contiguous and in depth-first order',
@@ -219,10 +221,10 @@ def sec_C(c):
         expect(all(e.origin['node'] == tree.by_step[e.origin['step']].id for e in exs), 'C5 %s: ... and the node' % name)
         trace('C %s %.1f s' % (name, time.time() - t0))
     # a solved example is the proof of a subtree: its actions are the subtree's, in order
-    ep = fx.run('sum_squares_zero')[0]; tree = ep.tree
-    sol = [e for e in c['examples']['sum_squares_zero'] if e.kind == 'solved']
+    ep = fx.run('quad_form_zero')[0]; tree = ep.tree
+    sol = [e for e in c['examples']['quad_form_zero'] if e.kind == 'solved']
     expect(all(e.steps == [m.portable for m in tree.subtree_steps(tree.by_step[e.origin['step']])] for e in sol), 'C6 a solved example\'s steps are the actions of its subtree')
-    der = [e for e in c['examples']['sum_squares_zero'] if e.kind == 'derived']
+    der = [e for e in c['examples']['quad_form_zero'] if e.kind == 'derived']
     expect(all(e.length == 1 and e.steps == [tree.by_step[e.origin['step']].portable] and tree.by_step[e.origin['step']].action.kind in T.DERIVING for e in der), 'C6 a derived example is ONE fact-adding action')
     # the statement of a derived example is the fact, in the context the action was applied in
     ok = True
@@ -232,7 +234,7 @@ def sec_C(c):
         ok &= want.n == e.stmt.n
     expect(ok, 'C7 the statement of a derived example is forall (the context of the action), (the new fact)')
     # the example dict is the data BankEnv.reset(options={'goal': ...}) takes
-    e0 = c['examples']['sum_squares_zero'][0].to_dict()
+    e0 = c['examples']['quad_form_zero'][0].to_dict()
     expect(set(e0) == {'kind', 'statement', 'statement_digest', 'statement_code', 'premises', 'steps', 'length', 'origin', 'verified'}, 'C8 the keys of an example\'s dict')
 
 
@@ -240,7 +242,7 @@ def sec_C(c):
 def sec_F(c):
     """a goal is said by `forall hyps, target`, and a fresh episode on that statement is on the same goal: the identification the whole relabelling rests on"""
     fx = c['fx']; w = fx.w; eng = fx.eng; n_nodes = 0; bad = []
-    for name in ('sum_squares_zero', 'sqrt2_irrational', 'imo1959_p1', 'two_pow_gt_n', 'ineq_am_gm_two', 'imo2019_p1', 'n4_n2_1_composite', 'ident_sophie_germain'):
+    for name in ('quad_form_zero', 'sqrt2_irrational', 'imo1959_p1', 'two_pow_gt_n', 'ineq_am_gm_two', 'imo2019_p1', 'n4_n2_1_composite', 'ident_sophie_germain'):
         ep = fx.run(name)[0]
         for n in ep.tree.nodes:
             stmt = T.closed_statement(w, n.goal.hyp_types, n.goal.target)
@@ -267,9 +269,9 @@ def sec_F(c):
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ D. tampering
 def sec_D(c):
     fx = c['fx']; eng = fx.eng_plain; w = fx.w
-    exs = c['examples']['sum_squares_zero']
+    exs = c['examples']['quad_form_zero']
     ex = max((e for e in exs if e.kind == 'solved'), key=lambda e: e.length)
-    expect(ex.length >= 3, 'D0 (the longest solved example of sum_squares_zero has %d actions)' % ex.length)
+    expect(ex.length >= 3, 'D0 (the longest solved example of quad_form_zero has %d actions)' % ex.length)
     d = json.loads(json.dumps(ex.to_dict())); pr = d['premises']
     stmt = T.statement_from_code(eng, d['statement_code'], pr)
     A.replay_portable(eng, stmt, d['steps'], pr)
@@ -299,11 +301,11 @@ def sec_D(c):
         lit = w.nota.lit; false = w.Eq(lit(1), lit(0))
     expect(T.replays(eng, false, [{'kind': 'RING'}], None) is None and T.replays(eng, false, [{'kind': 'NLINARITH'}], None) is None, 'D4 1 = 0 is not proved by ring or nlinarith')
     # a wrong RECORD: one leaf's action is replaced by `ring` (which proves no inequality): the examples that contain that action are dropped, counted, and no other
-    ep, events, errs = fx.play('sum_squares_zero'); tree = ep.tree
+    ep, events, errs = fx.play('quad_form_zero'); tree = ep.tree
     leaf = next(n for n in tree.nodes if not n.children and n.action.kind == Kind.NLINARITH)
     inside = []; m = leaf
     while m is not None: inside.append(m); m = m.parent
-    base = {e.key: e for e in c['examples']['sum_squares_zero']}
+    base = {e.key: e for e in c['examples']['quad_form_zero']}
     leaf.portable = {'kind': 'RING'}
     got = tree.examples(); st = dict(tree.stats)
     want_dropped = len(inside) - 1                       # (the root is not offered)
@@ -314,7 +316,7 @@ def sec_D(c):
     leaf.portable = None
     got = tree.examples(); st = dict(tree.stats)
     expect(st.get('not_portable_solved', 0) == want_dropped and st.get('kept_solved', 0) == 12 - want_dropped, 'D6 an action without a portable form excludes the %d examples that contain it (%s)' % (want_dropped, st))
-    leaf.portable = fx.data['sum_squares_zero']['demonstration']['steps'][leaf.step]
+    leaf.portable = fx.data['quad_form_zero']['demonstration']['steps'][leaf.step]
     expect(len(tree.examples()) == len(base), 'D7 (the record put right gives the examples again)')
     # the checks that guard what a derived fact is a fact ABOUT (no action of today's language can trip them: the record is made to)
     n = next(x for x in tree.nodes if x.post is not None); post = n.post; n_pre = n.goal.n_hyps; k = fx.k
@@ -339,11 +341,11 @@ def lin_statement(w):
 
 def sec_E(c):
     fx = c['fx']; w = fx.w; k = fx.k; eng = fx.eng
-    full = {e.key for e in c['examples']['sum_squares_zero']}
+    full = {e.key for e in c['examples']['quad_form_zero']}
     # E1. the first n actions of a proof: their examples are examples of the whole, and the closed subtrees only grow
     prev_closed = -1; n_by_len = []
     for L in range(0, 14):
-        ep, events, errs = fx.play('sum_squares_zero', upto=L); tree = ep.tree
+        ep, events, errs = fx.play('quad_form_zero', upto=L); tree = ep.tree
         expect(not errs and not tree.broken, 'E1 n=%d: the record agrees with the proof state' % L)
         exs = tree.examples(); keys = {e.key for e in exs}
         expect(keys <= full, 'E1 n=%d: %d examples, all of them examples of the whole proof' % (L, len(exs)))

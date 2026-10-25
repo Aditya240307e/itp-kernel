@@ -11,7 +11,7 @@ help:
 	@echo "make gates-repo      the repository gates: S45 layout, S46 examples"
 	@echo "make gates-synth     the synthetic theorem generator's gate S48"
 	@echo "make gates-all       every gate"
-	@echo "make dataset-verify  replay every recorded proof of data/dataset_v1 in a fresh engine (about 1 minute)"
+	@echo "make dataset-verify  replay every recorded proof of data/dataset_v2 in a fresh engine (about 1 minute)"
 	@echo "make examples        run the examples"
 	@echo "make mutants-check   check that every mutant of the catalogue still applies to the code (seconds); the mutation run itself: python3 mutants/mutate.py PREFIX"
 	@echo "make sanitize        build the kernel with ASan + UBSan and run the gates under it (long)"
@@ -37,7 +37,7 @@ gates-all: kernel
 	$(PY) tests/run_gates.py -j $(J) --all
 
 dataset-verify: kernel
-	$(PY) src/python/problems/dataset.py --verify data/dataset_v1
+	$(PY) src/python/problems/dataset.py --verify data/dataset_v2
 
 examples: kernel
 	@for f in examples/[0-9][0-9]_*.py; do echo "== $$f"; $(PY) $$f || exit 1; done

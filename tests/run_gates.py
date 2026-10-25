@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """run_gates.py -- run the gates with the arguments the mutation driver uses and report PASS/FAIL per gate.
 
-    python3 tests/run_gates.py                       the kernel gates (the ones the mutation driver runs: kernel, tactics, environment, bank), 2 at a time
+    python3 tests/run_gates.py                       the kernel gates (the ones the mutation driver runs: kernel, tactics, environment, bank) and the gates of the contest problems, 2 at a time (never two of the
+                                                     gates that build the whole bank's world at once: gate_registry.HEAVY_GATES)
     python3 tests/run_gates.py -j 1                  serial (use this when timing matters)
     python3 tests/run_gates.py --ml                  + the learner's gate (s44; needs torch and gymnasium)
     python3 tests/run_gates.py --repo                + the repository gates (s45 layout, s46 examples)
@@ -44,22 +45,30 @@ def main(argv):
         elif a == '--synth': extra += list(REG.SYNTH_GATE_CMDS)
         elif a == '--all': extra += list(REG.ML_GATE_CMDS) + list(REG.REPO_GATE_CMDS) + list(REG.SYNTH_GATE_CMDS)
         else: names.append(a)
-    everything = list(REG.GATE_CMDS) + list(REG.ML_GATE_CMDS) + list(REG.REPO_GATE_CMDS) + list(REG.SYNTH_GATE_CMDS)
+    everything = list(REG.GATE_CMDS) + list(REG.BANK_GATE_CMDS) + list(REG.ML_GATE_CMDS) + list(REG.REPO_GATE_CMDS) + list(REG.SYNTH_GATE_CMDS)
     base = [os.path.basename(c[0]) for c in everything]
     unknown = set(names) - set(base)
     if unknown:
         print('unknown gate(s): %s' % ', '.join(sorted(unknown))); return 2
     if names: cmds = [c for c in everything if os.path.basename(c[0]) in names]          # named gates: exactly these, wherever they are registered
-    else: cmds = list(REG.GATE_CMDS) + [c for c in extra if c not in REG.GATE_CMDS]
+    else: cmds = list(REG.GATE_CMDS) + list(REG.BANK_GATE_CMDS) + [c for c in extra if c not in REG.GATE_CMDS]
     t0, failed = time.time(), []
+    pending, running = list(cmds), {}
+    heavy = lambda c: os.path.basename(c[0]) in REG.HEAVY_GATES
     with cf.ThreadPoolExecutor(max_workers=jobs) as pool:
-        futs = [pool.submit(run_one, c, timeout) for c in cmds]
-        for f in cf.as_completed(futs):
-            cmd, ok, dt, text = f.result()
-            last = next((l.strip() for l in reversed(text.strip().split('\n')) if 'GATE' in l or 'PASS' in l or 'FAIL' in l), text.strip().split('\n')[-1] if text.strip() else '')
-            print('%-5s %-34s %6.1fs  %s' % ('PASS' if ok else 'FAIL', label(cmd), dt, last[:90]), flush=True)
-            if not ok:
-                failed.append(os.path.basename(cmd[0])); print('      ---- tail of output ----\n      ' + '\n      '.join(text.strip().split('\n')[-12:]), flush=True)
+        while pending or running:
+            heavy_running = any(heavy(c) for c in running.values()); i = 0
+            while len(running) < jobs and i < len(pending):                              # (the next gate that may start: not a second heavy one)
+                if heavy(pending[i]) and heavy_running: i += 1; continue
+                c = pending.pop(i); running[pool.submit(run_one, c, timeout)] = c; heavy_running = heavy_running or heavy(c)
+            done, _ = cf.wait(list(running), return_when=cf.FIRST_COMPLETED)
+            for f in done:
+                running.pop(f)
+                cmd, ok, dt, text = f.result()
+                last = next((l.strip() for l in reversed(text.strip().split('\n')) if 'GATE' in l or 'PASS' in l or 'FAIL' in l), text.strip().split('\n')[-1] if text.strip() else '')
+                print('%-5s %-34s %6.1fs  %s' % ('PASS' if ok else 'FAIL', label(cmd), dt, last[:90]), flush=True)
+                if not ok:
+                    failed.append(os.path.basename(cmd[0])); print('      ---- tail of output ----\n      ' + '\n      '.join(text.strip().split('\n')[-12:]), flush=True)
     print('%d/%d gates passed in %.0fs%s' % (len(cmds) - len(failed), len(cmds), time.time() - t0, ('   FAILED: ' + ', '.join(failed)) if failed else ''))
     return 1 if failed else 0
 
