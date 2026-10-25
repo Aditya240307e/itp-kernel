@@ -187,7 +187,7 @@ def sec_A(c):
     fx = c['fx']; w, k, eng = fx.w, fx.k, fx.eng
     eng.premises = None
     # ---- A1. the terms of the library's proofs: said, built back as the same term
-    tot = collections.Counter(); bad = []
+    tot = collections.Counter(); bad = []; k.reset_fuel_peak()
     for nm, rec in fx.recs.items():
         eng.premises = rec.gid
         for n in nodes_of(rec):
@@ -207,6 +207,7 @@ def sec_A(c):
             if not k.check_open(back, ty, pre.hyp_types)[0]: tot['unchecked'] += 1
             if len(code) > GB.MAX_CODE: tot['toolong'] += 1
     eng.premises = None
+    peak1 = k.fuel_peak(); trace('A1 the largest single kernel call of the %d terms spent %d steps (the engine\'s budget: %d)' % (tot['terms'], peak1, eng.default_fuel))
     expect(tot['terms'] >= 700 and tot['tokens'] >= 4000, 'A1 the proofs of the library have many terms to say (%s)' % dict(tot))
     expect(tot['mismatch'] == 0 and tot['unchecked'] == 0 and tot['illtyped'] == 0 and tot['toolong'] == 0, 'A1 every term is built back as itself, and the kernel accepts it (%s; %s)' % (dict(tot), bad[:3]))
     expect(tot['unsayable'] <= 1 and all(b[0] == 'Z.induction_on' for b in bad), 'A1 the only term that cannot be said is the `match` of Z.induction_on (%s)' % (bad[:3],))
@@ -428,6 +429,62 @@ def sec_A(c):
     eng.premises = None
     expect(tot['statements'] >= 400 and tot['tokens'] >= 6500 and tot['different'] == 0 and bad == ['funext'], 'A9 every statement of the library is said and built back as itself, but `funext`, which quantifies over a family of types (%s; %s)' % (dict(tot), bad[:3]))
     expect(all(used[t] > 0 for t in ('v', 'c', 'n', 'lam', 'all', 'imp', 'arr', 's', 'dep')), 'A9 ... with every kind of token among them (%s)' % dict(used))
+    # ---- A10. the assembler's work budget (F86).  A term a learner says at random can be one whose check does not stop.  The assembler ran such checks under the library's budget (2 * 10^9 steps: half a minute,
+    # 4 GB of memory, then the kernel killed the process); it runs them under the budget the engine gives the action that carries the term (`Engine.default_fuel`), and a term that spends it is refused.
+    import resource
+    Nat_, Zt_ = w['Nat'].n, w['Z'].n; a0 = k.mk_fvar(0)
+    def cst(nm): return k.mk_const(gid[nm])
+    def app_(f, *xs):
+        for x in xs: f = k.mk_app(f, x)
+        return f
+    def unary(n):
+        t = cst('Zero')
+        for _ in range(n): t = k.mk_app(cst('Succ'), t)
+        return t
+    F_ = app_(cst('Z.sumNat'), app_(cst('Z.prodNat'), k.mk_lambda(Nat_, app_(cst('Z.sub'), a0, app_(cst('Z.neg'), a0)))))
+    for _ in range(4): F_ = app_(cst('Z.prodNat'), F_)
+    huge = app_(cst('Z.sumNat'), F_, unary(130))                    # a sum of nested products over a numeral in unary (the shape of the term that killed a run, with the integer a0 in it)
+    ok_h, ty_h = k.infer_open(huge, [Zt_])
+    expect(ok_h and ty_h == Zt_, 'A10 the term that does not stop is a well-typed integer')
+    prime_a0 = app_(cst('Z.prime'), a0)
+    sp10 = GB.TermSpace(eng, [Zt_], ['a0'], roots=[prime_a0])
+    def apply_huge():
+        """`Z.le_of_eq_le a0 a0 huge ?g ?g` for the goal `Z.prime a0`: what a learner that says terms at random does, in the way gym_policy's APPLY_WITH does it"""
+        b_ = sp10.builder(prime_a0); b_.allow_goals = True
+        b_.push(('c', gid['Z.le_of_eq_le'], 5))
+        for arg in (a0, a0, huge): b_.fill(arg)
+        while not b_.done:
+            if not b_.is_prop(b_.hole_type): raise AssertionError('a hole that is no proposition')
+            b_.push(('g',))
+        return sp10.close_goals(b_)
+    cap = int(eng.default_fuel); amb = k.get_fuel()
+    expect(amb > 100 * cap, 'A10 the library\'s budget is far above the engine\'s (%d against %d)' % (amb, cap))
+    k.set_fuel(cap)
+    try: refuses('A10 where the budget is the caller\'s (the engine carrying an action out) a term that spends it is `FuelExhausted`, as for every kernel call', apply_huge, E.FuelExhausted)
+    finally: k.set_fuel(amb)
+    expect(k.get_fuel() == amb, 'A10 ... and the budget is as it was')
+    soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+    with open('/proc/self/statm') as f_: vm = int(f_.read().split()[0]) * resource.getpagesize()
+    limit = vm + 2 * 2 ** 30; limit = limit if hard == resource.RLIM_INFINITY else min(limit, hard)
+    outcome = None; t1 = time.time()
+    try:
+        resource.setrlimit(resource.RLIMIT_AS, (limit, hard))               # (if the budget were not enforced the check would ask for gigabytes: a MemoryError here, not a killed process)
+        try: apply_huge(); outcome = 'built'
+        except GB.BuildError as e_: outcome = 'refused'; why = str(e_)
+        except MemoryError: outcome = 'out of memory'
+        except E.FuelExhausted: outcome = 'FuelExhausted'
+    finally: resource.setrlimit(resource.RLIMIT_AS, (soft, hard))
+    took = time.time() - t1
+    expect(outcome == 'refused' and took < 30 and ('%d steps' % cap) in why, 'A10 under the library\'s budget the same term is refused by the assembler (`BuildError`) within the engine\'s budget: %s in %.1f s' % (outcome, took))
+    expect(k.get_fuel() == amb, 'A10 ... and the library\'s budget is as it was')
+    # the budget is the engine's: with a smaller one a term that is fine is refused, with a larger one it is built
+    PROP_ = k.mk_type(0)
+    leg_code = GB.TermSpace(eng, [], []).encode(k.global_info(gid['Z.sq_nonneg'])[1], PROP_)
+    k.reset_fuel_peak(); leg = GB.TermSpace(eng, [], []).build(leg_code, PROP_); need = k.fuel_peak()
+    expect(need >= 20, 'A10 a statement of the library needs some work to check (%d steps)' % need)
+    small, large = G.Engine(w, kinds=set(G.Kind), probe_fuel=need // 2), G.Engine(w, kinds=set(G.Kind), probe_fuel=need * 4)
+    refuses('A10 an engine whose budget is half of what a statement needs refuses the statement (%d steps of %d)' % (need // 2, need), lambda: GB.TermSpace(small, [], []).build(leg_code, PROP_), GB.BuildError)
+    expect(k.get_fuel() == amb and GB.TermSpace(large, [], []).build(leg_code, PROP_) == leg and k.get_fuel() == amb, 'A10 ... an engine with four times the work builds it, and the library\'s budget is as it was')
 
 
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ B. the actions

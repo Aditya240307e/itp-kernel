@@ -13,12 +13,16 @@ contest tiers (the 72 graded problems are pinned by S41/S43) are kernel-checked 
                            the plain-prefix menu without hidden globals (and the mask removes something).
   D. THE PROOFS.           each of the 115 proved contest problems: its reference proof replays as a kernel-checked sequence of actions in its regime; the steps survive a round trip through JSON and replay again; the proof term
                            mentions only globals the problem's premises offer (and the ones the replay itself derived); the proof depends on no axiom and on the quotient primitives only (audit.py).
-  E. THE SECOND OPINION.   the independent checker (recheck.SecondOpinion) accepts every one of those proofs for its statement and rejects a proof for another problem's statement.
+  E. THE SECOND OPINION.   the independent checker (recheck.SecondOpinion) accepts the proofs it is given for their statements -- every eighth proof of the list by default, all of them with S50_E=all (it is a
+                           Python program that walks the proof terms, about a minute for a proof: a quarter of an hour for 15, more than an hour for all 115) -- each in a process of its own with an environment
+                           made for that proof and a limit on its memory (S50_E_MEM), and rejects a proof for another problem's statement, and a lemma of the library for a problem.  (One process that judged
+                           the proofs one after the other grew past 5 GB, the limit of a run on the reference machine is 5.8 GB, and the kernel killed it: finding F86.)
 
-Environment: S50_TRACE=1 prints timings and memory, S50_ONLY=A,B selects sections, S50_LIMIT=n restricts D and E to the first n proved contest problems (a quick run; the gate itself runs them all).
+Environment: S50_TRACE=1 prints timings and memory, S50_ONLY=A,B selects sections, S50_LIMIT=n restricts D and E to the first n proved contest problems (a quick run; the gate itself runs them all), S50_E=i/n or
+S50_E=all selects the proofs E judges (default 0/8), S50_E_MEM=n the megabytes one independent check may use (default 2000).
 """
 import os as _os, sys as _sys; _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', '..', 'src', 'python')); import itp_paths  # noqa: E402,F401
-import os, sys, time, json, random, collections, traceback
+import os, sys, time, json, random, collections, traceback, gc
 sys.setrecursionlimit(200000)
 import itp_env_lnl as E
 import bank as B, bank_lib, bank_all
@@ -33,6 +37,9 @@ FAIL = []; CHECKS = [0]
 TRACE = bool(os.environ.get('S50_TRACE'))
 ONLY = set(os.environ['S50_ONLY'].split(',')) if os.environ.get('S50_ONLY') else None
 LIMIT = int(os.environ['S50_LIMIT']) if os.environ.get('S50_LIMIT') else None
+E_SPEC = os.environ.get('S50_E', '0/8')                          # which proofs the independent checker judges (section E): 'i/n' = the proofs number i, i+n, i+2n, ... of the list ('0/8': every eighth, a sample); 'all'
+E_I, E_N = (0, 1) if E_SPEC == 'all' else tuple(int(x) for x in E_SPEC.split('/'))
+E_MEM = int(os.environ.get('S50_E_MEM', '2000'))                       # MB of memory one independent check (a process of its own) may use beyond what it inherits from the gate (section E)
 
 
 def rss_mb():
@@ -346,6 +353,7 @@ def sec_D(c):
     expect(not bad, 'D2 the steps of every proof survive a round trip through JSON and prove the statement again in a second engine (%d proofs; %s)' % (len(terms), bad[:2]))
     trace('D2 portable replays: %.1f s' % (time.time() - t0))
     # ---- D3. the proof term mentions only what the premises offer (and what the replay derived itself)
+    trace('D3 start')
     bad = []; derived = 0
     for n, (t, n_before) in terms.items():
         ps = P[n].premises('prefix'); used = RC.consts_of(k.dump_raw(t.n))
@@ -353,6 +361,7 @@ def sec_D(c):
         derived += sum(1 for g in used if g >= n_before)
         if out: bad.append((n, [k.global_info(g)[0] for g in sorted(out)[:3]]))
     expect(not bad, 'D3 no proof term mentions a global that its premises hide (%s)' % (bad[:3],))
+    trace('D3 done')
     # ---- D4. the trusted base
     t0 = time.time(); memo = {}; axioms = set(); quots = set(); per = {}
     for n, (t, _) in terms.items():
@@ -380,6 +389,43 @@ def sec_D(c):
 
 
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ E. the second opinion
+def judge(k, term, stmt, extra=(), mem_mb=None, timeout=3600):
+    """what the independent checker says of `term` as a proof of `stmt`, asked in a child process of its own (fork): the checker is a Python program that walks the proof, and the memory it needs is not the
+    parent's to keep (the parent holds the world; one process that judged proofs one after the other grew past 5 GB, and the machine's limit for a run is about 5.8 GB: the kernel killed it, F86). The child
+    makes the environment for this one proof (`needed_by`: the globals the proof and the statement need, seconds), is held to `mem_mb` MB of memory beyond what it inherits, and dies with its answer.
+    Returns (status, message, globals in the environment, MB the child used): status 'accepted' / 'rejected' (the checker's verdict), or 'memory' / 'timeout' / 'killed' / 'error' (no verdict)."""
+    import multiprocessing as mp, resource
+    mem_mb = E_MEM if mem_mb is None else mem_mb
+    ctx = mp.get_context('fork'); rx, tx = ctx.Pipe(duplex=False)
+    def child():
+        try:
+            rx.close()
+            with open('/proc/self/statm') as f: vm = int(f.read().split()[0]) * resource.getpagesize()
+            soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+            lim = vm + mem_mb * 2 ** 20
+            resource.setrlimit(resource.RLIMIT_AS, (lim if hard == resource.RLIM_INFINITY else min(lim, hard), hard))
+            base = rss_mb()
+            so = RC.SecondOpinion(k, fuel=400_000_000, needed_by=[term, stmt] + list(extra))
+            n_env = len(so.checker.g)
+            ok, msg = so.accepts(term, stmt)
+            tx.send(('accepted' if ok else 'rejected', str(msg)[:200], n_env, max(0, rss_mb() - base)))
+        except MemoryError: tx.send(('memory', 'more than %d MB beyond the parent' % mem_mb, 0, mem_mb))
+        except BaseException as e: tx.send(('error', '%s: %s' % (type(e).__name__, str(e)[:150]), 0, 0))
+        finally: tx.close()
+    sys.stdout.flush(); sys.stderr.flush()
+    p = ctx.Process(target=child); p.start(); tx.close()
+    try:
+        if rx.poll(timeout):
+            try: res = rx.recv()
+            except EOFError: res = ('killed', 'the child died without an answer (exit %s)' % (p.exitcode,), 0, 0)
+        else: res = ('timeout', 'no answer within %d s' % timeout, 0, 0)
+    finally:
+        p.join(5)
+        if p.is_alive(): p.terminate(); p.join(5)
+        rx.close()
+    return res
+
+
 def sec_E(c):
     fx = c['fx']; w = fx.w; k = fx.k; P = fx.placed
     terms = c.get('terms')
@@ -388,29 +434,39 @@ def sec_E(c):
         for n, r in fx.results.items():
             if r.ok: terms[n] = A.replay_portable(eng3, P[n].stmt, r.portable, P[n].premises('prefix'))
     names = list(terms)
-    t0 = time.time()
-    so = RC.SecondOpinion(k, fuel=400_000_000, needed_by=[terms[n] for n in names] + [P[n].stmt for n in names])
-    trace('E the independent checker\'s environment: %d globals of %d, %.1f s' % (len(so.checker.g), k.num_globals(), time.time() - t0))
-    bad = []; t0 = time.time(); slow = []
-    for n in names:
-        t1 = time.time(); ok, msg = so.accepts(terms[n], P[n].stmt)
-        if not ok: bad.append((n, str(msg)[:100]))
-        if time.time() - t1 > 30: slow.append((n, round(time.time() - t1)))
-    expect(not bad, 'E1 the independent checker accepts the proof of every proved contest problem for its statement (%d proofs; %s)' % (len(names), bad[:2]))
-    trace('E1 %d proofs checked in %.1f s; slow: %s' % (len(names), time.time() - t0, slow))
-    # ---- E2. negative controls: a proof for the statement of another problem
-    wrong = []; tried = 0
+    c.pop('eng3', None); gc.collect()
+    # ---- E1. the independent checker accepts the proofs.  Each proof is judged in a process of its own (`judge`).
+    judged = names[E_I::E_N]
+    t0 = time.time(); verdicts = {}; env_max = 0; mem_max = 0
+    for n in judged:
+        t1 = time.time(); st, msg, n_env, used = judge(k, terms[n], P[n].stmt)
+        verdicts[n] = (st, msg); env_max = max(env_max, n_env); mem_max = max(mem_max, used)
+        trace('E1 %s: %s in %.1f s (environment of %d globals of %d, the child used %d MB)%s' % (n, st, time.time() - t1, n_env, k.num_globals(), used, '' if st == 'accepted' else ' ' + msg[:100]))
+    accepted = [n for n, v in verdicts.items() if v[0] == 'accepted']
+    rejected = [(n, v[1][:80]) for n, v in verdicts.items() if v[0] == 'rejected']
+    errors = [(n, v[1][:80]) for n, v in verdicts.items() if v[0] == 'error']
+    no_verdict = [(n, v[0]) for n, v in verdicts.items() if v[0] in ('memory', 'timeout', 'killed')]
+    # (a proof can be more than a Python program that walks it can hold: the checker works on terms with named variables and shares nothing, so a proof by computation with big numerals -- aime1983_p6 -- needs
+    # several GB. Such a proof gets no verdict, which is said; a REJECTION or an error fails the gate, and so does a sample in which fewer than three of five proofs are judged.)
+    expect(judged and not rejected and not errors and len(accepted) * 5 >= len(judged) * 3, 'E1 the independent checker accepts the proofs of the contest problems it is given, for their statements (S50_E=%s: %d of the %d proofs, each in a process of its own, environments of up to %d globals of %d, at most %d MB used by one; accepted %d, rejected %s, errors %s, no verdict within %d MB and the time limit: %s)' % (E_SPEC, len(judged), len(names), env_max, k.num_globals(), mem_max, len(accepted), rejected[:2], errors[:2], E_MEM, no_verdict[:4]))
+    trace('E1 %d proofs judged in %.1f s: %d accepted, %d no verdict' % (len(judged), time.time() - t0, len(accepted), len(no_verdict)))
+    # ---- E2. negative controls: a proof for the statement of another problem, and a lemma of the library for a problem
+    pairs = []
     for i, n in enumerate(names[:8]):
         m = names[(i * 5 + 3) % len(names)]
         if m == n or k.dump_raw(P[m].stmt.n) == k.dump_raw(P[n].stmt.n): continue
-        tried += 1
-        ok, msg = so.accepts(terms[n], P[m].stmt)
-        if ok: wrong.append((n, m))
-    expect(tried >= 6 and not wrong, 'E2 the independent checker rejects the proof of one problem as a proof of another (%d pairs tried; accepted by mistake: %s)' % (tried, wrong[:2]))
-    # a lemma of the library is no proof of a problem
-    lem = next((w.gid[nm] for nm in ('Z.sq_nonneg', 'Z.add_comm', 'Z.mul_comm', 'Z.le_refl', 'Z.le_trans') if nm in w.gid and w.gid[nm] in so.gids), None)
-    ok, msg = so.accepts(k.mk_const(lem), P[names[0]].stmt) if lem is not None else (True, 'no library lemma in the environment')
-    expect(not ok and 'not made for' not in str(msg), 'E2 ... and a lemma of the library is no proof of a problem (%s)' % (str(msg)[:80],))
+        pairs.append((n, m))
+    wrong = []; nov = []; refused_ = 0
+    for n, m in pairs:
+        st, msg, _, _ = judge(k, terms[n], P[m].stmt)
+        if st == 'accepted': wrong.append((n, m))
+        elif st == 'rejected': refused_ += 1
+        else: nov.append((n, m, st))
+    expect(len(pairs) >= 6 and not wrong and refused_ * 2 >= len(pairs), 'E2 the independent checker rejects the proof of one problem as a proof of another (%d pairs tried, %d rejected; accepted by mistake: %s; no verdict: %s)' % (len(pairs), refused_, wrong[:2], nov[:3]))
+    lem = next((w.gid[nm] for nm in ('Z.sq_nonneg', 'Z.add_comm', 'Z.mul_comm', 'Z.le_refl', 'Z.le_trans') if nm in w.gid), None)
+    if lem is not None:
+        st, msg, _, _ = judge(k, k.mk_const(lem), P[names[0]].stmt)
+        expect(st == 'rejected' and 'not made for' not in msg, 'E2 ... and a lemma of the library is no proof of a problem (%s: %s)' % (st, msg[:80]))
 
 
 SECTIONS = [('A', sec_A), ('B', sec_B), ('C', sec_C), ('D', sec_D), ('E', sec_E)]

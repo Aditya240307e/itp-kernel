@@ -27,11 +27,16 @@ the terms of `f_equal`'s conclusion): those are not said. A head may be applied 
 NOTHING HERE IS TRUSTED. A term built here is an ordinary kernel term; whatever is done with it is done by the tactic layer and checked by the kernel, and `build` checks the finished term against the
 expected type with the kernel as well. A wrong menu wastes a step; it cannot make a false theorem appear.
 
+WORK BUDGET.  The kernel calls an assembler makes (the check of a finished term, the sort of a hole's type) run under the budget the engine gives the action that carries the term, `Engine.default_fuel`
+(5 * 10^6 steps), and not under the library's (`author.DEFAULT_FUEL`, 2 * 10^9, about half a minute and several GB: a term a learner has said at random, `Z.sumNat` of nested products of a numeral in unary,
+type-checked against a proposition it does not prove, spent them all, F86). A term whose check spends the budget is REFUSED (`BuildError`), as the engine would have refused the action; inside a probe the
+probe's own budget decides, and spending it is `FuelExhausted`, as everywhere (`spent`).
+
 PROBES.  Kernel nodes made during a probe are reclaimed at its rewind. The table of the library's heads (`head_table`) is made outside probes (by `Engine.refresh`) and never stored from inside one; a
 `TermSpace` and its builders are made for one goal and thrown away with it.
 """
 import os as _os, sys as _sys; _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..')); import itp_paths  # noqa: E402,F401
-import os, sys, collections
+import os, sys, collections, functools
 import itp_env_lnl as E
 import ring as R
 from author import AuthorError
@@ -59,6 +64,22 @@ def spent(e):
     may succeed -- never "this term is ill-typed" or "this is no proposition"
     """
     if isinstance(e, E.FuelExhausted): raise e
+
+
+def bounded(fn):
+    """a method of a `Builder` or a `TermSpace` that calls the kernel, run under the assembler's work budget: `Engine.default_fuel` steps for each call into the kernel (see WORK BUDGET above). Spending it
+    is a refused term (`BuildError`). Left alone: a probe (`world.probing`: its own budget, set by the engine, decides, and spending it is `FuelExhausted`, which `spent` lets through), a caller that has set
+    a budget at most as large already (the engine carrying an action out), and an engine whose default budget is unlimited (<= 0)."""
+    @functools.wraps(fn)
+    def run(self, *args, **kw):
+        sp = getattr(self, 'space', None) or self
+        k = sp.k; cap = int(sp.eng.default_fuel); saved = k.get_fuel()
+        if cap <= 0 or sp.w.probing or 0 < saved <= cap: return fn(self, *args, **kw)
+        k.set_fuel(cap)
+        try: return fn(self, *args, **kw)
+        except E.FuelExhausted: raise BuildError('the kernel needs more than %d steps to check this: refused' % cap) from None
+        finally: k.set_fuel(saved)
+    return run
 
 
 class NotEncodable(BuildError):
@@ -376,6 +397,7 @@ class Builder:
         return ty
 
     # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ the menu
+    @bounded
     def tokens(self, pool=False, rare=False):
         """the choices at the first hole, in a fixed order: binders and sorts, numerals, variables (the latest first), globals (by id), then (with `pool`) the pool terms of the hole's type"""
         H = self.hole_type
@@ -412,12 +434,14 @@ class Builder:
         except (E.ITPError, RuntimeError) as e: spent(e); return False
         return bool(ok) and sort == self.space.prop
 
+    @bounded
     def is_prop(self, H):
         """is the type H a proposition (in the context of the term so far)?"""
         try: ok, sort = self.k.infer_open(H, self.ctx)
         except (E.ITPError, RuntimeError) as e: spent(e); return False
         return bool(ok) and sort == self.space.prop
 
+    @bounded
     def fill(self, term):
         """put a term that is already built into the first hole (the kernel checks it against the hole's type)"""
         H = self.hole_type
@@ -535,6 +559,7 @@ class Builder:
         return r
 
     # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ pushing a token
+    @bounded
     def push(self, tok):
         H = self.hole_type
         if H is None: raise BuildError('the term is finished: no token %r' % (tok,))
@@ -749,6 +774,7 @@ class TermSpace:
         return Builder(self, expected)
 
     # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ whole terms
+    @bounded
     def build(self, code, expected, check=True):
         """the term that a code says, of the expected type; raises BuildError"""
         b = Builder(self, expected)
@@ -769,6 +795,7 @@ class TermSpace:
         for tok in code: b.push(tuple(tok) if isinstance(tok, list) else tok)
         return self.close_goals(b)
 
+    @bounded
     def close_goals(self, b):
         """(the term of a finished builder with its goals abstracted, the goals): see `build_refine`"""
         k = self.k
@@ -785,6 +812,7 @@ class TermSpace:
         if not ok: raise BuildError('the term does not have the expected type: %s' % (msg,))
         return lam, goals
 
+    @bounded
     def encode(self, term, expected=None):
         """the canonical code of a term (numerals as numerals, a head applied to exactly the arguments the expected type does not determine); raises NotEncodable"""
         k = self.k
