@@ -301,8 +301,8 @@ def fig_levels(C, P, out, plt):
             m, lo, hi = ST.mean_ci(r) if len(r) > 1 else (float(r[0]), NAN, NAN)
             x = j + (i - (len(variants) - 1) / 2) * w
             ax.bar([x], [m], width=w * 0.9, color=colour, alpha=0.5 + 0.5 * (i % 2), edgecolor=colour, hatch=None if ls == '-' else '//', linewidth=0.8, label=label if j == 0 else None)
-            if not math.isnan(lo): ax.plot([x, x], [lo, hi], color=INK2, linewidth=0.8)
-    ax.set_xticks(range(len(levels))); ax.set_xticklabels(['level %s\n(%d)' % (l, sum(1 for n in C.names('test', 'all') if C.info[n]['level'] == l)) for l in levels]); pct_axis(ax)
+            if not math.isnan(lo): ax.plot([x, x], [max(0.0, lo), min(1.0, hi)], color=INK2, linewidth=0.8)             # (a rate lives in [0, 1]; with two seeds the t-interval leaves it)
+    ax.set_ylim(0.0, 1.0); ax.set_xticks(range(len(levels))); ax.set_xticklabels(['level %s\n(%d)' % (l, sum(1 for n in C.names('test', 'all') if C.info[n]['level'] == l)) for l in levels]); pct_axis(ax)
     ax.set_ylabel('test problems solved (%)'); ax.grid(axis='x', visible=False); ax.legend(frameon=False, ncol=3, fontsize=6.5, loc='upper right')
     fig.tight_layout(); return save(plt, fig, out, 'fig_levels')
 

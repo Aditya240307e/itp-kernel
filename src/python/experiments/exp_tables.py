@@ -206,6 +206,9 @@ def scaling_table(C, P):
     return Table('scaling', 'Olympiad performance (%% solved within %s probes) against the number of synthetic theorems used for pre-training.' % B, ['synthetic theorems', 'model', 'seeds', 'dev', 'test', 'test, proved'], rows, align='rlrrrr')
 
 
+FAMILY_LABEL = {'AMC': 'AMC-style'}              # (the bank holds no problem of the AMC itself: its 72 are written in the manner of that contest)
+
+
 def level_table(C, P, variants=('bc_scratch', 'bc', 'ppo', 'ei_her', 'ei_her_boot')):
     B = P.get('headline'); levels = sorted({C.info[n]['level'] for n in C.names('test', 'all') if C.info.get(n, {}).get('level') is not None})
     srcs = ['IMO', 'ISL', 'AIME', 'AMC', 'APMO', 'folklore', 'other']
@@ -223,7 +226,7 @@ def level_table(C, P, variants=('bc_scratch', 'bc', 'ppo', 'ei_her', 'ei_her_boo
         rows.append(['level %s' % l, len(names)] + [cell(v, names) for v in present])
     for s in srcs:
         names = [n for n in C.names('test', 'all') if EC.source_class(C.info[n]['source']) == s]
-        if names: rows.append([s, len(names)] + [cell(v, names) for v in present])
+        if names: rows.append([FAMILY_LABEL.get(s, s), len(names)] + [cell(v, names) for v in present])
     return Table('levels', 'Test problems solved (%%) within %s probes by level of the bank (1 = one routine step ... 5 = a hard olympiad problem) and by the contest the problem comes from.' % B, ['group', 'problems'] + [LABELS.get(v, v) for v in present], rows,
                  notes=['A row with few problems has an interval wider than its entry shows; read it as a profile, not a ranking.'], align='lr' + 'r' * len(present))
 
@@ -240,7 +243,7 @@ def bank_table(C):
     rows = []
     for k in classes:
         ps = [p for p in probs if EC.source_class(p.get('source')) == k]
-        if ps: rows.append(row(k, ps))
+        if ps: rows.append(row(FAMILY_LABEL.get(k, k), ps))
     rows.append(row('all problems', probs))
     for l in sorted({p.get('level') for p in probs if p.get('level') is not None}): rows.append(row('level %s' % l, [p for p in probs if p.get('level') == l]))
     for field, values, title in (('origin', ('contest', 'adapted', 'style', 'folklore'), 'origin'), ('verified', ('answer-checked', 'recalled', 'none'), 'checked against a public source')):
