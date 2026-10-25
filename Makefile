@@ -8,7 +8,7 @@ J  ?= 2
 
 help:
 	@echo "make kernel          build the hybrid kernel and the frozen reference kernel into build/"
-	@echo "make gates           the 47 kernel / tactic / environment / bank gates (about 10 minutes on two cores)"
+	@echo "make gates           the 47 kernel / tactic / environment / bank gates (about 13 minutes on two cores)"
 	@echo "make gates-ml        the learner's gates S44 (machinery) and S51 (training suite, experiment runner); they need torch and gymnasium"
 	@echo "make gates-repo      the repository gates: S45 layout, S46 examples"
 	@echo "make gates-synth     the synthetic theorem generator's gate S48"

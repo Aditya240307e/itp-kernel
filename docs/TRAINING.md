@@ -218,8 +218,9 @@ python3 src/python/learner/ml_ppo.py data/dataset_v2 --init runs/ft/s0/best.pt -
 python3 src/python/learner/ml_evaluate.py data/dataset_v2 --split dev,test --regimes prefix,strict --solver sample --model ft=runs/ft/s0/best.pt --probes 2000 --recheck --workers 4 --out runs/eval/ft_s0
 ```
 
-Seeds are fixed (`--seed`); training and search use one thread per process by default, so a run is reproducible on the same library versions (a GPU is not bit-reproducible). The trained models of the author's
-runs, if any, are in the release archive under `artifacts/models/` (they are not in the git history); the result files of dataset v1 are in `data/results/v1/` (section 7).
+Seeds are fixed (`--seed`); training and search use one thread per process by default, so a run is reproducible on the same library versions (a GPU is not bit-reproducible). No trained model is part of the
+repository or of its release archive: nothing has been trained on dataset v2 yet, and model files do not belong in git (`make dist ARTIFACTS=dir` would put the files of `dir` into an archive under `artifacts/`). The result
+files of dataset v1 (the only measurements made so far) are in `data/results/v1/` (section 7).
 
 ## 11. Limits
 
