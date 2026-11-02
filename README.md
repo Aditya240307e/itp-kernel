@@ -18,10 +18,10 @@ and the experiment pipeline are built and heavily tested; the learners are a bas
 | Decision procedures | `ring` (naturals, binary naturals, integers), `linarith`, `nlinarith`, `linear_combination`, `interval_cases` -- each produces a certificate the kernel checks |
 | Problem bank | **268 formal problems** (levels 1-5): 41 IMO, 18 ISL and 1 APMO problems (only 12 of them with proofs), 31 AIME, 72 AMC-style problems written for the bank, 105 graded problems, classical results and exercises; **187 have a kernel-checked reference proof** (a sequence of actions), 81 are statement-only. Every problem says where its text comes from (`origin`) and whether it was compared with a source (`verified`) -- the contest texts are paraphrases, some written from memory (`docs/BANK.md`). Dataset v2 in `data/dataset_v2`: the problems and proofs, 453 library lemmas with proofs, a label for every action (direction, depth, size of the subtree), and the theorems that the reference proofs contain, each with its own proof; splits by problem family |
 | Environment | `gym_env` / `gym_acts`: goals as data, menus of legal actions, actions that *say* their term arguments, atomic probes; `gym_tree`: the proof tree of an episode and the theorems it proved (hindsight); `learner/bank_env.py` is a Gymnasium environment (`ITPBank-v0`) that starts on any goal given as data, has a step budget and reports what each action achieved |
-| Learner | features, a transformer + GRU policy network over *options*; behaviour cloning (also as pre-training on synthetic theorems); provers: sampling, policy-guided IDA\*, MCTS, a manager-worker design, with blind and random baselines; expert iteration and PPO with **hindsight** (every goal an attempt closes on the way is a theorem with a proof) and a **bootstrapped library** (kernel-checked hindsight theorems become premises); all measured by one protocol (kernel-checked proofs within a budget of probes). A baseline, not a result: see `docs/TRAINING.md` |
+| Learner | features, a policy network over *options* with a swappable encoder of the goal (transformer, bidirectional GRU, dilated CNN, bag of tokens: one class each behind `PolicyNet.encode`; `ml_init.py` makes an untrained one of any kind); behaviour cloning (also as pre-training on synthetic theorems); provers: sampling, policy-guided IDA\*, MCTS, a manager-worker design, with blind and random baselines; expert iteration and PPO with **hindsight** (every goal an attempt closes on the way is a theorem with a proof) and a **bootstrapped library** (kernel-checked hindsight theorems become premises); all measured by one protocol (kernel-checked proofs within a budget of probes). A baseline, not a result: see `docs/TRAINING.md` |
 | Synthetic data | `src/python/synth`: a generator of kernel-checked theorems (proof trees grown backwards from the library's lemmas, labelled by depth, lemmas and hypotheses; reproducible from a seed and an index; verified from the data alone), shards, splits, a dataset card and saturation statistics; no statement of the bank enters it (excluded by digest and by shape); see `docs/GENERATOR.md` |
-| Experiments | `scripts/` + `src/python/experiments`: one resumable pipeline that generates the data, pre-trains, fine-tunes, runs the RL variants and the ablations over several seeds, evaluates every model with the same provers on the same problems, measures throughput and memory, and writes the tables, figures and numbers of the paper (`paper/`, a TMLR skeleton); see `docs/EXPERIMENTS.md` |
-| Tests | 54 gates: 47 kernel / tactic / environment / bank gates, the problem-set gates S49-S50, the learner's gates S44 and S51, the repository gates S45-S46, the generator's gate S48; 1616 mutants of the kernel, libraries, checker and environment (none yet for the problem sets, the learner, `synth` and the experiment pipeline) to show the gates bite |
+| Experiments | `scripts/` + `src/python/experiments`: one resumable pipeline that generates the data, pre-trains, fine-tunes, runs the RL variants and the ablations over several seeds, evaluates every model with the same provers on the same problems, measures throughput and memory, runs the studies of other encoders, other sizes and learning from random weights, and writes the tables, figures and numbers of the paper into a results folder kept apart from it (`results/`; `paper/` is a TMLR skeleton); see `docs/EXPERIMENTS.md` |
+| Tests | 54 gates: 47 kernel / tactic / environment / bank gates, the problem-set gates S49-S50, the learner's gates S44 and S51, the repository gates S45-S46, the generator's gate S48; 1647 mutants of the kernel, libraries, checker and environment (none yet for the problem sets, the learner, `synth` and the experiment pipeline) to show the gates bite |
 
 ## Quick start
 
@@ -33,6 +33,9 @@ make kernel                              # builds build/itp_env_lnl*.so (the ker
 python3 examples/01_prove_with_tactics.py
 python3 tests/run_gates.py -j 2          # the 49 default gates, about 45 minutes on two cores;  make gates-all runs all 54 (about an hour)
 make dataset-verify                      # replay every recorded proof and sub-theorem of data/dataset_v2 in a fresh engine (about 25 minutes)
+make soundness                           # the soundness evidence in one stamped folder (results/soundness): every gate, every mutant, fuzzing, the independent checker; hours, use J=8 on a big machine
+make audit                               # the statement audit in one stamped folder (results/audit): every statement of the bank against its intended meaning, the cautions, who has read it; minutes
+make tool-mutants J=8                    # fault injection into the tools that make that evidence (soundness folder, audit, number checker, record of the code): their tests must fail for every fault (252 faults of six tools; 47 minutes on two cores)
 ```
 
 The experiments (they need torch; a GPU is optional and makes the networks faster):
@@ -76,15 +79,15 @@ src/python/problems/       the problem bank (bank_*.py), faithfulness checks, du
 src/python/learner/        features, network, training (ml_bc, ml_ei, ml_ppo), provers (ml_agents, ml_search, ml_mcts, ml_hier), hindsight and library (ml_her, ml_lemmas), evaluation, the Gymnasium environment
 src/python/synth/          the synthetic theorem generator: lemma pool, proof trees grown backwards, records, shards, merge and splits, verification from the data alone (docs/GENERATOR.md)
 src/python/experiments/    the experiment graph, scheduler, collector, statistics, tables, figures, throughput benchmarks, report (docs/EXPERIMENTS.md)
-scripts/                   the shell scripts that run the experiments (00_check_env ... 07_report, run_all, smoke_test, status; env.sh and local.env.example hold the settings)
+scripts/                   the shell scripts that run the experiments (00_check_env ... 09_audit, run_all, smoke_test, status; env.sh and local.env.example hold the settings)
 paper/                     the TMLR paper skeleton (main.tex, bibliography, style) and generated/ (tables and figures from `make report`); a release archive also holds `main.pdf`, a **preview**: compiled from a `make smoke` run, so the tables and figures that depend on runs show the numbers of a tiny test world (19 problems, 2 seeds) and every page says so; the facts about the repository and the benchmark (Tables 1 and 2) are real
 tests/                     the gates by role (kernel, library, environment, problems, learner, synth, repo), shared modules (support), fuzzers, benchmarks, golden files
-mutants/                   the mutation catalogue (1616 mutants) and its driver
+mutants/                   the mutation catalogue (1647 mutants) and its driver
 examples/                  runnable examples; examples/repros holds scripts that reproduce fixed defects
 data/dataset_v2/           the dataset (JSON + card + manifest);  data/results/v1/ the result files of the first runs on the earlier dataset (historical)
-docs/                      FINDINGS (the tracker), ROADMAP, KERNEL_DESIGN, ACTIONS, BANK, GENERATOR, ARCHITECTURE_RL, TRAINING, EXPERIMENTS
+docs/                      FINDINGS (the tracker), ROADMAP, KERNEL_DESIGN, ACTIONS, BANK, GENERATOR, ARCHITECTURE_RL, TRAINING, EXPERIMENTS, PAPER_PLAN
 legacy/                    the previous generation's modules, tests and notes (some gates import curriculum / hypergraph from here)
-tools/                     sanitizer run, environment check, release archive (make_dist.py)
+tools/                     sanitizer run, environment check, release archive (make_dist.py), the check of a LaTeX source against the results folders (check_numbers.py)
 ```
 
 Modules are imported by their plain names (`import gym_env`); the names are unique across the tree (S45 checks it).
@@ -97,6 +100,7 @@ Modules are imported by their plain names (`import gym_env`); the names are uniq
 * `docs/GENERATOR.md` -- the synthetic theorem generator: how a theorem and its proof are grown, what is rejected and why, how many theorems there can be, how the data are reproduced and verified, what they do not show.
 * `docs/ARCHITECTURE_RL.md` -- how a learner should be structured to climb from imitation to a manager/worker design; `docs/TRAINING.md` -- what exists and what it achieves (little, honestly).
 * `docs/EXPERIMENTS.md` -- the experiments of the paper: questions, protocol, statistics, the run graph, the scripts, what the results can and cannot show.
+* `docs/PAPER_PLAN.md` -- the plan of the paper: each claim, the evidence for it and the table, figure or number that carries it; the hypotheses and the words for results, fixed before the runs; the run order on the big machine with a go/no-go criterion at each step; the paper section by section; the submission checklist. `tools/check_numbers.py` checks a hand-typed LaTeX source against the results folders.
 * `docs/ROADMAP.md` -- what is missing for IMO-level and undergraduate mathematics, and a calibrated plan.
 * `tests/README.md` (the gates), `mutants/README.md` (mutation testing), `legacy/README.md`.
 

@@ -209,6 +209,22 @@ Table~\ref{tab:hyper} (appendix) lists every setting; \todo{machine, from genera
 \genfigure{fig_learning}{0.98}{Reinforcement learning: dev problems solved against iterations (a) and against cumulative rollout probes (b), and the mean length of the dev proofs (c).}
 \todo{inference scaling (budget), data scaling, iterations vs.\ proof length; say whether the curves are still rising}
 
+\subsection{Other encoders of the goal}
+\inputtable{arch}
+\genfigure{fig_arch}{0.98}{The encoder of the goal swapped with everything else held fixed: (a) actions right on held-out synthetic theorems after pre-training (iid and compositional splits); (b) olympiad test problems solved by each learner that continues from each encoder; (c) training steps per second.}
+\todo{which encoders imitate and solve as well as the transformer and which do not (the bag of tokens is the control: how much of the task is the multiset of symbols); whether the ranking of the encoders is the same for behaviour cloning, expert iteration and PPO; the parameter counts differ little: say why}
+
+\subsection{Other widths and scaling laws}
+\inputtable{size}
+\inputtable{laws}
+\genfigure{fig_laws}{0.98}{Held-out synthetic loss against (a) the number of synthetic training theorems and (b) the number of parameters (log--log; dashed: the average of the lines fitted to each seed, its slope is the exponent of the table), and (c) olympiad problems solved by behaviour cloning against the number of parameters.}
+\todo{the exponents with their intervals over seeds; whether the iid and compositional splits scale alike; the range over which they were measured (no asymptote is assumed); whether olympiad accuracy follows the held-out loss}
+
+\subsection{Learning from random weights}
+\inputtable{scratch}
+\genfigure{fig_scratch}{0.9}{Dev problems solved by learners that start from random weights, against (a) iterations and (b) the probes spent by their rollouts (log scale); dotted: uniform random actions.}
+\todo{what a learner reaches with no demonstration and no pre-training, next to the model-free baselines and to the same learner continued from behaviour cloning; with which encoders it works; its cost in hours}
+
 \subsection{Ablations}
 \inputtable{ablations}
 \genfigure{fig_ablations}{0.85}{Differences in problems solved on test (percentage points), first minus second method, with the 95\% interval over seeds.}
@@ -228,11 +244,17 @@ Table~\ref{tab:hyper} (appendix) lists every setting; \todo{machine, from genera
 \subsection{Difficulty and contest}
 \inputtable{levels}
 
-\subsection{Throughput and memory}
+\subsection{Throughput, latency and memory}
+\inputtable{bench_machine}
 \inputtable{bench_solvers}
+\genfigure{fig_throughput}{0.98}{(a) probes per second of each prover on one core (median of the passes, range of the passes as a line; logarithmic axis); (b) speed-up of the evaluation with worker processes; (c) memory of the evaluation counting the shared world once, against the sum of the resident sets of the processes.}
+\inputtable{bench_breakdown}
+\genfigure{fig_breakdown}{0.98}{Where the time goes: share of the wall-clock time of an instrumented pass in each group of operations, for the Gymnasium interface and for each prover.}
+\inputtable{bench_latency}
+\genfigure{fig_latency}{0.98}{(a) latency of the operations of the stack; (b) latency of a probe by the kind of action. Dot: median; tick: 90th percentile; line: up to the 99th percentile; logarithmic axis.}
 \inputtable{bench_workers}
+\inputtable{bench_archs}
 \inputtable{bench_world}
-\genfigure{fig_throughput}{0.9}{(a) probes per second of each prover on one core; (b) scaling of the evaluation with worker processes.}
 \inputtable{bench_kernel}
 \inputtable{cost}
 

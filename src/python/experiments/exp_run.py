@@ -8,7 +8,7 @@
     python3 src/python/experiments/exp_run.py full --runs runs/full --dry-run                # the commands, nothing executed
     ... --set rl_iters=20 --set eval_probes=500                                               # change fields of the profile (recorded in PROFILE.json)
 
-A run is DONE when its command exited with status 0 and the files it promises exist (exp_spec.Run.check); that is recorded in `RUNS/.status/<id>.json` (return code, times, host, commit).  Running the same
+A run is DONE when its command exited with status 0 and the files it promises exist (exp_spec.Run.check); that is recorded in `RUNS/.status/<id>.json` (return code, times, host, commit, and the digest of the code when the run started and when it ended).  Running the same
 command again skips what is done and re-runs the rest; every command of the matrix is itself resumable (a training run continues from its last checkpoint, an evaluation from its rows, the generator from its
 shards), so an interrupted run loses at most the work since its last checkpoint.  `--force ID` re-runs a run (and, with --cascade, everything that depends on it).
 
@@ -17,7 +17,7 @@ estimates of the runs (exp_spec: a run's cores are its --workers).  A failed run
 """
 import os as _os, sys as _sys; _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..')); import itp_paths  # noqa: E402,F401
 import os, sys, json, time, signal, argparse, subprocess, platform, collections
-import exp_spec as SP
+import exp_spec as SP, exp_repo as XR
 
 ROOT = itp_paths.ROOT
 MACHINE_FIELDS = ('device', 'threads', 'workers', 'mem_scale')          # profile fields about the machine, not the results: they may change between invocations of one runs directory
@@ -73,6 +73,13 @@ def git_commit():
     except Exception: return ''
 
 
+def code_tree():
+    """the digest of the code as it is now ('' when it cannot be computed).  A run records it when it starts and when it ends: the report then says whether the whole matrix was made with one version of the code.  The commit
+    is no help for that, since a commit that changed only the paper is another commit with the same code"""
+    try: return XR.tree_digest()
+    except Exception: return ''
+
+
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ selection
 def dependents(runs, rid):
     out = set(); changed = True
@@ -88,6 +95,7 @@ class Scheduler:
     def __init__(self, runs, R, ids, jobs, cores, mem_gb, fail_fast=False, say=print):
         self.runs = runs; self.R = R; self.ids = list(ids); self.jobs = jobs; self.cores = cores; self.mem = mem_gb; self.fail_fast = fail_fast; self.say = say
         self.running = {}                                            # id -> (Popen, t0, logfile)
+        self.tree0 = {}                                              # id -> the digest of the code when the run started
         self.failed = {}; self.skipped = set()
         self.done = {i for i in self.ids if is_done(R, runs[i])}
 
@@ -114,6 +122,7 @@ class Scheduler:
         logp = os.path.join(self.R, 'logs', sid(rid) + '.log')
         lf = open(logp, 'a'); lf.write('\n===== %s  %s\n$ %s\n' % (time.strftime('%Y-%m-%d %H:%M:%S'), rid, ' '.join(r.argv))); lf.flush()
         env = dict(os.environ, PYTHONUNBUFFERED='1', OMP_NUM_THREADS=os.environ.get('OMP_NUM_THREADS', '1'), MKL_NUM_THREADS=os.environ.get('MKL_NUM_THREADS', '1'))
+        self.tree0[rid] = code_tree()
         p = subprocess.Popen(r.argv, cwd=ROOT, stdout=lf, stderr=subprocess.STDOUT, env=env, start_new_session=True)
         self.running[rid] = (p, time.time(), lf)
         self.say('start  %-30s [%d running]  log %s' % (rid, len(self.running), shown(logp)))
@@ -124,7 +133,7 @@ class Scheduler:
         missing = [c for c in r.check if not os.path.exists(os.path.join(ROOT, c) if not os.path.isabs(c) else c)]
         ok = rc == 0 and not missing
         write_json(status_path(self.R, rid), {'id': rid, 'returncode': rc if not (rc == 0 and missing) else -1, 'missing': missing, 'seconds': round(secs, 1), 'finished': time.strftime('%Y-%m-%dT%H:%M:%S%z'),
-                                              'host': platform.node(), 'commit': git_commit(), 'argv': r.argv})
+                                              'host': platform.node(), 'commit': git_commit(), 'tree': self.tree0.pop(rid, ''), 'tree_finish': code_tree(), 'argv': r.argv})
         if ok: self.done.add(rid); self.say('done   %-30s %s' % (rid, fmt_secs(secs)))
         else:
             self.failed[rid] = rc

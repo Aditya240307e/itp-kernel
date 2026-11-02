@@ -17,6 +17,12 @@ differently when it samples and when it learns, or whose environment hands out a
   F. GOALS, BUDGET, HINDSIGHT.  The environment starts on ANY closed statement given as data (`reset(options={'goal': ...})`: the dict of a hindsight example is one) and the episode is solved by the example's
      own proof; the step budget is observed and enforced; a tracked episode reports what each action achieved and returns the theorems it proved, finished or not, kernel-checked; bad data is refused.
 
+  G. THE ENCODERS.  The goal's encoder is swappable (ml_model.ARCHS: transformer, bidirectional GRU, dilated CNN, bag of tokens) and nothing else changes with it.  For every architecture: the loss is finite and
+     every weight of the encoder is trained; the incremental decoder and the batched network agree; a goal's vector does not depend on what it is batched with (padding); it depends on the ORDER of the tokens
+     for the three that read order and does not for the bag; a saved network loads to the same function and names its architecture, and weights of one architecture are refused by another; a short run on one
+     batch lowers the loss.  The default is the transformer it always was (a configuration without `arch`; the names, order and shapes of its parameters pinned), a CNN sees exactly the window its
+     documentation says, an unknown architecture is refused.
+
     python3 s44_ml_tests.py          (S44_ONLY=A,C to select sections; S44_TRACE=1 for timings)
 """
 import os as _os, sys as _sys; _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', '..', 'src', 'python')); import itp_paths  # noqa: E402,F401
@@ -171,7 +177,7 @@ def sec_B(c):
     bl = {}
     for t, (act, logp) in enumerate(out['logits']):
         want = batch['time'][t]['want']
-        for j, i in enumerate(act.tolist()): bl[(i, t)] = float(logp[j, int(want[j])])
+        for j, i in enumerate(act.tolist()): bl[(i, t)] = float(logp[j, int(want[j])].detach())
     with torch.no_grad(): gtab = net.global_table()
     worst = 0.0; n_cmp = 0; first_scores = {}
     for si, (n, (g, ds, step)) in enumerate(traces):
@@ -530,7 +536,114 @@ def sec_F(c):
     obs, info = env.reset(options={'problem': 'imo1959_p1'}); expect(info['problem'] == 'imo1959_p1', 'F8 ... and the environment is still usable after a refused reset')
 
 
-SECTIONS = [('A', sec_A), ('B', sec_B), ('C', sec_C), ('D', sec_D), ('E', sec_E), ('F', sec_F)]
+# ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ G. the encoders
+DEFAULT_FINGERPRINT = ('d86a66bcc8371b2e', 187845, 69)         # (names + shapes in order, parameters, tensors) of the network of CFG: what the code has always built for the transformer (checked against the earlier code, bit for bit)
+
+
+def arch_net(ctx, arch, seed=0, **over):
+    torch.manual_seed(seed)
+    net = T.make_net(ctx.bags, dict(CFG, arch=arch, **over)); net.eval()
+    return net
+
+
+def fingerprint(net):
+    import hashlib
+    sd = net.state_dict()
+    return (hashlib.sha256(';'.join('%s%s' % (k, tuple(v.shape)) for k, v in sd.items()).encode()).hexdigest()[:16], sum(p.numel() for p in net.parameters()), len(sd))
+
+
+def sec_G(c):
+    fx = c['fx']; ctx = fx.ctx
+    traces = [(n, t) for n in DEMOS for t in fx.trace_of(n)]
+    steps = [t[2] for n, t in traces]
+    expect(M.ARCHS[0] == 'transformer' and len(set(M.ARCHS)) == len(M.ARCHS) and set(M.ARCHS) >= {'transformer', 'bigru', 'cnn', 'bow'}, 'G1 the architectures: %s' % (M.ARCHS,))
+    default = tiny_net(ctx)
+    expect(default.arch == 'transformer' and T.make_net(ctx.bags, CFG).arch == 'transformer' and 'arch' not in CFG, 'G1 a configuration without `arch` is the transformer')
+    expect(fingerprint(default) == DEFAULT_FINGERPRINT, 'G1 the default network has the parameters it has always had: names, order, shapes (%s)' % (fingerprint(default),))
+    raises('G1 an unknown architecture is refused', lambda: T.make_net(ctx.bags, dict(CFG, arch='lstm')), ValueError)
+    raises('G1 the bidirectional GRU needs an even width', lambda: T.make_net(ctx.bags, dict(CFG, arch='bigru', d=33, heads=1)), ValueError)
+    batch = D.collate(steps, max_dec=10 ** 4)
+    Tn = lambda k: torch.as_tensor(batch[k])
+    longest = max(range(len(steps)), key=lambda i: len(steps[i].goal.tokens)); shortest = min(range(len(steps)), key=lambda i: len(steps[i].goal.tokens))
+    expect(len(steps[longest].goal.tokens) > len(steps[shortest].goal.tokens) + 5 and len(steps) >= 10, 'G0 the batch has goals of different lengths (%d..%d tokens, %d steps)' % (len(steps[shortest].goal.tokens), len(steps[longest].goal.tokens), len(steps)))
+    counts = {}
+    for arch in M.ARCHS:
+        net = arch_net(ctx, arch); counts[arch] = sum(p.numel() for p in net.parameters())
+        tag = 'G %s' % arch
+        expect(net.arch == arch and (net.positional == (arch != 'bow')) and hasattr(net, 'pos') == net.positional, '%s: the architecture is recorded, and only an encoder with positions has a table of them' % tag)
+        # a finite loss, a value per step, and every weight of the encoder is trained
+        net.train(); out = net(batch, want_logits=True)
+        expect(math.isfinite(out['loss'].item()) and out['n'] > 0 and out['value'].shape == (len(steps),), '%s: a finite loss over %d decisions, one value per step' % (tag, out['n']))
+        net.zero_grad(); out['loss'].backward()
+        dead = [n for n, p in net.named_parameters() if (n.startswith('enc.') or n.startswith('tok.')) and (p.grad is None or not bool(torch.isfinite(p.grad).all()))]
+        gnorm = math.sqrt(sum(float((p.grad ** 2).sum()) for n, p in net.named_parameters() if n.startswith('enc.') and p.grad is not None))
+        expect(not dead and gnorm > 0.0, '%s: every weight of the encoder gets a finite gradient (norm %.3g; without: %s)' % (tag, gnorm, dead[:3]))
+        net.eval()
+        # the incremental decoder and the batched network
+        with torch.no_grad(): out = net(batch, want_logits=True)
+        bl = {}
+        for t, (act, logp) in enumerate(out['logits']):
+            want = batch['time'][t]['want']
+            for j, i in enumerate(act.tolist()): bl[(i, t)] = float(logp[j, int(want[j])].detach())
+        with torch.no_grad(): gtab = net.global_table()
+        worst = 0.0; n_cmp = 0
+        for si, (n, (g, ds, step)) in enumerate(traces):
+            dec = M.Decoder(net, ctx, g, gtab); carry = dec.root()
+            for t, (ch, i) in enumerate(ds):
+                logp, oe, hs = dec.scores(carry, ch); carry = dec.child(carry, ch, i, oe, hs)
+                worst = max(worst, abs(float(logp[i]) - bl[(si, t)])); n_cmp += 1
+        expect(n_cmp == sum(s.n_decisions for s in steps) and worst < 2e-4, '%s: the incremental decoder and the batched network give the same log-probabilities (%d decisions, worst %.1e)' % (tag, n_cmp, worst))
+        # padding: a goal's vectors alone and batched with longer and shorter goals
+        with torch.no_grad(): cls_b, hyp_b = net.encode(Tn('tokens'), Tn('seg'), Tn('mask'), Tn('hyp_of'), Tn('n_hyps'))
+        worst = 0.0
+        for k in (longest, shortest, len(steps) // 2):
+            one = D.collate([steps[k]], max_dec=10 ** 4)
+            O = lambda key: torch.as_tensor(one[key])
+            with torch.no_grad(): cls_1, hyp_1 = net.encode(O('tokens'), O('seg'), O('mask'), O('hyp_of'), O('n_hyps'))
+            h = int(one['n_hyps'][0])
+            worst = max(worst, float((cls_1[0] - cls_b[k]).abs().max()), float((hyp_1[0, :h] - hyp_b[k, :h]).abs().max()) if h else 0.0)
+        expect(worst < 2e-4, '%s: the vectors of a goal do not depend on what it is batched with (worst difference %.1e)' % (tag, worst))
+        # the order of the tokens
+        one = D.collate([steps[longest]], max_dec=10 ** 4); O = lambda key: torch.as_tensor(one[key])
+        tok, sg, mk, ho, nh = O('tokens'), O('seg'), O('mask'), O('hyp_of'), O('n_hyps')
+        perm = torch.randperm(tok.shape[1], generator=torch.Generator().manual_seed(5))
+        with torch.no_grad():
+            c0, h0 = net.encode(tok, sg, mk, ho, nh); c1, h1 = net.encode(tok[:, perm], sg[:, perm], mk[:, perm], ho[:, perm], nh)
+        moved = float((c0 - c1).abs().max()); hmoved = float((h0 - h1).abs().max())
+        if arch == 'bow': expect(moved < 1e-5 and hmoved < 1e-5, '%s: a bag does not see the order of the tokens (goal %.1e, hypotheses %.1e)' % (tag, moved, hmoved))
+        else: expect(moved > 1e-3, '%s: the vector of a goal depends on the order of its tokens (%.2g)' % (tag, moved))
+        # a save and a load: the same function, and the architecture is part of the checkpoint
+        with tempfile.TemporaryDirectory() as td:
+            path = os.path.join(td, 'm.pt'); cfg = dict(CFG, arch=arch); T.save(net, cfg, path, {'tag': 's44'})
+            net2, cfg2, extra = T.load(path, ctx.bags)
+            la = net(D.collate(steps[:6], max_dec=10 ** 4))['policy_loss'].item(); lb = net2(D.collate(steps[:6], max_dec=10 ** 4))['policy_loss'].item()
+            expect(net2.arch == arch and cfg2['arch'] == arch and la == lb and T.load_config(path) == cfg, '%s: a saved network loads to the same function and names its architecture' % tag)
+            if arch != 'transformer':
+                ck = torch.load(path, map_location='cpu', weights_only=False); ck['config'] = dict(ck['config'], arch='transformer'); torch.save(ck, os.path.join(td, 'wrong.pt'))
+                raises('%s: its weights are refused by another architecture' % tag, lambda: T.load(os.path.join(td, 'wrong.pt'), ctx.bags), RuntimeError)
+        # a short run on one batch lowers the loss
+        net3 = arch_net(ctx, arch); net3.train(); opt = torch.optim.AdamW(net3.parameters(), lr=3e-3, weight_decay=0.0)
+        first = net3(batch)['policy_loss'].item()
+        for _ in range(25):
+            res = net3(batch); opt.zero_grad(); res['policy_loss'].backward(); torch.nn.utils.clip_grad_norm_(net3.parameters(), 1.0); opt.step()
+        last = net3(batch)['policy_loss'].item()
+        expect(math.isfinite(last) and last < 0.8 * first, '%s: 25 steps on one batch lower the loss (%.3f -> %.3f)' % (tag, first, last))
+    expect(len(set(counts.values())) == len(counts) and counts['transformer'] == DEFAULT_FINGERPRINT[1] and counts['bow'] < min(counts[a] for a in M.ARCHS if a != 'bow'), 'G2 the architectures have their own parameter counts (%s)' % counts)
+    # a configuration saved before the architecture was a setting loads as a transformer
+    with tempfile.TemporaryDirectory() as td:
+        path = os.path.join(td, 'old.pt'); T.save(tiny_net(ctx), CFG, path, {})
+        net2, cfg2, _ = T.load(path, ctx.bags)
+        expect(net2.arch == 'transformer' and 'arch' not in cfg2 and T.load_config(path).get('arch', 'transformer') == 'transformer', 'G3 a checkpoint without `arch` is a transformer')
+    # the dilated CNN sees exactly the window its documentation says: 5 tokens at one layer, 29 at three
+    for layers, reach in ((1, 2), (2, 6), (3, 14)):
+        torch.manual_seed(2); enc = M.ConvEncoder(16, layers, 32, 0.0).eval()
+        x = torch.randn(1, 64, 16); y = x.clone(); y[0, 32] += 1.0
+        with torch.no_grad(): d = (enc(x) - enc(y)).abs().amax(-1)[0]
+        far = [p for p in range(64) if abs(p - 32) > reach]; edge = [p for p in (32 - reach, 32 + reach)]
+        expect(float(d[far].max()) == 0.0 and all(float(d[p]) > 0.0 for p in edge) and float(d[32]) > 0.0, 'G4 a CNN of %d layer(s) sees %d tokens (a change %d away is felt, one %d away is not)' % (layers, 2 * reach + 1, reach, reach + 1))
+
+
+SECTIONS = [('A', sec_A), ('B', sec_B), ('C', sec_C), ('D', sec_D), ('E', sec_E), ('F', sec_F), ('G', sec_G)]
 
 
 def main():

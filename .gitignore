@@ -10,6 +10,9 @@ steps_*.pkl
 /dist/
 # experiment outputs (scripts/*.sh write here by default) and machine-local settings
 /runs/
+# results folders (make report writes results/<profile>/): derived from runs/, remade by `make report`; commit one by hand when it is the one a paper cites
+/results/*
+!/results/README.md
 /scripts/local.env
 # paper build products (the generated tables/figures are rebuilt by `make -C paper`)
 /paper/generated/*

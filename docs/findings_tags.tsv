@@ -1,0 +1,116 @@
+# docs/findings_tags.tsv -- the classification of the findings of docs/FINDINGS.md that exp_soundness.py counts.
+#
+# One line per row of the table in FINDINGS.md:  id <TAB> layer[,layer] <TAB> effect <TAB> note (optional).   exp_soundness.py (and gate S51) refuse a finding without a line, and a line without a finding:
+# a new finding is tagged when it is written.
+#
+# LAYER -- where the defect lived
+#   kernel    the trusted C++ kernel: typing, conversion, admission, work budget, memoisation, the probe/rewind interface
+#   checker   the independent checker (indep_checker.py, recheck.py)
+#   tactic    the tactic layer, the unifier and the libraries (untrusted: the kernel checks every term they build)
+#   engine    the learner's environment: engine, probe protocol, action language, term builder, search (untrusted)
+#   data      the problem bank, recorder, dataset, hindsight, the synthetic generator and the semantic checks (untrusted)
+#   pipeline  the training suite, the experiment tooling, estimates, documents
+#   tooling   the mutation catalogue and driver, the repository layout, the gates
+#
+# EFFECT -- what it could do (one per finding)
+#   accepts      trusted code accepted a term it must refuse (found in the baseline, in an earlier version of this kernel or in the checker)   <- the class that matters for soundness
+#   refuses      trusted code refused, aborted on or mishandled a VALID input (fails closed: no false theorem, but a true one is lost)
+#   wrong        untrusted code produced a wrong, ill-typed or misleading result, or failed on valid input (the kernel check refuses it, or a test caught it first)
+#   resource     unbounded or excessive time or memory
+#   data         the benchmark or the training data was wrong, duplicated or misleading
+#   missing      a capability the platform needs did not exist yet (a design decision, not a defect of a released rule)
+#   obligation   a soundness-critical rule that had to be designed or ported correctly (nothing wrong was released)
+#   process      tooling, estimates, documents, the test harness itself
+#   measurement  not a defect: a measurement recorded with the findings
+#
+# The tags are the author's reading of each row's text; where the row does not say which direction a defect went (accepted or refused) the less alarming reading is NOT assumed: the tag is `obligation` (F1, F24).
+F1	kernel	obligation	the universe rule for inductives (corpus S2 B: U_paradox, Nat -> Type0 field, positivity); fixed in the baseline, ported
+F2a	kernel	wrong
+F2b	tactic	missing
+F3	tactic	wrong
+F4	tactic	wrong
+F5	kernel	refuses	needs parameter mode
+F6	tactic	missing
+F7	tactic	missing
+F8	checker	missing	the checker was not independent; partial: scaling unmeasured
+F9	kernel	refuses	84 of 1,427 induct partial proofs failed to type-check in the reference
+F10	tactic	wrong
+F11	kernel	refuses
+F12	tactic	missing
+F13	tactic	wrong
+F14	tactic	wrong
+F15	tactic	wrong
+F16	tactic	wrong
+F17	tactic	wrong
+F18	kernel	refuses	aborts instead of rejecting an ill-scoped term (fails closed)
+F19	kernel	accepts	the reference kernel; the hybrid is stricter
+F20	kernel	refuses	mode-dependent Match terms; kernel and checker agree on what they refuse
+F21	kernel	accepts	a lambda checked against a Pi never validated its binder annotation; found by the independent checker
+F22	tactic	wrong
+F23	kernel	wrong	the evaluator unfolds a Fix on a neutral argument; the checker implements the standard rule and agreed on every test; root cause open
+F24	kernel	obligation	classical axioms are inconsistent in the legacy universe (impredicative Type0): they exist only in the Prop/Type world
+F25	tactic	wrong
+F26	kernel,checker	accepts	SOUNDNESS: a branchless match on an inhabitant of an opaque type constant proved anything; found while designing the Quot gate
+F27	kernel,checker	refuses	function eta in one and not the other
+F28	kernel	refuses	conversion incomplete and not transitive for stuck matches; an incompleteness only: a True answer is always justified
+F29	kernel	resource	exponential in the depth of a shared term; mitigated by F30
+F30	kernel	resource	no bound on the work of a kernel call; the deterministic work budget
+F31	tactic	wrong
+F32	tactic	wrong
+F33	tactic	resource
+F34	tactic	wrong
+F35	tactic	wrong
+F36	kernel	resource
+F37	kernel	resource
+F38	kernel	resource
+F39	kernel	process	the debugging switch that re-decides every memoised answer covered only the typing memo
+F40	kernel	resource
+F41	tactic	wrong
+F42	kernel	resource
+F43	kernel	resource
+F44	tactic	wrong	found by the randomised oracle of S34
+F45	tactic	wrong	found by the first falsification of the search; nothing false was accepted (the final check refused it)
+F46	tactic	wrong	found by a search on false statements; the final check refused the ill-typed term
+F47	engine	wrong	a Python error inside a probe was counted as a refused action, which made the integer fuzz vacuous
+F48	kernel	wrong	a stale or foreign checkpoint was accepted by rewind
+F49	engine	wrong
+F50	engine	obligation
+F51	engine	wrong	a spent work budget was read as an answer
+F52	engine	wrong
+F53	engine	wrong
+F54	engine	wrong
+F55	engine	wrong
+F56	engine	wrong
+F57	engine	wrong
+F58	data	wrong
+F59	data	data
+F60	data	data
+F61	engine	wrong	open
+F62	engine	missing
+F63	data	wrong
+F64	data	wrong
+F65	data	data
+F66	data	data
+F67	checker	resource	accepted: slow on case-enumeration proofs
+F68	tooling	process
+F69	tooling	process
+F70	pipeline	measurement	a measurement of the first learner, not a defect
+F71	tooling	process	the mutation driver was vacuous after a reorganisation: every mutant looked caught
+F72	data	wrong
+F73	checker	resource
+F74	data	wrong
+F75	data	wrong
+F76	data	data
+F77	tooling	process
+F78	pipeline	wrong
+F79	data	data
+F80	data	data
+F81	engine	wrong
+F82	pipeline	process
+F83	pipeline	process
+F84	data	data
+F85	pipeline	process
+F86	engine	resource
+F87	engine	resource
+F88	pipeline	process	the tests of the soundness folder, the number checker and the statement audit passed with the code broken (found by injecting single-line faults)
+F89	data	wrong	a caution of the statement audit that fired on 29% of the bank and warned of nothing (thin_box)

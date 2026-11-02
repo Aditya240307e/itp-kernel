@@ -127,6 +127,14 @@ independently and with the text next to it). What it removes is the slip that is
 statement. A statement with something the reader does not know cannot be checked; add the symbol to the tables
 (section 8) instead of leaving a problem unchecked.
 
+**The audit and the second readers (`exp_audit.py`, `make audit`).** The checks above run in the gates, problem by problem. `scripts/09_audit.sh` runs them for the whole bank in one stamped folder (`results/audit/`, `docs/EXPERIMENTS.md` 7.4):
+one record per problem (the digest of its statement, what the spec compares, the box, the slips tried and caught or declared equivalent, the constructs of the statement), the **cautions** that say where this evidence is weaker (a
+contest problem adapted or recalled, a predecessor on the naturals, an existential or a function quantifier, an equation in a hypothesis whose numbers are not compared, declared-equivalent slips), and the **ledger of second readers**
+(`docs/statement_reviews.tsv`). The spec is written by whoever wrote the statement, so a misreading of the English that they share is exactly what the checks cannot see; a second person reads the text against the statement (printed as a formula in
+`review_sheet.md`) and says `faithful`, `adapted`, `ambiguous` or `unfaithful`; the verdict is bound to the digest of the statement that was read, so a statement that changes afterwards is no longer counted as read. The
+audit fails when a check fails, a second reader finds a statement unfaithful or the readers disagree; how many statements have been confirmed is reported, not required. The audit counts `verified` (the published wording was compared with
+a source) and `origin`; it does not compute them, and the paper may say no more than the folder does.
+
 ## 4. The reference proof and the action language
 
 Every problem has a proof written in the authoring DSL. `bank.demonstrate(name, regime)` replays it **through the action

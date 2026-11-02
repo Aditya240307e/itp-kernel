@@ -1,4 +1,9 @@
-"""S8 gate (F8): the independently written checker against the kernels."""
+"""S8 gate (F8): the independently written checker against the kernels.
+
+    python3 s8_indep_tests.py [MUTANTS_PER_PROOF]       (default 150; the gate registry runs it with 100)
+
+S8_JSON=FILE writes what was counted (proofs, definitions, mutants, agreements, disagreements, per mode) to FILE as JSON; exp_soundness.py reads it.
+"""
 import os as _os, sys as _sys; _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', '..', 'src', 'python')); import itp_paths  # noqa: E402,F401
 import sys, random, time, functools
 sys.setrecursionlimit(30000)
@@ -144,7 +149,8 @@ def guard_corpus(g):
 if __name__ == '__main__':
     t0 = time.time(); FAIL = []
     kref, knew, g = t6.build_logic()
-    chk, bad = run_definitions(knew)
+    chk, bad = run_definitions(knew); REPORT = {'argv_mutants_per_proof': int(sys.argv[1]) if len(sys.argv) > 1 else 150, 'modes': {}, 'tactic_proofs_checked': 0, 'wrong_proofs': 0, 'wrong_proofs_accepted': 0, 'guard_cases': 0, 'guard_cases_agree': 0}
+    REPORT['definitions'] = len(chk.g); REPORT['definitions_rejected'] = len(bad)
     print("independent re-check of the %d globals of the kernel (value : type, every type is a type): %d rejected" % (len(chk.g), len(bad)))
     for b in bad[:8]: print("    REJECTED", b)
     if bad: FAIL.append('definitions')
@@ -153,16 +159,16 @@ if __name__ == '__main__':
     for (name, done_n, ver_n, done_r, ver_r, fd, L) in rows:
         if not (done_n and ver_n): continue
         proof = parse_raw(knew.dump_raw(L.psn.extract()), True); stmt_h = l2h(stmts[name], 0)
-        ok, msg = chk.check_closed(proof, stmt_h)
+        ok, msg = chk.check_closed(proof, stmt_h); REPORT['tactic_proofs_checked'] += 1
         print("   proof %-14s kernel accepts True | independent checker accepts %s %s" % (name, ok, '' if ok else '(' + msg + ')'))
         if not ok: FAIL.append('independent checker rejects the valid proof ' + name)
     for name, (ty, term) in wrong.items():
-        ok, msg = chk.check_closed(l2h(term, 0), l2h(ty, 0))
+        ok, msg = chk.check_closed(l2h(term, 0), l2h(ty, 0)); REPORT['wrong_proofs'] += 1; REPORT['wrong_proofs_accepted'] += bool(ok)
         print("   wrong %-44s independent checker accepts %s %s" % (name, ok, '(' + msg + ')' if not ok else ''))
         if ok: FAIL.append('independent checker ACCEPTS the wrong proof ' + name)
     kg, ng, gg = t6.build_logic(); chk_g = ic.Checker(build_env(ng))
     for label, expected, ty, term in guard_corpus(gg):
-        vk = kernel_verdict(ng, l2h(term, 0), l2h(ty, 0)); vi, msg = chk_g.check_closed(l2h(term, 0), l2h(ty, 0))
+        vk = kernel_verdict(ng, l2h(term, 0), l2h(ty, 0)); vi, msg = chk_g.check_closed(l2h(term, 0), l2h(ty, 0)); REPORT['guard_cases'] += 1; REPORT['guard_cases_agree'] += bool(vk == vi == expected)
         print("   guard corpus: %-62s expected %-5s kernel %-5s independent %-5s" % (label, expected, vk, vi))
         if not (vk == vi == expected): FAIL.append('guard corpus: ' + label)
     for label, params in (("legacy mode", False), ("parameter mode", True)):
@@ -175,6 +181,9 @@ if __name__ == '__main__':
         kv = kernel_redeclare_verdicts(knew2); k_rejected = sorted(n for n, ok in kv.items() if not ok); i_rejected = sorted(b[1] for b in bad2)
         print("   definitions the KERNEL rejects when re-declared (%s): %s | the independent checker rejects: %s" % (label, k_rejected, i_rejected))
         if k_rejected != i_rejected: FAIL.append(label + ': kernel and independent checker disagree about which definitions are valid')
+        REPORT['modes'][label] = {'tactic_proofs': st['valid'], 'globals': len(chk2.g), 'valid_rejected': len(st['valid_rejected']), 'definitions_rejected_by_checker': len(bad2), 'definitions_rejected_by_kernel': len(k_rejected),
+                                  'definitions_agree': k_rejected == i_rejected, 'mutants': st['mutants'], 'agree': st['agree'], 'both_accept': st['both_accept'], 'both_reject': st['both_reject'],
+                                  'kernel_accepts_checker_rejects': len(st['kernel_accepts_indep_rejects']), 'checker_accepts_kernel_rejects': len(st['indep_accepts_kernel_rejects'])}
         print("%s: %d tactic proofs (derived globals included: %d globals); valid proofs rejected by either side: %d; definitions rejected: %d" % (label, st['valid'], len(chk2.g), len(st['valid_rejected']), len(bad2)))
         print("   mutants: %d, verdicts agree %d (both accept %d, both reject %d); kernel ACCEPTS / independent REJECTS: %d; independent ACCEPTS / kernel REJECTS: %d" %
               (st['mutants'], st['agree'], st['both_accept'], st['both_reject'], len(st['kernel_accepts_indep_rejects']), len(st['indep_accepts_kernel_rejects'])))
@@ -183,4 +192,8 @@ if __name__ == '__main__':
         for v in st['indep_accepts_kernel_rejects'][:2]: print("      independent accepts, kernel rejects:", str(v)[:200])
         if st['valid_rejected']: FAIL.append(label + ': valid proof rejected')
         if st['kernel_accepts_indep_rejects'] or st['indep_accepts_kernel_rejects']: FAIL.append(label + ': verdict disagreement on mutants')
+    if _os.environ.get('S8_JSON'):
+        import json
+        REPORT.update(seconds=round(time.time() - t0, 1), passed=not FAIL, failures=FAIL)
+        with open(_os.environ['S8_JSON'], 'w') as f: json.dump(REPORT, f, indent=1, sort_keys=True)
     print("elapsed %.1fs" % (time.time() - t0)); print("S8 INDEP GATE:", "PASS" if not FAIL else "FAIL -- " + "; ".join(FAIL)); sys.exit(1 if FAIL else 0)

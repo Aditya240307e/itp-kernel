@@ -7,6 +7,7 @@
 #   PROFILE   smoke | small | full           how big the experiments are (docs/EXPERIMENTS.md, "Profiles")                  default: full
 #   SEEDS     "0-4" (five seeds), "0-6" (seven), "0,1,2"   the training seeds = the replicates                              default: 0-1 smoke, 0-2 small, 0-4 full
 #   RUNS      the runs directory: every checkpoint, log, evaluation row and the report live below it                        default: runs/$PROFILE
+#   RESULTS   the results folder: a copy of the report (tables, figures, numbers, per-problem outcomes, statistics, provenance) kept apart from the paper   default: results/$PROFILE
 #   JOBS      how many commands may run at once; the scheduler also keeps within CORES and MEM_GB                          default: the number of cores
 #   CORES     cores the scheduler may use                                                                                   default: all
 #   MEM_GB    memory (GB) the scheduler may use                                                                             default: 85% of the machine's
@@ -18,7 +19,7 @@
 #
 # Every setting is also an option of every script (they win over scripts/local.env and the environment):
 #     ./scripts/run_all.sh --profile full --seeds 0-6 --device cuda --jobs 4 --set rl_iters=20 --set eval_probes=100
-#   --profile --seeds --runs --jobs --cores --mem-gb --device --workers --target --py, and --set (repeatable; added to SET); `--seeds=0-6` works too; --help prints this text.
+#   --profile --seeds --runs --results --jobs --cores --mem-gb --device --workers --target --py, and --set (repeatable; added to SET); `--seeds=0-6` works too; --help prints this text.
 #
 # Every command of the matrix is resumable: run a script again after an interruption and it continues where it stopped.
 # A runs directory belongs to ONE profile / seed list / SET: the runner refuses to mix results made with different settings
@@ -31,7 +32,7 @@ cd "$ROOT"
 # scripts/local.env holds your usual settings; anything exported in the environment of the call wins over it
 if [ -f "$SCRIPTS_DIR/local.env" ]; then
   _kept=""
-  for _v in PROFILE SEEDS RUNS JOBS CORES MEM_GB DEVICE WORKERS SET TARGET PY; do
+  for _v in PROFILE SEEDS RUNS RESULTS JOBS CORES MEM_GB DEVICE WORKERS SET TARGET PY; do
     if [ -n "${!_v+x}" ]; then _kept="$_kept $_v"; eval "_keep_$_v=\${$_v}"; fi
   done
   # shellcheck disable=SC1091
@@ -46,13 +47,13 @@ while [ $# -gt 0 ]; do
   case "$_opt" in --*=*) _val="${_opt#*=}"; _opt="${_opt%%=*}"; _have=1;; esac
   case "$_opt" in
     -h|--help) sed -n '2,/^$/p' "$SCRIPTS_DIR/env.sh" | sed 's/^# \{0,1\}//'; exit 0;;
-    --profile|--seeds|--runs|--jobs|--cores|--mem-gb|--device|--workers|--target|--py|--set)
+    --profile|--seeds|--runs|--results|--jobs|--cores|--mem-gb|--device|--workers|--target|--py|--set)
       if [ "$_have" = 0 ]; then
         [ $# -ge 1 ] || { echo "$_opt needs a value (see --help)" >&2; exit 2; }
         _val="$1"; shift
       fi
       case "$_opt" in
-        --profile) PROFILE="$_val";;  --seeds) SEEDS="$_val";;  --runs) RUNS="$_val";;  --jobs) JOBS="$_val";;  --cores) CORES="$_val";;  --mem-gb) MEM_GB="$_val";;
+        --profile) PROFILE="$_val";;  --seeds) SEEDS="$_val";;  --runs) RUNS="$_val";;  --results) RESULTS="$_val";;  --jobs) JOBS="$_val";;  --cores) CORES="$_val";;  --mem-gb) MEM_GB="$_val";;
         --device) DEVICE="$_val";;  --workers) WORKERS="$_val";;  --target) TARGET="$_val";;  --py) PY="$_val";;  --set) SET="${SET:+$SET }$_val";;
       esac;;
     *) echo "unknown option '$_opt' (see --help)" >&2; exit 2;;
@@ -64,6 +65,7 @@ unset _opt _val _have
 case "$PROFILE" in smoke|small|full) ;; *) echo "PROFILE must be smoke, small or full (got '$PROFILE')" >&2; exit 2;; esac
 if [ -z "${SEEDS:-}" ]; then case "$PROFILE" in smoke) SEEDS=0-1;; small) SEEDS=0-2;; *) SEEDS=0-4;; esac; fi
 : "${RUNS:=runs/$PROFILE}"
+: "${RESULTS:=results/$PROFILE}"
 : "${PY:=python3}"
 : "${DEVICE:=cpu}"
 : "${WORKERS:=}"
@@ -72,7 +74,7 @@ if [ -z "${SEEDS:-}" ]; then case "$PROFILE" in smoke) SEEDS=0-1;; small) SEEDS=
 : "${CORES:=}"
 : "${MEM_GB:=}"
 if [ -z "${JOBS:-}" ]; then JOBS="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1)"; fi
-export PROFILE SEEDS RUNS PY DEVICE WORKERS SET TARGET CORES MEM_GB JOBS            # (the scripts run each other: what an option set is what the next script reads from its environment)
+export PROFILE SEEDS RUNS RESULTS PY DEVICE WORKERS SET TARGET CORES MEM_GB JOBS            # (the scripts run each other: what an option set is what the next script reads from its environment)
 export PYTHONUNBUFFERED=1
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}" MKL_NUM_THREADS="${MKL_NUM_THREADS:-1}"
 
@@ -103,5 +105,5 @@ stage_script() {
 }
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
-  echo "PROFILE=$PROFILE SEEDS=$SEEDS RUNS=$RUNS JOBS=$JOBS CORES=${CORES:-all} MEM_GB=${MEM_GB:-85%} DEVICE=$DEVICE WORKERS=${WORKERS:-profile} SET='$SET' TARGET='$TARGET' PY=$PY"
+  echo "PROFILE=$PROFILE SEEDS=$SEEDS RUNS=$RUNS RESULTS=$RESULTS JOBS=$JOBS CORES=${CORES:-all} MEM_GB=${MEM_GB:-85%} DEVICE=$DEVICE WORKERS=${WORKERS:-profile} SET='$SET' TARGET='$TARGET' PY=$PY"
 fi

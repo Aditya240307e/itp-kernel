@@ -16,7 +16,9 @@ import os, sys, json, argparse, collections
 import exp_spec as SP, exp_run as RUN
 
 # the reference machine (2 slow cores, no GPU): measured by scripts/06_benchmarks.sh on the smoke world; override with --bench / --train-rate / --probe-rate
-RATES = {'train_steps_per_s': 55.0, 'probes_per_s': {'sample': 30.0, 'greedy': 30.0, 'ida': 18.0, 'mcts': 5.5, 'mw': 12.0, 'blind': 40.0, 'uniform': 60.0}}
+RATES = {'train_steps_per_s': 55.0, 'probes_per_s': {'sample': 30.0, 'greedy': 30.0, 'ida': 18.0, 'mcts': 5.5, 'mw': 12.0, 'blind': 40.0, 'uniform': 60.0},
+         # training speed of the other networks relative to the default (transformer, width 128), measured on the same machine (exp_bench `archs`, batch 64): a bigger or slower network trains in proportionally more time
+         'train_ratio': {'bigru@128': 1.21, 'cnn@128': 2.38, 'bow@128': 2.07, 'transformer@64': 2.43, 'transformer@256': 0.26}}
 MEAN_SYNTH_STEPS = 5.3                      # steps (actions) per synthetic theorem: the mean of the pilot's 6 024 theorems (5.26)
 GEN_ATTEMPTS_PER_S = 12.0                   # generator attempts per second per core, world builds included: the pilot's 30 000 attempts took 2 473 core-seconds
 
@@ -46,7 +48,22 @@ def rates_from_bench(path):
     for s, v in (b.get('solvers') or {}).items():
         if v.get('probes_per_s'): r['probes_per_s'][s] = float(v['probes_per_s'])
     if (b.get('world') or {}).get('train_steps_per_s'): r['train_steps_per_s'] = float(b['world']['train_steps_per_s'])
+    ar = b.get('archs') or {}; base = (ar.get('transformer@%d' % SP.DEFAULT_WIDTH) or {}).get('train_steps_per_s')
+    if base:
+        r['train_ratio'] = {k: float(v['train_steps_per_s']) / base for k, v in ar.items() if v.get('train_steps_per_s') and k != 'transformer@%d' % SP.DEFAULT_WIDTH}
     return r, True
+
+
+def train_ratio(rates, t):
+    """how much faster than the default network a run's network trains (< 1: slower): measured (exp_bench `archs`) where there is a number, else from the size of the transformer (width squared times layers)"""
+    arch = t.get('arch', 'transformer'); width = int(t.get('width') or SP.DEFAULT_WIDTH)
+    if arch == 'transformer' and width == SP.DEFAULT_WIDTH: return 1.0
+    got = (rates.get('train_ratio') or {}).get('%s@%d' % (arch, width))
+    if got: return got
+    if arch == 'transformer':
+        sz = SP.size_of(width); base = SP.size_of(SP.DEFAULT_WIDTH)
+        return (base['d'] ** 2 * base['layers']) / float(sz['d'] ** 2 * sz['layers'])
+    return 1.0
 
 
 def estimate(runs, P, counts, rates, train_rate=None, probe_rate=None, synth_mean=MEAN_SYNTH_STEPS):
@@ -66,23 +83,24 @@ def estimate(runs, P, counts, rates, train_rate=None, probe_rate=None, synth_mea
             elif r.id in ('data/synth_verify',): add('data', 60.0 + 0.003 * P['synth_target'])
             elif r.id == 'data/dataset': add('data', 1400.0 if t.get('verify_only') else 110.0)               # (measured: replaying the released dataset takes 1 362 s, building the smoke dataset 108 s)
             else: add('data', 60.0)
-        elif st == 'pre': add('pre', P['pre_epochs'] * t['n_synth'] * synth_mean / tr)
+        elif st == 'pre':
+            if t.get('method') == 'init': add('pre', 60.0)                                                  # (a network with random weights: the world is built and the file written)
+            else: add('pre', P['pre_epochs'] * t['n_synth'] * synth_mean / (tr * train_ratio(rates, t)))
         elif st == 'ft':
             epochs = P['ft_epochs'] if '--init' in r.argv else P['scratch_epochs']
-            secs = epochs * steps_ft / tr
+            secs = epochs * steps_ft / (tr * train_ratio(rates, t))
             if P['bc_eval_every']: secs += (epochs // max(1, P['bc_eval_every'])) * n_dev * P['bc_eval_probes'] / pr('sample') / W
             add('ft', secs)
         elif st == 'rl':
-            v = r.id.split('/')[1]
+            trr = tr * train_ratio(rates, t)
             if t.get('algo') == 'ppo':
+                iters = t.get('iters') or P['ppo_iters']
                 eps = P['ppo_episodes'] * 100.0 / pr('sample') / W                                      # an episode is at most about a hundred probes
-                add('rl', P['ppo_iters'] * (eps + 8 * 64 / tr) + (P['ppo_iters'] // max(1, P['rl_eval_every'])) * n_dev * P['rl_eval_probes'] / pr('sample') / W, W)
+                add('rl', iters * (eps + 8 * 64 / trr) + (iters // max(1, P['rl_eval_every'])) * n_dev * P['rl_eval_probes'] / pr('sample') / W, W)
             else:
-                actor = 'sample'
-                a = SP.RL_VARIANTS[v]['args']
-                if '--actor' in a: actor = a[a.index('--actor') + 1]
-                per_iter = P['rl_episodes'] * P['rl_probes'] / pr(actor) / W + P['ei_updates'] * 64 / tr
-                add('rl', P['rl_iters'] * per_iter + (P['rl_iters'] // max(1, P['rl_eval_every'])) * n_dev * P['rl_eval_probes'] / pr('sample') / W, W)
+                iters = t.get('iters') or P['rl_iters']; actor = t.get('actor') or 'sample'
+                per_iter = P['rl_episodes'] * P['rl_probes'] / pr(actor) / W + P['ei_updates'] * 64 / trr
+                add('rl', iters * per_iter + (iters // max(1, P['rl_eval_every'])) * n_dev * P['rl_eval_probes'] / pr('sample') / W, W)
         elif st == 'eval':
             solvers = t.get('solvers') or ['sample']; secs = 0.0
             for s in solvers:
@@ -92,6 +110,25 @@ def estimate(runs, P, counts, rates, train_rate=None, probe_rate=None, synth_mea
             add('eval', secs, W)
         elif st == 'bench': add('bench', 1800.0)
         elif st == 'report': add('report', 120.0)
+    return out
+
+
+def study_of(r):
+    """which part of the experiments a run belongs to: `core` (the comparison of learners and the benchmark), `arch` (other encoders), `size` (other widths), `scratch` (learning from random weights)"""
+    t = r.tags
+    if t.get('scratch') or r.id.startswith('init/') or t.get('group') == 'scratch': return 'scratch'
+    if t.get('group') in ('arch', 'size'): return t['group']
+    if t.get('arch', 'transformer') != 'transformer': return 'arch'
+    if int(t.get('width') or SP.DEFAULT_WIDTH) != SP.DEFAULT_WIDTH: return 'size'
+    return 'core'
+
+
+def estimate_by_study(runs, P, counts, rates, train_rate=None, probe_rate=None, synth_mean=MEAN_SYNTH_STEPS):
+    """{study: the estimate of its runs} (see `estimate`), in the order core, arch, size, scratch"""
+    out = collections.OrderedDict()
+    for st in ('core', 'arch', 'size', 'scratch'):
+        sub = collections.OrderedDict((i, r) for i, r in runs.items() if study_of(r) == st)
+        if sub: out[st] = estimate(sub, P, counts, rates, train_rate, probe_rate, synth_mean)
     return out
 
 
@@ -117,6 +154,12 @@ def main(argv=None):
         tr_h += rh; tc_h += ch; tw += wall
         print('%-8s %6d %12.1f %12.1f %16.1f' % (stage, n, rh, ch, wall))
     print('%-8s %6s %12.1f %12.1f %16.1f' % ('total', '', tr_h, tc_h, tw))
+    parts = estimate_by_study(runs, P, counts, rates, a.train_rate or None, a.probe_rate or None)
+    if len(parts) > 1:
+        print('\n%-8s %6s %12s %12s %16s   (the same, by part of the experiments: --set archs=() widths=() scratch=() drop a part)' % ('part', 'runs', 'run-hours', 'core-hours', 'wall-clock, %d cores' % a.cores))
+        for st, e in parts.items():
+            n = sum(v[0] for v in e.values()); rh = sum(v[1] for v in e.values()) / 3600.0; ch = sum(v[2] for v in e.values()) / 3600.0
+            print('%-8s %6d %12.1f %12.1f %16.1f' % (st, n, rh, ch, ch / a.cores))
     print('\nrun-hours: the wall-clock of the runs added up, each run alone; core-hours: what they occupy (a training run one core, a search run `workers` = %d cores); wall-clock: core-hours / cores with perfect packing, and\n'
           'at least one run\'s length; stages overlap in run_all.sh, so the true total is a little lower.  Training on a GPU: pass --train-rate with the rate of scripts/06_benchmarks.sh (DEVICE=cuda); runs that share one GPU slow each other down.' % P['workers'])
     return 0

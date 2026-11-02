@@ -1,11 +1,11 @@
 """exp_repo.py -- facts about the repository itself (size of the trusted kernel, number of gates and mutants, size of the libraries), counted from the files, for the system section of the paper.
 
-    facts = exp_repo.facts()          # {'kernel_lines': 7474, 'gates': 52, 'mutants': 1616, ...}
+    facts = exp_repo.facts()          # {'kernel_lines': 7474, 'gates': 52, 'mutants': 1647, ...}
 
 Nothing is typed in: a number that the paper quotes about the code is counted here from the code.
 """
 import os as _os, sys as _sys; _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..')); import itp_paths  # noqa: E402,F401
-import os, glob, json, importlib.util, subprocess
+import os, sys, glob, json, importlib.util, subprocess
 
 ROOT = itp_paths.ROOT
 
@@ -27,6 +27,28 @@ def load_module(path, name):
     spec = importlib.util.spec_from_file_location(name, path); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); return m
 
 
+CODE_PATHS = itp_paths.CODE_PATHS                                                     # the code, the tests, the mutants and the manifest of the dataset; a document, the paper, a tool or a script is not in it
+
+
+def tree_digest():
+    """the digest of the code (CODE_PATHS): the results of the gates, the soundness and audit folders and every run of the matrix are bound to it and not to the commit, so that typing the paper or editing a document never makes them stale"""
+    d = os.path.join(ROOT, 'mutants')
+    if d not in sys.path: sys.path.insert(0, d)
+    import mutate
+    return mutate.tree_digest()
+
+
+def git_state(root=None):
+    """{'commit': HEAD, 'dirty': the CODE has changes that are not committed (a tracked file of CODE_PATHS is changed, or a file there is new)}: the commit then does not identify the code, the tree digest does.
+    A change to a document, the paper, a tool or a script is not dirty.  Both keys are missing when it is not a git checkout"""
+    root = root or ROOT
+    try:
+        commit = subprocess.run(['git', '-C', root, 'rev-parse', 'HEAD'], capture_output=True, text=True, timeout=20).stdout.strip()
+        if not commit: return {}
+        return {'commit': commit, 'dirty': bool(subprocess.run(['git', '-C', root, 'status', '--porcelain', '--untracked-files=normal', '--'] + list(itp_paths.CODE_PATHSPEC), capture_output=True, text=True, timeout=20).stdout.strip())}
+    except Exception: return {}
+
+
 def facts():
     out = {}
     hyb = os.path.join(ROOT, 'src', 'c++', 'hybrid')
@@ -45,10 +67,9 @@ def facts():
         cat = load_module(os.path.join(ROOT, 'mutants', 'catalogue.py'), 'mutant_catalogue_facts')
         out['mutants'] = len(cat.MUTANTS); out['mutants_equivalent'] = len(cat.KNOWN_EQUIVALENT)
     except Exception as e: out['mutants_error'] = str(e)
-    try:
-        out['commit'] = subprocess.run(['git', '-C', ROOT, 'rev-parse', 'HEAD'], capture_output=True, text=True, timeout=20).stdout.strip()
-        out['dirty'] = bool(subprocess.run(['git', '-C', ROOT, 'status', '--porcelain', '--untracked-files=no'], capture_output=True, text=True, timeout=20).stdout.strip())
-    except Exception: pass
+    out.update(git_state())
+    try: out['tree'] = tree_digest()
+    except Exception as e: out['tree_error'] = str(e)
     return out
 
 

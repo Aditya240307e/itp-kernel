@@ -1212,6 +1212,185 @@ def sec_E(c):
         got = any(a.kind == Kind.FORWARD and a.codes[0] == (('v', 2, 0),) for a in m_.actions)
         expect(got == want, 'E6 FORWARD from a hypothesis with %d premises (all hypotheses) is %s (the limit is %d)' % (n_prem, 'listed' if got else 'not listed', A.MAX_PREMISES))
     eng.premises = None
+    # ---- E7. the menu's work budget (F87).  Listing a menu is not a probe, so its kernel calls ran under the library's budget (2 * 10^9 steps): the display normal form of one candidate of INSTANTIATE, `9^9` in a
+    # unary numeral (387 420 489 successors), ran for 18 to 100 s and then hit the stack guard, and the attempt was lost (the first pilot on the real library, `bernoulli_int`). Every kernel call of a menu now runs
+    # under `Engine.menu_fuel` steps, a candidate fact of INSTANTIATE under 1/INST_SHARE of it, and what spends it is not offered.
+    Zt, Nat_ = w['Z'], w['Nat']; Su, Z0, pow_ = w['Succ'], w['Zero'], w['pow']; zle = w['Z.le']
+    amb = k.get_fuel()
+    def nat_(n):
+        t_ = Z0
+        for _ in range(n): t_ = Su(t_)
+        return t_
+    def peak_of(fn):
+        k.reset_fuel_peak(); out_ = fn(); return out_, k.fuel_peak()
+    # (a) INSTANTIATE of pow_add (b^(m+n) = b^m * b^n) on a goal that mentions the numeral 9: the facts with b = m = 9 have a normal form that does not stop
+    stmt87 = w.forall_([Zt], lambda a: w.Eq(nat_(9), Z0))                         # (no Nat variable in the context: the Nat terms of the pool are numerals, and 9 is among the first ten)
+    mk87 = lambda: G.Engine(w, kinds=set(G.Kind), strict=True, inst_lemmas=('pow_add',))
+    e87 = mk87(); ep87 = G.Episode(e87, stmt87); g87 = ep87.goal()
+    t87 = time.time(); m87, pk87 = peak_of(lambda: e87.menu(g87)); took87 = time.time() - t87
+    ins87 = [a for a in m87.actions if a.kind == Kind.INSTANTIATE]
+    nat_pool = m87.pool.of_type.get(Nat_.n, [])[:G.INST_TWO]; lab87 = {i_: m87.pool.labels[i_] for i_ in nat_pool}
+    i0 = [i_ for i_ in nat_pool if lab87[i_] == '0']; i9 = [i_ for i_ in nat_pool if lab87[i_] == '9']
+    expect(len(i0) == 1 and len(i9) == 1, 'E7 the pool of the goal has the numerals 0 and 9 among the first %d Nat terms (%s)' % (G.INST_TWO, list(lab87.values())))
+    expect(i0 and i9 and any(a.args == (i0[0], i0[0]) for a in ins87), 'E7 the fact pow_add 0 0 (cheap) is offered (%d INSTANTIATE in all)' % len(ins87))
+    expect(i0 and i9 and not any(a.args == (i9[0], i9[0]) for a in ins87), 'E7 the fact pow_add 9 9 (a normal form of 387 420 489 successors) is not offered')
+    expect(e87.stats['menu_spent'] > 0, 'E7 ... and the menu counts what it dropped (%d)' % e87.stats['menu_spent'])
+    cand87 = e87.menu_fuel // G.INST_SHARE
+    expect(pk87 <= cand87 + 1, 'E7 no kernel call of the menu spent more than a candidate fact may (%d of %d steps; the menu\'s own budget is %d)' % (pk87, cand87, e87.menu_fuel))
+    expect(e87.stats['menu_spent'] == G.MAX_MENU_SPENT, 'E7 ... and after %d facts that spent it the rest of the source is not looked at (%d dropped)' % (G.MAX_MENU_SPENT, e87.stats['menu_spent']))
+    expect(took87 < 90, 'E7 ... the menu is listed in %.1f s, not in minutes' % took87)
+    expect(k.get_fuel() == amb, 'E7 ... and the library\'s budget is as it was')
+    m87b, pk87b = peak_of(lambda: e87.menu(g87))
+    expect(m87b.actions == m87.actions and pk87b < cand87 // 10, 'E7 listing the goal again gives the same menu without paying for the forms again (largest call %d steps)' % pk87b)
+    m87c = G.Episode(mk87(), stmt87).menu()
+    expect(m87c.actions == m87.actions, 'E7 another engine (nothing remembered) lists the same menu: it depends on the goal and the budget alone')
+    # (b) the budget is the engine's: wide for an ordinary goal, and a goal that spends it has no menu rather than a wrong one
+    for nm_ in ('amgm', 'trans', 'ind'):
+        base_ = G.Episode(eng, S[nm_]).menu(); small_ = G.Episode(G.Engine(w, kinds=set(G.Kind), strict=True, menu_fuel=20_000), S[nm_]).menu()
+        expect(small_.actions == base_.actions, 'E7 an ordinary goal (%s) is listed the same under 20 000 steps and under %d' % (nm_, eng.menu_fuel))
+    e_tiny = G.Engine(w, kinds=set(G.Kind), strict=True, menu_fuel=1); g_t = G.Episode(eng, S['amgm']).goal()
+    refuses('E7 a goal whose own terms spend the menu\'s budget has no menu: FuelExhausted, as for every kernel call (never a partial menu)', lambda: e_tiny.menu(g_t), E.FuelExhausted)
+    refuses('E7 an engine starts a proof under the same budget: a statement that spends it is FuelExhausted', lambda: G.Episode(e_tiny, S['amgm']), E.FuelExhausted)
+    expect(k.get_fuel() == amb, 'E7 ... and the budget is as it was')
+    # (c) the second language: a fact of FORWARD (the source `forall a b, a = a -> b = b -> a^b = a^b` with the hypothesis n = n for both premises) and of INJECT (Succ (n^n) = Succ (n^n)) is offered when its normal
+    # form costs what a menu may spend (n = 6: 1.9 * 10^6 steps; n = 2: 10^2) and not when it does not stop (n = 9). INSTANTIATE of the same source with a = b = 6 is not offered: a candidate fact may spend a fiftieth
+    # of it (the facts are made by the pool, up to MAX_INST of them) -- and that is given back, so the enumerators after it have all of the menu's budget. The goals are made from kernel handles (a statement with 9^9
+    # in it does not start: see (e)).
+    with w.nota.using(Zt):
+        tgt = zle(w.nota.lit(1), w.nota.lit(0)).n                                                  # (false: the goal stays open)
+    src_ = w.forall_([Nat_, Nat_, lambda a, b: w.Eq(a, a), lambda a, b, p_: w.Eq(b, b)], lambda a, b, p_, q_: w.Eq(pow_(a, b), pow_(a, b))).n
+    e_f = G.Engine(w, kinds=set(G.Kind), strict=True)
+    for n_, listed in ((2, True), (6, True), (9, False)):
+        gf = G.GoalData(tgt, [w.Eq(nat_(n_), nat_(n_)).n, src_], ['h1', 'h2'])
+        gi = G.GoalData(tgt, [w.Eq(Su(pow_(nat_(n_), nat_(n_))), Su(pow_(nat_(n_), nat_(n_)))).n], ['h'])
+        t_f = time.time(); mf_, pkf_ = peak_of(lambda: e_f.menu(gf)); mi_, pki_ = peak_of(lambda: e_f.menu(gi))
+        expect(any(a.kind == Kind.FORWARD and a.codes and a.codes[0] == hyp(1) for a in mf_.actions) == listed, 'E7 FORWARD of the source with the fact n^n = n^n (n = %d) is %s' % (n_, 'offered' if listed else 'not offered (its normal form has 387 420 489 successors)'))
+        expect(any(a.kind == Kind.INJECT and a.arg == 0 for a in mi_.actions) == listed, 'E7 INJECT of Succ (n^n) = Succ (n^n) (n = %d) is %s' % (n_, 'offered' if listed else 'not offered'))
+        expect(max(pkf_, pki_) <= e_f.menu_fuel + 1 and time.time() - t_f < 90, 'E7 ... the menus of n = %d were listed within the budget (%d, %d steps, %.1f s)' % (n_, pkf_, pki_, time.time() - t_f))
+        if n_ == 6:
+            nat6 = [i_ for i_ in mf_.pool.of_type.get(Nat_.n, []) if mf_.pool.labels[i_] == '6']
+            ins6 = [a for a in mf_.actions if a.kind == Kind.INSTANTIATE]
+            expect(len(nat6) == 1 and len(ins6) > 0 and not any(a.args == (nat6[0], nat6[0]) for a in ins6), 'E7 INSTANTIATE of the same source with a = b = 6 (1.9 * 10^6 steps) is not offered, though other facts of it are (%d)' % len(ins6))
+    expect(k.get_fuel() == amb, 'E7 ... and the library\'s budget is as it was')
+    # (c') the answer depends on the budget: a form that spends a candidate's budget does not spend the menu's, whichever is asked first; what the kernel refuses is not "too expensive"
+    t6 = w.Eq(pow_(nat_(6), nat_(6)), pow_(nat_(6), nat_(6))).n; wide, narrow = e_f.menu_fuel, e_f.menu_fuel // G.INST_SHARE
+    for order in ((narrow, wide), (wide, narrow)):
+        e_o = G.Engine(w, kinds=set(G.Kind), strict=True); got = []
+        for f_ in order:
+            k.set_fuel(f_)
+            try: got.append(e_o.nf(t6, 0) is not None)
+            finally: k.set_fuel(amb)
+        expect(got == [f_ == wide for f_ in order], 'E7 the normal form of 6^6 = 6^6 (1.9 * 10^6 steps) is found under the menu\'s budget and not under a candidate\'s, in either order (%s)' % got)
+    refuses('E7 a term the kernel refuses (a variable the context does not have) is an error, not "too expensive"', lambda: e_f.nf(k.mk_fvar(5), 0), E.ITPError)
+    small_cache = G.NF_CACHE; G.NF_CACHE = 3
+    try:
+        e_c = G.Engine(w, kinds=set(G.Kind), strict=True)
+        for n_ in range(2, 8): e_c.nf(w.Eq(nat_(n_), nat_(n_)).n, 0)
+        expect(0 < len(e_c._nf) <= 3, 'E7 the engine remembers at most NF_CACHE normal forms (%d)' % len(e_c._nf))
+    finally: G.NF_CACHE = small_cache
+    e_a = G.Engine(w, kinds=set(G.Kind), strict=True); g_a = G.Episode(eng, S['amgm']).goal()
+    k.set_fuel(1)
+    try: refuses('E7 a caller that has set a smaller budget keeps it: the menu is not given more than that', lambda: e_a.menu(g_a), E.FuelExhausted)
+    finally: k.set_fuel(amb)
+    # (d) what counts as running out of work: the work budget and the stack guard (which Python sees as a bare RuntimeError), nothing else
+    expect(G.out_of_work(E.FuelExhausted('x')) and G.out_of_work(RuntimeError('itp: stack exhausted -- a term is nested too deeply'))
+           and not G.out_of_work(RuntimeError('something else')) and not G.out_of_work(ValueError('stack exhausted')) and not G.out_of_work(E.ITPError('x')), 'E7 the kernel running out of work or of stack is told from every other exception')
+    # (e) an engine starts a proof under the same budget: a statement with the fact n^n = n^n in it (n = 9) fails to start with FuelExhausted, not with the stack guard after minutes
+    with w.nota.using(Zt):
+        st9 = w.forall_([lambda: w.Eq(nat_(9), nat_(9)), lambda h1: w.forall_([Nat_, Nat_, lambda a, b: w.Eq(a, a), lambda a, b, p_: w.Eq(b, b)], lambda a, b, p_, q_: w.Eq(pow_(a, b), pow_(a, b)))], lambda h1, h2: w.Eq(pow_(nat_(9), nat_(9)), pow_(nat_(9), nat_(9))))
+    t_s = time.time()
+    refuses('E7 a statement whose normal form does not stop fails to start with FuelExhausted', lambda: G.Episode(e_f, st9), E.FuelExhausted)
+    expect(time.time() - t_s < 90 and k.get_fuel() == amb, 'E7 ... within the budget (%.1f s), which is restored' % (time.time() - t_s))
+    k.set_fuel(1)
+    try: refuses('E7 a caller that has set a smaller budget keeps it for the start of a proof too', lambda: G.Episode(e_a, S['amgm']), E.FuelExhausted)
+    finally: k.set_fuel(amb)
+    # (f) on the goals of the library's own proofs the budget changes nothing: the menu under it is the menu under the library's budget (menu_fuel 0), and nothing of it is dropped
+    e_free = G.Engine(w, kinds=set(G.Kind), strict=True, menu_fuel=0); cmp_ = collections.Counter()
+    def cmp_hook(i, p, g, act_, menu_):
+        e_free.premises = eng.premises; m_a = eng.menu(g); m_b = e_free.menu(g)
+        cmp_['menus'] += 1; cmp_['same'] += int(m_a.actions == m_b.actions and m_a.cands == m_b.cands)
+    for nm_ in sorted(n_ for n_, r_ in fx.results.items() if r_.ok)[::5]: fx.walk(nm_, cmp_hook)
+    e_free.premises = None
+    expect(cmp_['menus'] >= 400 and cmp_['same'] == cmp_['menus'], 'E7 on the goals of every fifth recorded proof the menu under the budget is the menu under the library\'s (%s)' % dict(cmp_))
+    expect(eng.stats['menu_spent'] == 0 and e_free.stats['menu_spent'] == 0, 'E7 ... and nothing of those menus was dropped for its cost (%d, %d)' % (eng.stats['menu_spent'], e_free.stats['menu_spent']))
+    # (g) reading the goal's terms, or making the pool, may spend the budget too (simulated: the pool's builder runs out of work, or of stack): the goal then offers no action that carries a term, and the rest of
+    # its menu is listed; any other exception is an error
+    real_pool = G.GT.build_pool
+    def pool_that_raises(exc_):
+        def build_pool(*a_, **kw_): raise exc_
+        return build_pool
+    try:
+        for label_, exc_ in (('the work budget', E.FuelExhausted('x')), ('the stack guard', RuntimeError('itp: stack exhausted -- a term is nested too deeply'))):
+            G.GT.build_pool = pool_that_raises(exc_); e_g = mk87(); m_g = e_g.menu(g87); kinds_g = {a.kind for a in m_g.actions}
+            expect(len(m_g.actions) > 0 and not kinds_g & {Kind.INSTANTIATE, Kind.USE} and e_g.stats['menu_spent'] == 1, 'E7 a pool that spends %s: no INSTANTIATE, no USE, the rest of the menu listed, counted once (%d actions, %d dropped)' % (label_, len(m_g.actions), e_g.stats['menu_spent']))
+        for exc_ in (RuntimeError('boom'), ValueError('boom')):
+            G.GT.build_pool = pool_that_raises(exc_); refuses('E7 ... and a pool that fails in any other way (%s) is an error' % type(exc_).__name__, lambda: mk87().menu(g87), type(exc_))
+    finally: G.GT.build_pool = real_pool
+    expect(any(a.kind == Kind.INSTANTIATE for a in mk87().menu(g87).actions), 'E7 ... and the real pool is back')
+    # (h) a goal whose OWN display normal form spends the budget (9^9 = 9^9) is listed with the goal as it is written in the place of that form, not refused
+    gw = G.GoalData(w.Eq(pow_(nat_(9), nat_(9)), pow_(nat_(9), nat_(9))).n, [], []); e_w = G.Engine(w, kinds=set(G.Kind), strict=True); t_w = time.time()
+    m_w, pk_w = peak_of(lambda: e_w.menu(gw))
+    expect(len(m_w.actions) > 0 and e_w.stats['menu_spent'] == 1 and pk_w <= e_w.menu_fuel + 1 and time.time() - t_w < 90 and k.get_fuel() == amb, 'E7 the goal 9^9 = 9^9 has a menu (%d actions; its form spent the budget: %d; largest call %d steps; %.1f s)' % (len(m_w.actions), e_w.stats['menu_spent'], pk_w, time.time() - t_w))
+    # (i) a normal form found inside a probe is not remembered (the rewind that ends the probe reclaims its node: a handle kept would name nothing, or another node); one found outside is
+    e_p = G.Engine(w, kinds=set(G.Kind), strict=True); t5 = w.Eq(nat_(5), nat_(5)).n; w.probing += 1
+    try: f_in = e_p.nf(t5, 0)
+    finally: w.probing -= 1
+    n_in = len(e_p._nf); f_out = e_p.nf(t5, 0)
+    expect(f_in is not None and n_in == 0 and len(e_p._nf) == 1 and f_out == f_in, 'E7 a normal form found inside a probe is not remembered, one found outside is (%d, %d entries)' % (n_in, len(e_p._nf)))
+    # (j) the exceptions of the kernel (simulated through a stand-in for it): the work budget and the stack guard are "too expensive" and are counted, every other RuntimeError is an error
+    class KernelThatRaises:
+        def __init__(self, exc_): self._k = k; self._exc = exc_
+        def __getattr__(self, name_): return getattr(self._k, name_)
+        def simp_normalize(self, t_, n_): raise self._exc
+    for label_, exc_ in (('the work budget', E.FuelExhausted('x')), ('the stack guard', RuntimeError('itp: stack exhausted -- a term is nested too deeply'))):
+        e_x = G.Engine(w, kinds=set(G.Kind), strict=True); e_x.k = KernelThatRaises(exc_)
+        expect(e_x.nf(t5, 0) is None and e_x.stats['menu_spent'] == 1, 'E7 a form that spends %s is None, and counted' % label_)
+    e_x = G.Engine(w, kinds=set(G.Kind), strict=True); e_x.k = KernelThatRaises(RuntimeError('boom'))
+    refuses('E7 any other RuntimeError of the kernel is an error, not "too expensive"', lambda: e_x.nf(t5, 0), RuntimeError)
+    expect(e_x.stats['menu_spent'] == 0, 'E7 ... and is not counted')
+    # (l) a caller whose budget is smaller than a candidate fact's keeps it for the candidates too: no call of the menu spends more than the caller allowed, and the facts are still listed
+    k.set_fuel(50_000)
+    try: m_s, pk_s = peak_of(lambda: mk87().menu(g87))
+    finally: k.set_fuel(amb)
+    expect(pk_s <= 50_000 + 1 and any(a.kind == Kind.INSTANTIATE for a in m_s.actions), 'E7 a caller with a budget of 50 000 steps (less than a candidate may spend, %d) keeps it: the largest call of the menu is %d steps' % (e87.menu_fuel // G.INST_SHARE, pk_s))
+    eng.premises = None
+    # ---- E8. a fact that is a hypothesis only UP TO NORMALISATION is not offered again (the three enumerators that compare normal forms; the mutants GA16, GQ126, GQ141 had survived since the environment was reorganised).  A menu
+    # is a function of the goal as DATA, and a goal may hold hypotheses that are not in display normal form (the steps of the engine leave the facts they add normalised; a goal built by hand or by a recorder need not): `Zero + n = m`
+    # says `n = m`, and `f (1 + 2) = 4` says `f 3 = 4`.  INSTANTIATE, INJECT and FORWARD must compare the normal form of the fact with the normal forms of the hypotheses, not with their spellings.
+    Nat8 = w['Nat']; NN8 = w.arrow(Nat8, Nat8); Fa8 = w.forall_; Eq8 = w.Eq; e8 = G.Engine(w, kinds=set(Kind), strict=True)
+    def hand(g_, extra):
+        """the goal g_ with hypotheses added at its end, built in its context and NOT normalised"""
+        types_, names_ = list(g_.hyp_types), list(g_.hyp_names)
+        for nm_, fn_ in extra:
+            with e8.in_context(types_, names_), w.nota.using(Nat8):
+                t_ = fn_(*[w.T(k.mk_fvar(i_)) for i_ in range(len(types_))]).n
+            types_.append(t_); names_.append(nm_)
+        return G.GoalData(g_.target, types_, names_)
+    with w.nota.using(Nat8):
+        lit8 = w.nota.lit
+        # INSTANTIATE: from  h : forall n, f n = n + 1  the instance at 3 is  f 3 = 3 + 1, which is  f 3 = 4
+        st_i = Fa8([NN8, lambda f: Fa8([Nat8], lambda n: Eq8(f(n), n + lit8(1)))], lambda f, h: Eq8(f(lit8(5)), lit8(6)))
+        g_i = G.Episode(e8, st_i).goal()
+        at = lambda m_, lab_: next((a for a in m_.actions if a.kind == Kind.INSTANTIATE and m_.cands[a.arg][0] == k.mk_fvar(1) and tuple(m_.pool.labels[i_] for i_ in a.args) == (lab_,)), None)
+        expect(at(e8.menu(g_i), '3') is not None, 'E8 (control) INSTANTIATE of "forall n, f n = n + 1" at 3 is offered where no hypothesis says f 3 = 4')
+        g_i2 = hand(g_i, [('h3', lambda f, h: Eq8(f(lit8(1) + lit8(2)), lit8(4)))]); m_i2 = e8.menu(g_i2)
+        expect(e8.nf(g_i2.hyp_types[-1], g_i2.n_hyps) != g_i2.hyp_types[-1], 'E8 (the hypothesis  f (1 + 2) = 4  is not in normal form)')
+        expect(at(m_i2, '3') is None and at(m_i2, '4') is not None, 'E8 INSTANTIATE at 3 is not offered when a hypothesis says f 3 = 4 in another spelling (f (1 + 2) = 4) -- at 4 it still is')
+        # INJECT: S n = S m gives  n = m;  the hypothesis  Zero + n = m  says it
+        st_j = Fa8([Nat8, Nat8, lambda n, m_: Eq8(w['Succ'](n), w['Succ'](m_))], lambda n, m_, h: Eq8(n, m_ + lit8(1)))
+        g_j = G.Episode(e8, st_j).goal()
+        inj = lambda g_: [a for a in e8.menu(g_).actions if a.kind == Kind.INJECT]
+        expect(inj(g_j) == [Action(Kind.INJECT, 2)], 'E8 (control) INJECT is offered for S n = S m where no hypothesis says n = m (%s)' % (inj(g_j),))
+        g_j2 = hand(g_j, [('hB', lambda n, m_, h: Eq8(w['add'](w['Zero'], n), m_))])
+        expect(e8.nf(g_j2.hyp_types[-1], g_j2.n_hyps) != g_j2.hyp_types[-1] and inj(g_j2) == [], 'E8 INJECT is not offered when a hypothesis says n = m in another spelling (Zero + n = m): %s' % (inj(g_j2),))
+        # FORWARD: from  hAB : f 0 = 0 -> f 3 = 3 + 1  and  hA : f 0 = 0  the fact is  f 3 = 3 + 1  (not in normal form itself);  hQ : f (1 + 2) = 4  says its normal form
+        st_f = Fa8([NN8, lambda f: Eq8(f(lit8(0)), lit8(0))], lambda f, hA: Eq8(f(lit8(5)), lit8(6)))
+        g_f = G.Episode(e8, st_f).goal()
+        fw = lambda g_: [a for a in e8.menu(g_).actions if a.kind == Kind.FORWARD]
+        g_f1 = hand(g_f, [('hAB', lambda f, hA: Fa8([lambda: Eq8(f(lit8(0)), lit8(0))], lambda hh: Eq8(f(lit8(3)), lit8(3) + lit8(1))))])
+        expect([a.codes for a in fw(g_f1)] == [((('v', 2, 0),), (('v', 1, 0),))], 'E8 (control) FORWARD offers the modus ponens of  f 0 = 0 -> f 3 = 3 + 1  with  f 0 = 0 (%s)' % (fw(g_f1),))
+        g_f2 = hand(g_f1, [('hQ', lambda f, hA, hAB: Eq8(f(lit8(1) + lit8(2)), lit8(4)))])
+        expect(fw(g_f2) == [], 'E8 FORWARD is not offered when a hypothesis says the conclusion in another spelling (f 3 = 3 + 1 against f (1 + 2) = 4): %s' % (fw(g_f2),))
 
 
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ F. the recorder

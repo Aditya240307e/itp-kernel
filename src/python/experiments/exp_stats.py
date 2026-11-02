@@ -3,6 +3,8 @@
     mean_ci([0.31, 0.28, 0.35])                         # (mean, low, high): Student-t interval of the mean over replicates (training seeds); NaN bounds for fewer than two
     paired_seed_diff(a, b)                               # replicates paired by seed: mean difference, its t-interval, the two-sided p of the paired t-test
     paired_problem_bootstrap(A, B)                       # A, B: (seeds x problems) 0/1 matrices: mean difference with a bootstrap interval over PROBLEMS (resampled together in both methods)
+    crossed_bootstrap(A, B)                              # the same with the replicates resampled too: the interval over seeds AND problems
+    paired_mde(A, B)                                     # the smallest difference of the two methods' rates that a paired analysis over these problems detects with 80% power
     wilson(k, n)                                         # interval of a proportion from ONE run (a baseline without replicates)
     chao1(counts)                                        # (estimate of the number of classes, standard error): how many skeletons a generator could still make
     rarefaction(labels, points)                          # distinct classes among the first m items, for m in points
@@ -58,6 +60,30 @@ def paired_problem_bootstrap(A, B, n_boot=4000, level=0.95, seed=0):
     means = d[idx].mean(axis=1)
     lo, hi = np.quantile(means, [(1 - level) / 2, 1 - (1 - level) / 2])
     return {'mean': float(d.mean()), 'low': float(lo), 'high': float(hi)}
+
+
+def crossed_bootstrap(A, B, n_boot=4000, level=0.95, seed=0):
+    """A, B: arrays (replicates x problems) of 0/1 (solved) for two methods over the same problems, replicates paired by seed.  The statistic is mean(A) - mean(B); the interval resamples BOTH the replicates and the
+    problems (each with replacement, independently), so it says how much the difference depends on the seeds drawn and on the problems the benchmark holds, together.  With one replicate it is the bootstrap over
+    problems.  Returns {mean, low, high}."""
+    D = np.asarray(A, dtype=np.float64) - np.asarray(B, dtype=np.float64)
+    if D.ndim != 2 or D.size == 0: return {'mean': NAN, 'low': NAN, 'high': NAN}
+    s, n = D.shape; rng = np.random.default_rng(seed)
+    si = rng.integers(0, s, size=(n_boot, s)); pi = rng.integers(0, n, size=(n_boot, n))
+    means = np.array([D[si[b]][:, pi[b]].mean() for b in range(n_boot)])
+    lo, hi = np.quantile(means, [(1 - level) / 2, 1 - (1 - level) / 2])
+    return {'mean': float(D.mean()), 'low': float(lo), 'high': float(hi)}
+
+
+def paired_mde(A, B, power=0.8, alpha=0.05):
+    """the smallest true difference of the solve rates of two methods that a paired analysis over THESE problems detects with the given power (two-sided level alpha): (z_{1-alpha/2} + z_power) * sd(d) / sqrt(n),
+    where d is the per-problem difference of the rates (mean over replicates) of A and B, n the number of problems.  NaN for fewer than two problems.  It is the resolution of the benchmark: a difference smaller
+    than this one is not one the benchmark can tell from the choice of its problems."""
+    A = np.asarray(A, dtype=np.float64); B = np.asarray(B, dtype=np.float64)
+    if A.ndim != 2 or A.shape[1] < 2: return NAN
+    from scipy import stats
+    d = A.mean(axis=0) - B.mean(axis=0); z = float(stats.norm.ppf(1 - alpha / 2) + stats.norm.ppf(power))
+    return z * float(d.std(ddof=1)) / math.sqrt(len(d))
 
 
 def wilson(k, n, level=0.95):
@@ -120,3 +146,23 @@ def first_crossing(xs, ys, level):
             return x0 + (x - x0) * (level - y0) / (y - y0) if y > y0 else x
         prev = (x, y)
     return None
+
+
+def loglog_fit(xs, ys):
+    """the least-squares line of ln y on ln x over the points with x > 0 and y > 0: (slope, intercept, r2, n).  The slope is the exponent of y ~ c * x^slope over the range of x that was measured -- an
+    empirical exponent, with no asymptote assumed.  (nan, nan, nan, n) for fewer than two points or no spread in x."""
+    pts = [(math.log(x), math.log(y)) for x, y in zip(xs, ys) if x is not None and y is not None and not math.isnan(x) and not math.isnan(y) and x > 0 and y > 0]
+    n = len(pts)
+    if n < 2: return NAN, NAN, NAN, n
+    X = np.array([a for a, _ in pts]); Y = np.array([b for _, b in pts]); vx = float(X.var())
+    if vx == 0.0: return NAN, NAN, NAN, n
+    slope = float(((X - X.mean()) * (Y - Y.mean())).mean() / vx); icpt = float(Y.mean() - slope * X.mean())
+    tot = float(((Y - Y.mean()) ** 2).sum()); res = float(((Y - (icpt + slope * X)) ** 2).sum())
+    return slope, icpt, (1.0 - res / tot) if tot > 0 else NAN, n
+
+
+def exponent_ci(xs, per_seed_ys, level=0.95):
+    """the exponent of y ~ x^e fitted on each replicate's own values (`per_seed_ys`: one list of y per seed, aligned with `xs`): (mean, low, high, replicates fitted); the interval is over replicates"""
+    slopes = [loglog_fit(xs, ys)[0] for ys in per_seed_ys]
+    ok = [s for s in slopes if not math.isnan(s)]
+    return mean_ci(ok, level) + (len(ok),)

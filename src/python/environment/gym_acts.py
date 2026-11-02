@@ -516,13 +516,15 @@ def extend_menu(eng, g, actions):
 
 def _inject_actions(eng, space, g):
     out = []; k = eng.k
-    existing = set(g.hyp_types) | {k.simp_normalize(t, g.n_hyps) for t in g.hyp_types}
+    existing = set(g.hyp_types) | {f for f in (eng.nf(t, g.n_hyps) for t in g.hyp_types) if f is not None}
     for h in range(g.n_hyps):
         if not injectivity_lemmas(eng, g.hyp_types[h]): continue
         fresh = False
         for gid, values in inject_facts(eng, space, h):
             ty = apply_type(k, space.table.heads[gid].ty, values)
-            if ty is not None and k.simp_normalize(ty, g.n_hyps) not in existing: fresh = True
+            if ty is None: continue
+            form = eng.nf(ty, g.n_hyps)                                                   # (None: the form costs more than a menu may spend, F87: the fact is not offered)
+            if form is not None and form not in existing: fresh = True
         if fresh: out.append(Action(Kind.INJECT, h))
     return out
 
@@ -581,7 +583,7 @@ def _forward_actions(eng, space, g):
     only the facts that are not hypotheses yet"""
     out = []; k = eng.k; HOLE = GB.HOLE; w = eng.w
     conv = conv_fn(eng, g.n_hyps)
-    existing = set(g.hyp_types) | {k.simp_normalize(t, g.n_hyps) for t in g.hyp_types}
+    existing = set(g.hyp_types) | {f for f in (eng.nf(t, g.n_hyps) for t in g.hyp_types) if f is not None}
     sources = []
     for h in range(g.n_hyps): sources.append((('v', h, 0), space.local_head(h)))
     for name in eng.inst_lemmas:
@@ -613,7 +615,9 @@ def _forward_actions(eng, space, g):
                     ty = apply_type(k, head.ty, vals)
                 except (ActionError, GB.BuildError, E.ITPError, RuntimeError): return
                 if ty is None: return
-                if ty in existing or k.simp_normalize(ty, g.n_hyps) in existing: return
+                if ty in existing: return
+                form = eng.nf(ty, g.n_hyps)
+                if form is None or form in existing: return                                 # (None: the form costs more than a menu may spend, F87: the fact is not offered)
                 out.append(Action(Kind.FORWARD, 0, (), (((tok),),) + tuple(slots)))
                 return
             j = pj[idx]

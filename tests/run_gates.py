@@ -9,17 +9,38 @@
     python3 tests/run_gates.py --synth               + the gate of the synthetic theorem generator (s48)
     python3 tests/run_gates.py --all                 every gate
     python3 tests/run_gates.py s14_prop_world_tests.py s15_classical_tests.py       only these (by file name; the learner's, the repository's and the generator's gates are found by name too)
+    python3 tests/run_gates.py --all --json gates.jsonl                              also append one JSON line per finished gate to the file (gate, its arguments, group, ok, seconds, the verdict line and,
+                                                                                     for a gate that failed, the end of its output); exp_soundness.py reads it
 
 The gate list lives in gate_registry.py, the one place to add a gate.  A gate passes iff it exits 0 and prints no "GATE: FAIL".  Exit status is 0 iff every selected gate passed.
 """
 import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src', 'python')); import itp_paths  # noqa
 import concurrent.futures as cf
-import re, subprocess, time
+import json, re, subprocess, time
 import gate_registry as REG
 
 
 def label(cmd): return ' '.join([os.path.basename(cmd[0])] + cmd[1:])
+
+
+def group_of(cmd):
+    """the directory of a gate below tests/ (kernel, library, environment, problems, learner, repo, synth, support): which part of the system it tests"""
+    return os.path.dirname(cmd[0]) or '.'
+
+
+def verdict_line(text):
+    """the line of a gate's output that states its verdict (the last one that mentions GATE, PASS or FAIL)"""
+    lines = text.strip().split('\n')
+    return next((l.strip() for l in reversed(lines) if 'GATE' in l or 'PASS' in l or 'FAIL' in l), lines[-1] if text.strip() else '')
+
+
+def gate_record(cmd, ok, dt, text):
+    """what is saved of a finished gate (--json): enough to tell, afterwards, which gate ran with which arguments, how long it took and why it failed"""
+    rec = {'gate': os.path.basename(cmd[0]), 'args': list(cmd[1:]), 'group': group_of(cmd), 'ok': bool(ok), 'seconds': round(dt, 1), 'verdict': verdict_line(text)[:200],
+           'time': time.strftime('%Y-%m-%dT%H:%M:%S%z')}
+    if not ok: rec['tail'] = text.strip().split('\n')[-12:]
+    return rec
 
 
 def run_one(cmd, timeout):
@@ -35,10 +56,11 @@ def run_one(cmd, timeout):
 
 
 def main(argv):
-    jobs, timeout, names, extra = 2, 5400, [], []                   # (a gate that runs longer than this is hung: S50 takes about half an hour, S43 and S46 up to ten minutes)
+    jobs, timeout, names, extra, json_path = 2, 5400, [], [], None  # (a gate that runs longer than this is hung: S50 takes about half an hour, S43 and S46 up to ten minutes)
     it = iter(argv)
     for a in it:
         if a == '-j': jobs = int(next(it))
+        elif a == '--json': json_path = next(it)
         elif a == '--timeout': timeout = int(next(it))
         elif a == '--ml': extra += list(REG.ML_GATE_CMDS)
         elif a == '--repo': extra += list(REG.REPO_GATE_CMDS)
@@ -65,7 +87,9 @@ def main(argv):
             for f in done:
                 running.pop(f)
                 cmd, ok, dt, text = f.result()
-                last = next((l.strip() for l in reversed(text.strip().split('\n')) if 'GATE' in l or 'PASS' in l or 'FAIL' in l), text.strip().split('\n')[-1] if text.strip() else '')
+                last = verdict_line(text)
+                if json_path:
+                    with open(json_path, 'a') as jf: jf.write(json.dumps(gate_record(cmd, ok, dt, text), sort_keys=True) + '\n')
                 print('%-5s %-34s %6.1fs  %s' % ('PASS' if ok else 'FAIL', label(cmd), dt, last[:90]), flush=True)
                 if not ok:
                     failed.append(os.path.basename(cmd[0])); print('      ---- tail of output ----\n      ' + '\n      '.join(text.strip().split('\n')[-12:]), flush=True)

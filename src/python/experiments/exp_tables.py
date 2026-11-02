@@ -10,7 +10,7 @@ replicates on a handful of problems) is clipped to it and written in parentheses
 import os as _os, sys as _sys; _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..')); import itp_paths  # noqa: E402,F401
 import os, sys, math, collections
 import numpy as np
-import exp_stats as ST, exp_collect as EC
+import exp_stats as ST, exp_collect as EC, exp_spec as SP
 
 NAN = float('nan')
 
@@ -69,6 +69,12 @@ class Table:
         if self.notes: L.append(r'\par\vspace{2pt}{\footnotesize\raggedright ' + ' '.join(esc(n) for n in self.notes) + r'\par}')
         L.append(r'\end{table}')
         return '\n'.join(L) + '\n'
+    def csv(self):
+        """the cells as the table prints them (a `mean ± half-width` stays one cell; the tidy numbers are in stats/rates.csv)"""
+        import io, csv as _csv
+        buf = io.StringIO(); w = _csv.writer(buf, lineterminator='\n'); w.writerow(self.header)
+        for r in self.rows: w.writerow([str(c) for c in r])
+        return buf.getvalue()
     def to_dict(self): return {'key': self.key, 'caption': self.caption, 'header': self.header, 'rows': self.rows, 'notes': self.notes}
 
 
@@ -110,7 +116,7 @@ def _cell(C, group, variant, solver, split, budget, subset):
 
 def _find(C, variant, solver='sample'):
     """the evaluation group that holds (variant, solver): main first, then the others; None when absent"""
-    for g in ('baselines', 'main', 'solvers', 'mw', 'scale'):
+    for g in ('baselines', 'main', 'solvers', 'mw', 'scale', 'arch', 'size', 'scratch'):
         if variant in C.variants(g) and solver in C.solvers(g, variant): return g
     return None
 
@@ -204,6 +210,158 @@ def scaling_table(C, P):
         dev, k = _cell(C, 'main', 'pre', 'sample', 'dev', B, 'all'); test, _ = _cell(C, 'main', 'pre', 'sample', 'test', B, 'all'); tp, _ = _cell(C, 'main', 'pre', 'sample', 'test', B, 'proved')
         rows.append([smax, 'pre-trained only (zero-shot, no olympiad data)', k, dev, test, tp])
     return Table('scaling', 'Olympiad performance (%% solved within %s probes) against the number of synthetic theorems used for pre-training.' % B, ['synthetic theorems', 'model', 'seeds', 'dev', 'test', 'test, proved'], rows, align='rlrrrr')
+
+
+# ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ the studies of the network and of the start
+ARCH_LABEL = collections.OrderedDict([('transformer', 'Transformer'), ('bigru', 'Bidirectional GRU'), ('cnn', 'Dilated CNN'), ('bow', 'Bag of tokens')])
+LEARNER_LABEL = collections.OrderedDict([('bc', 'BC'), ('ei_her', 'EI + HER'), ('ppo', 'PPO'), ('ei', 'EI'), ('ei_mcts', 'EI + HER, MCTS actor'), ('ei_ida', 'EI + HER, IDA* actor'), ('ppo_nosub', 'PPO, no sub-goals')])
+
+
+def mci(values, digits=3):
+    """`mean ± half-width` of the t-interval over replicates (a single value as it is, none as --)"""
+    xs = [v for v in values if v is not None and not (isinstance(v, float) and math.isnan(v))]
+    if not xs: return '--'
+    m, lo, hi = ST.mean_ci(xs)
+    return ('%.*f ± %.*f' % (digits, m, digits, (hi - lo) / 2.0)) if len(xs) >= 2 else '%.*f' % (digits, m)
+
+
+def pct_of(values, digits=1):
+    """a percentage cell from per-replicate fractions (as `pct`: mean ± half-width, or the clipped form)"""
+    xs = [v for v in values if v is not None and not (isinstance(v, float) and math.isnan(v))]
+    if not xs: return '--'
+    m, lo, hi = ST.mean_ci(xs)
+    return pct(m, lo, hi, len(xs), digits)
+
+
+def split_variant(variant):
+    """'ei_her_bigru' -> ('ei_her', 'bigru', None); 'bc_w64' -> ('bc', 'transformer', 64); 'scratch_ppo' -> ('scratch_ppo', 'transformer', None): the learner, the encoder and the width a variant name says"""
+    arch, width, base = 'transformer', None, variant
+    if '_w' in base and base.rsplit('_w', 1)[1].isdigit(): base, w = base.rsplit('_w', 1); width = int(w)
+    for a in ARCH_LABEL:
+        if a != 'transformer' and base.endswith('_' + a): base = base[:-len(a) - 1]; arch = a; break
+    return base, arch, width
+
+
+def scratch_label(variant):
+    base, arch, _ = split_variant(variant)
+    learner = base[len('scratch_'):] if base.startswith('scratch_') else base
+    return '%s from random weights%s' % (LEARNER_LABEL.get(learner, learner), '' if arch == 'transformer' else ', ' + ARCH_LABEL[arch][0].lower() + ARCH_LABEL[arch][1:])
+
+
+def _aligned(C, stage, names, path):
+    """{seed: [value for each of `names`]} for the seeds that have the value in every run (the fit of a trend needs the same replicate at every point)"""
+    vals = [C.final_values(stage, n, path) for n in names]
+    seeds = sorted(set.intersection(*[set(v) for v in vals])) if vals else []
+    return {s: [v[s] for v in vals] for s in seeds}
+
+
+def _smax(P):
+    sizes = sorted(set(P.get('synth_sizes', ())) - {0})
+    return max(sizes) if sizes else None
+
+
+def arch_table(C, P):
+    """the encoders side by side: what they are (parameters), how well they imitate held-out synthetic proofs, how many olympiad problems the learners solve with them, how fast they train"""
+    smax = _smax(P); B = P.get('headline')
+    archs = [a for a in ARCH_LABEL if a == 'transformer' or ('bc_' + a) in C.variants('arch')]
+    if len(archs) < 2 or smax is None: return None
+    learners = [('bc', 'BC')] + [(l, LEARNER_LABEL[l]) for l in ('ei_her', 'ppo') if any('%s_%s' % (l, a) in C.variants('arch') for a in archs if a != 'transformer')]
+    bench = ((C.bench or {}).get('throughput') or {}).get('archs') or {}
+    rows = []
+    for a in archs:
+        name = '%sn%d' % ('' if a == 'transformer' else a + '_', smax)
+        par = list(C.final_values('pre', name, ('n_params',)).values()) or ([bench['%s@%d' % (a, SP.DEFAULT_WIDTH)]['params']] if '%s@%d' % (a, SP.DEFAULT_WIDTH) in bench else [])
+        cells = [ARCH_LABEL[a], num(mean_of(par) / 1e6, 2) if par else '--',
+                 mci(list(C.final_values('pre', name, ('best', 'synth_test_iid', 'loss')).values()), 3), pct_of(list(C.final_values('pre', name, ('best', 'synth_test_iid', 'action_acc')).values())),
+                 pct_of(list(C.final_values('pre', name, ('best', 'synth_test_comp', 'action_acc')).values()))]
+        for l, _ in learners:
+            v = l if a == 'transformer' else '%s_%s' % (l, a); g = 'main' if a == 'transformer' else 'arch'
+            cells.append(_cell(C, g, v, 'sample', 'test', B, 'all')[0] if v in C.variants(g) and 'sample' in C.solvers(g, v) else '--')
+        b = bench.get('%s@%d' % (a, SP.DEFAULT_WIDTH)); cells.append(num(b.get('train_steps_per_s'), 0) if b else '--')
+        rows.append(cells)
+    header = ['Encoder', 'parameters (M)', 'held-out synthetic: loss', 'actions right, iid (%)', 'actions right, compositional (%)'] + ['%s: test (%%)' % lab for _, lab in learners] + ['training steps / s']
+    return Table('arch', 'Encoders of the goal compared with everything else held fixed: imitation of held-out synthetic proofs after pre-training, and olympiad test problems solved (%%) within %s probes by the learners that continue from each.' % B, header, rows,
+                 notes=['One network per row: the same decoder, heads, data, recipe, seeds and size class (width 128, three layers or blocks); only the encoder of the goal differs, so parameter counts differ only by what the encoder needs (the bag has no table of positions).  '
+                        '`Loss` is the cross-entropy per decision on held-out synthetic theorems (iid split); `actions right` the share of actions all of whose decisions were right (iid and compositional splits); mean ± half-width over seeds.  Training speed: batch 64 on the machine of the benchmark.'],
+                 align='l' + 'r' * (len(header) - 1))
+
+
+def size_table(C, P):
+    """the transformer at other widths: parameters, imitation of held-out synthetic proofs, olympiad performance, training speed"""
+    smax = _smax(P); B = P.get('headline')
+    ws = sorted({int(v.rsplit('_w', 1)[1]) for v in C.variants('size') if v.startswith('bc_w') and v.rsplit('_w', 1)[1].isdigit()})
+    if not ws or smax is None: return None
+    widths = sorted(set(ws) | {SP.DEFAULT_WIDTH}); bench = ((C.bench or {}).get('throughput') or {}).get('archs') or {}
+    more = [(l, LEARNER_LABEL[l]) for l in ('ei_her', 'ppo') if any('%s_w%d' % (l, w) in C.variants('size') for w in ws)]
+    rows = []
+    for w in widths:
+        name = '%sn%d' % ('' if w == SP.DEFAULT_WIDTH else 'w%d_' % w, smax); sz = SP.size_of(w)
+        par = list(C.final_values('pre', name, ('n_params',)).values()) or ([bench['transformer@%d' % w]['params']] if 'transformer@%d' % w in bench else [])
+        g = 'main' if w == SP.DEFAULT_WIDTH else 'size'; bc = 'bc' if w == SP.DEFAULT_WIDTH else 'bc_w%d' % w
+        has = bc in C.variants(g) and 'sample' in C.solvers(g, bc)
+        cells = [w, sz['layers'], num(mean_of(par) / 1e6, 2) if par else '--', mci(list(C.final_values('pre', name, ('best', 'synth_test_iid', 'loss')).values()), 3),
+                 pct_of(list(C.final_values('pre', name, ('best', 'synth_test_iid', 'action_acc')).values())),
+                 _cell(C, g, bc, 'sample', 'dev', B, 'all')[0] if has else '--', _cell(C, g, bc, 'sample', 'test', B, 'all')[0] if has else '--']
+        for l, _ in more:
+            v = l if w == SP.DEFAULT_WIDTH else '%s_w%d' % (l, w)
+            cells.append(_cell(C, g, v, 'sample', 'test', B, 'all')[0] if v in C.variants(g) and 'sample' in C.solvers(g, v) else '--')
+        b = bench.get('transformer@%d' % w); cells.append(num(b.get('train_steps_per_s'), 0) if b else '--')
+        rows.append(cells)
+    header = ['width', 'layers', 'parameters (M)', 'held-out synthetic: loss', 'actions right, iid (%)', 'BC: dev (%)', 'BC: test (%)'] + ['%s: test (%%)' % lab for _, lab in more] + ['training steps / s']
+    return Table('size', 'The transformer at other widths (layers and heads grow with the width): imitation of held-out synthetic proofs, and olympiad problems solved (%%) within %s probes.' % B, header, rows,
+                 notes=['Everything but the size of the network is held fixed (data, recipe, seeds); mean ± half-width over seeds.  The trend of the loss with the number of parameters is in the table of scaling laws.'], align='r' * len(header))
+
+
+def laws_table(C, P):
+    """empirical exponents: how the held-out synthetic loss falls with the number of synthetic training theorems and with the number of parameters, fitted per seed on a log-log line over the range measured"""
+    smax = _smax(P); sizes = sorted(set(P.get('synth_sizes', ())) - {0})
+    if smax is None: return None
+    rows = []
+    def row(label, xlabel, xs, per_seed, xrange):
+        if len(xs) < 3 or not per_seed: return
+        ys = list(per_seed.values()); m, lo, hi, k = ST.exponent_ci(xs, ys); r2 = mean_of([ST.loglog_fit(xs, y)[2] for y in ys])
+        cell = '--' if math.isnan(m) else ('%+.3f [%+.3f, %+.3f]' % (m, lo, hi) if k >= 2 and not math.isnan(lo) else '%+.3f' % m)
+        rows.append([label, xlabel, xrange, len(xs), cell, num(r2, 2), k])
+    # data: the pre-training runs of every size (the nominal size is the one the pre-training was asked for; the theorems it really used are the x)
+    names = ['n%d' % n for n in sizes]; xs = [float(C.synth_used(n) or n) for n in sizes]
+    for sname, lab in (('synth_test_iid', 'held-out synthetic loss, iid'), ('synth_test_comp', 'held-out synthetic loss, compositional')):
+        row(lab, 'synthetic training theorems', xs, _aligned(C, 'pre', names, ('best', sname, 'loss')), '%d–%d' % (xs[0], xs[-1]) if xs else '')
+    # parameters: the transformer at each width, pre-trained on all the synthetic theorems
+    ws = sorted({int(v.rsplit('_w', 1)[1]) for v in C.variants('size') if v.startswith('bc_w') and v.rsplit('_w', 1)[1].isdigit()} | {SP.DEFAULT_WIDTH})
+    if len(ws) >= 3:
+        names = ['%sn%d' % ('' if w == SP.DEFAULT_WIDTH else 'w%d_' % w, smax) for w in ws]
+        par = [mean_of(list(C.final_values('pre', n, ('n_params',)).values())) for n in names]
+        if not any(math.isnan(x) for x in par):
+            for sname, lab in (('synth_test_iid', 'held-out synthetic loss, iid'), ('synth_test_comp', 'held-out synthetic loss, compositional')):
+                row(lab, 'parameters', par, _aligned(C, 'pre', names, ('best', sname, 'loss')), '%.2gM–%.2gM' % (par[0] / 1e6, par[-1] / 1e6))
+    if not rows: return None
+    return Table('laws', 'Scaling laws: the exponent e of  loss ~ x^e, fitted on a log-log line separately for each seed, over the range of x that was measured.',
+                 ['quantity', 'x', 'range of x', 'points', 'exponent e [95% CI over seeds]', 'R² (mean)', 'seeds'], rows,
+                 notes=['An empirical exponent over a limited range, with no irreducible loss or asymptote assumed (the loss of an imitation model does not fall to zero); negative means the loss falls.  With few points, R² says how well a straight line describes them.'],
+                 align='llrrrrr')
+
+
+def scratch_table(C, P):
+    """learning from random weights, next to the model-free baselines and to the same learners continued from behaviour cloning"""
+    B = P.get('headline'); vs = [v for v in C.variants('scratch') if 'sample' in C.solvers('scratch', v)]
+    if not vs: return None
+    rows = []
+    def add(group, variant, solver, label, start, iters):
+        dev, n = _cell(C, group, variant, solver, 'dev', B, 'all'); test, _ = _cell(C, group, variant, solver, 'test', B, 'all'); tp, _ = _cell(C, group, variant, solver, 'test', B, 'proved')
+        hrs = [f.get('seconds') for rid, f in C.finals.items() if rid.startswith('rl/%s/' % variant) and f.get('seconds') is not None]
+        rows.append([label, start, n, iters, dev, test, tp, num(mean_of(hrs) / 3600.0, 1) if hrs else '--'])
+    for sname in ('uniform', 'blind'):
+        if 'baselines' in C.variants('baselines') and sname in C.solvers('baselines', 'baselines'): add('baselines', 'baselines', sname, LABELS.get(sname, sname), 'no network', '--')
+    def iters_of(variant):
+        ns = [len(f.get('history') or []) for rid, f in C.finals.items() if rid.startswith('rl/%s/' % variant) and f.get('history')]
+        return num(mean_of(ns), 0) if ns else '--'
+    for v in vs: add('scratch', v, 'sample', scratch_label(v), 'random weights', iters_of(v))
+    for ref in ('bc', 'ei_her', 'ppo'):
+        if ref in C.variants('main') and 'sample' in C.solvers('main', ref): add('main', ref, 'sample', LABELS.get(ref, ref), 'pre-trained + BC' if ref == 'bc' else 'BC', iters_of(ref) if ref != 'bc' else '--')
+    return Table('scratch', 'Reinforcement learning from random weights: problems solved (%%) within %s probes, next to the model-free baselines and to the same learners continued from behaviour cloning.' % B,
+                 ['Method', 'starts from', 'seeds', 'iterations', 'dev', 'test', 'test, proved', 'training hours'], rows,
+                 notes=['No demonstration and no pre-training reach a method started from random weights: it learns from the reward alone (a kernel-checked proof), from sub-theorems proved on the way (hindsight) and from synthetic goals, '
+                        'which are most of its goals.  The model-free baselines show what the engine solves without any learning.  Mean ± half-width over seeds.'], align='llrrrrrr')
 
 
 FAMILY_LABEL = {'AMC': 'AMC-style'}              # (the bank holds no problem of the AMC itself: its 72 are written in the manner of that contest)
@@ -371,23 +529,114 @@ def soundness_table(C):
     return Table('soundness', 'Soundness of the evaluation.', ['quantity', 'count'], rows, notes=['A row counts as solved only after the engine replayed its proof and the kernel accepted the term; the independently written checker (recheck.py) re-checks the same terms.'], align='lr')
 
 
+# the categories of the time ledger (exp_profile) as the groups the paper talks about
+BREAKDOWN_GROUPS = collections.OrderedDict([('tactics and kernel', ('tactic',)), ('menu of a goal', ('menu', 'nf', 'observe')), ('probe machinery', ('probe', 'replay', 'start', 'verify')),
+                                            ('decision language', ('assembler',)), ('features', ('features',)), ('policy network', ('policy',))])
+OTHER_LABEL = 'search and glue (not in a category)'
+KIND_ROWS = 12                    # the kinds of action in the latency table (the most frequently tried ones; stats/latency.csv-style detail is in bench.json)
+
+
+def breakdown_shares(bd):
+    """{group: share of the wall time} of a ledger report (exp_profile.Ledger.report), the remainder under OTHER_LABEL; None when it has no categories"""
+    if not bd or not bd.get('categories'): return None
+    cats = bd['categories']; out = collections.OrderedDict()
+    for g, members in BREAKDOWN_GROUPS.items():
+        out[g] = sum((cats.get(m) or {}).get('share') or 0.0 for m in members)
+    out[OTHER_LABEL] = max(0.0, 1.0 - sum(out.values()))
+    return out
+
+
+def lat_cells(d):
+    return [d.get('n', 0), num(d.get('p50_ms'), 2), num(d.get('p90_ms'), 2), num(d.get('p99_ms'), 2), num(d.get('max_ms'), 1)] if d and d.get('n') else [0, '--', '--', '--', '--']
+
+
+def share_cell(x, digits=1): return '--' if x is None or (isinstance(x, float) and math.isnan(x)) else ('%%.%df' % digits) % (100.0 * x)
+
+
 def throughput_tables(C):
     b = (C.bench or {}).get('throughput')
     if not b: return {}
     out = {}
     if b.get('solvers'):
-        rows = [[s, num(v.get('probes_per_s'), 1), num(v.get('decisions_per_s'), 1), num(v.get('actions_per_s'), 1), num(v.get('seconds_per_problem'), 2), num(v.get('peak_rss_mb', NAN) / 1024.0 if v.get('peak_rss_mb') else NAN, 2)]
-                for s, v in b['solvers'].items()]
+        rows = []
+        for s, v in b['solvers'].items():
+            lat = ((v.get('profile') or {}).get('latency') or {}).get('probe') or {}
+            rng = ('%s–%s' % (num(v.get('probes_per_s_min'), 1), num(v.get('probes_per_s_max'), 1))) if (v.get('repeats') or 1) > 1 and v.get('probes_per_s_min') is not None else '--'
+            rows.append([s, num(v.get('probes_per_s'), 1), rng, num(v.get('decisions_per_s'), 1), num(v.get('actions_per_s'), 1), num(v.get('seconds_per_problem'), 2), num(lat.get('p50_ms'), 2), num(lat.get('p99_ms'), 1),
+                         num(v.get('peak_rss_mb', NAN) / 1024.0 if v.get('peak_rss_mb') else NAN, 2)])
+        reps = max((v.get('repeats') or 1 for v in b['solvers'].values()), default=1); ov = [v['profile']['ratio_to_plain'] for v in b['solvers'].values() if (v.get('profile') or {}).get('ratio_to_plain')]
+        notes = ['Probes / s is the median of %d pass%s over the same problems (range beside it; the first pass is cold, after one untimed warm-up call).' % (reps, '' if reps == 1 else 'es')]
+        if ov: notes.append('The latency columns come from one more, instrumented pass, which takes %s as long as a plain pass and finds the same proofs.' % ('%.2f to %.2f times' % (min(ov), max(ov)) if len(ov) > 1 else '%.2f times' % ov[0]))
         out['bench_solvers'] = Table('bench_solvers', 'Engine throughput on %d train problems (one core): probes (tries of an action), decisions of the policy, actions per second.' % b.get('n_problems', 0),
-                                     ['solver', 'probes / s', 'decisions / s', 'actions / s', 'seconds / problem', 'peak RSS (GB)'], rows, align='lrrrrr')
+                                     ['solver', 'probes / s', 'range', 'decisions / s', 'actions / s', 'seconds / problem', 'probe median (ms)', 'probe p99 (ms)', 'peak RSS (GB)'], rows, notes=notes, align='lrrrrrrrr')
+    # where the time goes: the interface and each solver, by group of categories
+    cols = []
+    g_ = (b.get('gym') or {}).get('profiled') or {}
+    if breakdown_shares(g_.get('breakdown')): cols.append(('Gymnasium interface', breakdown_shares(g_['breakdown'])))
+    for sname, v in (b.get('solvers') or {}).items():
+        sh = breakdown_shares((v.get('profile') or {}).get('breakdown'))
+        if sh: cols.append((sname, sh))
+    if cols:
+        rows = [[lab] + [share_cell(sh[lab]) for _, sh in cols] for lab in list(BREAKDOWN_GROUPS) + [OTHER_LABEL]]
+        notes = ['Percent of the wall-clock time of an instrumented pass; the categories are exclusive (a menu\'s probes are charged to the probes), so a column adds up to 100.  ' + '; '.join('%s = %s' % (g, ', '.join(m)) for g, m in BREAKDOWN_GROUPS.items()) + '.']
+        out['bench_breakdown'] = Table('bench_breakdown', 'Where the time goes.', ['share of the time (%)'] + [n for n, _ in cols], rows, notes=notes, align='l' + 'r' * len(cols))
+    # latencies: a probe by kind, a menu, the replay of a proof and the checks, the interface
+    lat = b.get('latency') or {}; rows = []
+    if lat.get('probe'):
+        oc = collections.Counter()
+        for v in (lat.get('probe_by_kind') or {}).values(): oc.update(v.get('outcomes') or {})
+        rows.append(['probe, any kind'] + lat_cells(lat['probe']) + [' / '.join('%s %d' % (k, oc[k]) for k in ('ok', 'refused', 'fuel', 'bug', 'raised') if oc.get(k))])
+        by_kind = sorted((lat.get('probe_by_kind') or {}).items(), key=lambda kv: -kv[1].get('n', 0))
+        for kind, v in by_kind[:KIND_ROWS]:
+            rows.append(['  probe of %s' % kind] + lat_cells(v) + [' / '.join('%s %d' % (k, v['outcomes'][k]) for k in ('ok', 'refused', 'fuel', 'bug', 'raised') if (v.get('outcomes') or {}).get(k))])
+    kinds_cut = len(lat.get('probe_by_kind') or {}) - KIND_ROWS
+    for key, label in (('menu', 'menu of a goal'), ('replay', 'replay of an action on the live proof'), ('start', 'proof state for a statement')):
+        if lat.get(key): rows.append([label] + lat_cells(lat[key]) + [('%.0f options on average' % lat[key]['mean_options']) if lat[key].get('mean_options') else ''])
+    ck = b.get('check') or {}
+    for key, label in (('replay', 'reference proof: replay, then kernel check'), ('kernel_check', 'reference proof: the kernel\'s check of the finished term'), ('independent_check', 'reference proof: the independent checker')):
+        if ck.get(key): rows.append([label] + lat_cells(ck[key]) + [('%d proofs, %.1f steps on average' % (ck.get('proofs', 0), ck['steps_mean'])) if key == 'replay' and ck.get('steps_mean') else ''])
+    gl = ((b.get('gym') or {}).get('profiled') or {}).get('latency') or {}
+    for key, label in (('reset', 'Gymnasium: reset'), ('decision', 'Gymnasium: a decision'), ('decision_inner', '  a decision inside an action'), ('decision_action', '  a decision that completes an action')):
+        if gl.get(key): rows.append([label] + lat_cells(gl[key]) + [''])
+    if rows:
+        out['bench_latency'] = Table('bench_latency', 'Latency of the operations of the stack (milliseconds, wall clock, one core).', ['operation', 'n', 'median', 'p90', 'p99', 'max', 'remark'], rows,
+                                     notes=['Percentiles are linear interpolations between the observed values; with fewer than 100 samples the p99 is little more than the maximum.  A probe is one try of an action by the engine; `refused` is the usual outcome.' + ('  The %d rarer kinds of action are left out (all are in bench.json).' % kinds_cut if kinds_cut > 0 else '')], align='lrrrrrl')
     if b.get('workers'):
-        rows = [[w, num(v.get('probes_per_s'), 1), num(v.get('speedup'), 2), num(v.get('efficiency'), 2)] for w, v in sorted(b['workers'].items(), key=lambda kv: int(kv[0]))]
-        out['bench_workers'] = Table('bench_workers', 'Scaling of the evaluation with worker processes (the world is shared by fork).', ['workers', 'probes / s', 'speed-up', 'efficiency'], rows, align='rrrr')
+        rows = []
+        for w, v in sorted(b['workers'].items(), key=lambda kv: int(kv[0])):
+            m = v.get('memory') or {}
+            rows.append([w, num(v.get('probes_per_s'), 1), num(v.get('speedup'), 2), num(v.get('efficiency'), 2), num(m.get('pss_mb_max'), 0), num(m.get('rss_sum_mb_max'), 0), m.get('processes_max') if m.get('processes_max') else '--'])
+        det = b.get('determinism') or {}; notes = []
+        if det:
+            runs = ', '.join(det.get('runs') or [])
+            notes.append(('The rows of %s are identical but for the clock (%s tasks compared%s; outcome digest %s).' % (runs, det.get('tasks', '?'), (', %d left out for having used most of the time limit' % det['excluded_slow']) if det.get('excluded_slow') else '', det.get('outcome_digest', '--')))
+                         if det.get('identical') else 'THE ROWS DIFFER between %s: %d of %s tasks (first: %s).' % (runs, det.get('n_differing', 0), det.get('tasks', '?'), (det.get('differing') or [{}])[0]))
+        notes.append('Memory is the proportional set size, which counts a page shared with the parent once; the sum of the resident sets counts the world again for every worker.')
+        short = [w for w, v in sorted(b['workers'].items(), key=lambda kv: int(kv[0])) if (v.get('memory') or {}).get('processes_max') is not None and v['memory']['processes_max'] < int(w) + 1]
+        if short: notes.append('With %s worker%s the memory sampler saw fewer processes than there are workers and the parent: that run was shorter than its sampling interval, and its memory is the parent\'s alone.' % (' and '.join(short) if len(short) <= 2 else ', '.join(short[:-1]) + ' and ' + short[-1], '' if short == ['1'] else 's'))
+        out['bench_workers'] = Table('bench_workers', 'Scaling of the evaluation with worker processes (the world is shared by fork).', ['workers', 'probes / s', 'speed-up', 'efficiency', 'memory, shared-aware (MB)', 'sum of resident sets (MB)', 'processes'], rows, notes=notes, align='rrrrrrr')
     if b.get('world'):
         w = b['world']
         rows = [['world build (the whole bank)', num(w.get('seconds'), 1) + ' s'], ['globals in the world', w.get('globals')], ['resident memory after the build', num(w.get('rss_mb', NAN) / 1024.0, 2) + ' GB'],
                 ['policy network parameters', num(w.get('params', NAN) / 1e6, 2) + ' M'], ['BC training steps / s (batch)', num(w.get('train_steps_per_s'), 0)], ['network inference decisions / s (batch 1)', num(w.get('infer_decisions_per_s'), 0)]]
+        rows = [r for r in rows if not str(r[1]).strip().startswith('--')]
         out['bench_world'] = Table('bench_world', 'Fixed costs.', ['quantity', 'value'], rows, align='lr')
+    if b.get('archs'):
+        rows = []
+        for key, v in b['archs'].items():
+            e = v.get('encode') or {}
+            rows.append([ARCH_LABEL.get(v.get('arch'), v.get('arch')) + ('' if v.get('width') == SP.DEFAULT_WIDTH else ', width %s' % v.get('width')), v.get('width'), num(v.get('params', NAN) / 1e6, 2), num(v.get('train_steps_per_s'), 0), num(e.get('p50_ms'), 2), num(e.get('p99_ms'), 1)])
+        dev = next(iter(b['archs'].values())).get('device', 'cpu')
+        out['bench_archs'] = Table('bench_archs', 'Cost of the encoders and of the widths (untrained networks of the sizes of the experiments).', ['network', 'width', 'parameters (M)', 'training steps / s', 'encode one goal: median (ms)', 'p99 (ms)'], rows,
+                                   notes=['Training: forward, backward and AdamW on batches of 64 real steps, on the %s, one process; encoding: the encoder alone on one goal, no gradient (the first thing a decision costs).  The cost does not depend on the weights.' % dev], align='lrrrrr')
+    mc = b.get('machine') or {}
+    if mc:
+        meta = b.get('meta') or {}
+        rows = [['processor', mc.get('cpu')], ['cores (usable by the benchmark)', '%s (%s)' % (mc.get('cores'), mc.get('cores_usable'))], ['memory', '%s GB' % mc.get('memory_gb')], ['operating system', mc.get('platform')],
+                ['Python / torch / numpy', '%s / %s / %s' % (mc.get('python'), mc.get('torch'), mc.get('numpy'))], ['torch threads', mc.get('torch_threads')], ['sources of the kernel (digest)', mc.get('kernel_digest')],
+                ['load average before / after', '%s / %s' % (mc.get('loadavg_start'), mc.get('loadavg_end', '--'))], ['commit', (meta.get('commit') or '--')[:12] + (' (modified tree)' if meta.get('tree_dirty') else '')]]
+        rows = [[k, '--' if v in (None, '') else v] for k, v in rows]
+        out['bench_machine'] = Table('bench_machine', 'The machine of the benchmarks.', ['item', 'value'], rows, notes=(['The machine was busy when the benchmark started: its numbers measure the other jobs too.'] if mc.get('busy_at_start') else []), align='ll')
     k = (C.bench or {}).get('kernel')
     if k and isinstance(k, dict):
         rows = []
@@ -416,7 +665,7 @@ def all_tables(C):
     for key, t in (('system', system_table(C)), ('bank', bank_table(C)), ('main', main_table(C, P)), ('strict', strict_table(C, P)), ('ablations', ablation_table(C, P)),
                    ('solvers', solver_table(C, P, 'solvers', 'solvers', 'The same networks under different provers: problems solved (%%) within %s probes.')),
                    ('mw', solver_table(C, P, 'mw', 'mw', 'The manager-worker agent and its ablations: problems solved (%%) within %s probes.')),
-                   ('scaling', scaling_table(C, P)), ('levels', level_table(C, P)), ('generator', generator_table(C)), ('library', library_table(C, P)), ('cost', cost_table(C, P)), ('soundness', soundness_table(C)), ('hyper', hyper_table(C))):
+                   ('scaling', scaling_table(C, P)), ('arch', arch_table(C, P)), ('size', size_table(C, P)), ('laws', laws_table(C, P)), ('scratch', scratch_table(C, P)), ('levels', level_table(C, P)), ('generator', generator_table(C)), ('library', library_table(C, P)), ('cost', cost_table(C, P)), ('soundness', soundness_table(C)), ('hyper', hyper_table(C))):
         if t is not None: T[key] = t
     for k, t in throughput_tables(C).items(): T[k] = t
     return T

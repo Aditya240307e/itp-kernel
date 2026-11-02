@@ -1,0 +1,6 @@
+# The ledger of second readers: one line per reading of one statement, appended (never edited: a later line of the same reader replaces an earlier one).
+# name <TAB> statement digest <TAB> reviewer <TAB> role <TAB> date <TAB> verdict <TAB> note
+#   statement digest  the 16 hex digits printed in review_sheet.md next to the statement that was read; a line counts only for the statement it was written for, so a statement that changed is no longer reviewed
+#   role              second (someone who did not write the statement; counts as an independent reading) | author (the person who wrote it; recorded, does not count)
+#   verdict           faithful | adapted (faithful after the adaptation the notes describe) | ambiguous (the English admits several readings: say which one the statement picks) | unfaithful
+# Make lines with `python3 src/python/experiments/exp_audit.py import-reviews review_sheet.csv --reviewer NAME` from the filled sheet, or by hand.

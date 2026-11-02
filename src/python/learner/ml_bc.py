@@ -74,6 +74,7 @@ def main(argv=None):
     ap.add_argument('--no-bank', action='store_true'); ap.add_argument('--no-lib', action='store_true'); ap.add_argument('--no-strict', action='store_true')
     ap.add_argument('--epochs', type=int, default=30); ap.add_argument('--batch', type=int, default=64); ap.add_argument('--lr', type=float, default=1e-3); ap.add_argument('--wd', type=float, default=0.01)
     ap.add_argument('--d', type=int, default=128); ap.add_argument('--layers', type=int, default=3); ap.add_argument('--heads', type=int, default=4); ap.add_argument('--ff', type=int, default=384); ap.add_argument('--dropout', type=float, default=0.1)
+    ap.add_argument('--arch', default=None, choices=M.ARCHS, help="the encoder of the goal (ml_model.ARCHS); with --init it is the checkpoint's (naming another one is an error), else the transformer")
     ap.add_argument('--size-coef', type=float, default=0.2); ap.add_argument('--mgr-coef', type=float, default=0.2)
     ap.add_argument('--select', default='loss', choices=('loss', 'action_acc')); ap.add_argument('--select-set', default='', help='the dev set that picks the epoch (default: dev_bank when the bank is trained on, else dev_synth)')
     ap.add_argument('--patience', type=int, default=0); ap.add_argument('--seed', type=int, default=0); ap.add_argument('--device', default='cpu'); ap.add_argument('--threads', type=int, default=1)
@@ -86,7 +87,9 @@ def main(argv=None):
     torch.set_num_threads(a.threads); torch.manual_seed(a.seed)
     os.makedirs(a.out, exist_ok=True); t0 = time.time()
     bk, ctx, eng = W.load(a)
-    cfg_new = {'d': a.d, 'layers': a.layers, 'heads': a.heads, 'ff': a.ff, 'dropout': a.dropout, 'lr': a.lr, 'wd': a.wd, 'batch': a.batch, 'epochs': a.epochs, 'seed': a.seed}
+    init_arch = T.load_config(a.init).get('arch', 'transformer') if a.init else None
+    if a.init and a.arch and a.arch != init_arch: sys.exit('--arch %s, but %s is a %s network: the architecture of a network that is trained further is the one it has' % (a.arch, a.init, init_arch))
+    cfg_new = {'d': a.d, 'layers': a.layers, 'heads': a.heads, 'ff': a.ff, 'dropout': a.dropout, 'lr': a.lr, 'wd': a.wd, 'batch': a.batch, 'epochs': a.epochs, 'seed': a.seed, 'arch': a.arch or 'transformer'}
     pool = weights_file = None
     if a.eval_every:                                                    # (forked now, before the (large) synthetic dataset is in memory)
         import ml_ei as EI

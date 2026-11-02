@@ -16,7 +16,9 @@ term) -- the near misses that a search is most likely to close wrongly.
 THE INTEGERS (--world int): equalities that ring settles (a polynomial identity, or one made false by a small change), polynomial inequalities over a bounded interval (the bounds and the polynomial's true maximum
 decide the claim, which is made one too tight half of the time: interval_cases and nlinarith), and linear consequences of linear hypotheses (a non-negative combination of them, or a combination shifted by one: linarith).
 
-    python3 gym_fuzz.py --seed 1 --n 300 [--world nat|int] [--noarith] [--depth 5] [--probes 400] [--seconds 5] [--log fuzz.log]
+    python3 gym_fuzz.py --seed 1 --n 300 [--world nat|int] [--noarith] [--depth 5] [--probes 400] [--seconds 5] [--log fuzz.log] [--json fuzz.jsonl]
+
+--json appends ONE line per campaign (the settings, the outcome counts, how many statements were true and how many false, the seconds, the probe statistics and every report), which exp_soundness.py reads.
 """
 import os as _os, sys as _sys; _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', '..', 'src', 'python')); import itp_paths  # noqa: E402,F401
 import argparse, os, random, sys, time
@@ -408,7 +410,8 @@ def check_canaries(W, eng, noarith):
         if out != []: raise RuntimeError('canary %s: %s did not close the goal (%r; errors %r)' % (label, kind.name, out, dict(eng.errors)))
 
 
-def run(seed=1, n=200, world='nat', noarith=False, depth=5, probes=400, seconds=5.0, log=None, verbose=False, family=None):
+def run(seed=1, n=200, world='nat', noarith=False, depth=5, probes=400, seconds=5.0, log=None, verbose=False, family=None, info=None):
+    """returns (counts, reports); a dict passed as `info` is filled with what else the campaign measured (world, statements, how many were true and false, seconds, probe statistics)"""
     rng = random.Random(seed)
     W = family if family is not None else NatWorld() if world == 'nat' else IntFamily()
     world = W.name
@@ -446,6 +449,7 @@ def run(seed=1, n=200, world='nat', noarith=False, depth=5, probes=400, seconds=
         counts['ERROR'] += 1; reports.append(('ERROR', True, 'engine bugs', repr(eng.bugs[:3]))); print('[ERROR] the engine recorded bugs: %r' % (eng.bugs[:3],), flush=True)
     summary = 'gym_fuzz seed=%d world=%s noarith=%s: %d statements (%d true, %d false) in %.1f s: %s; probes %s' % (seed, world, noarith, sum(counts.values()), n_true, n_false, time.time() - t0, counts, dict(eng.stats))
     print(summary, flush=True)
+    if info is not None: info.update(world=world, statements=n_true + n_false, true=n_true, false=n_false, seconds=round(time.time() - t0, 1), stats={str(k): v for k, v in eng.stats.items()})
     if log:
         with open(log, 'a') as f:
             f.write(summary + '\n')
@@ -457,7 +461,12 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument('--seed', type=int, default=1); ap.add_argument('--n', type=int, default=200); ap.add_argument('--world', default='nat')
     ap.add_argument('--noarith', action='store_true'); ap.add_argument('--depth', type=int, default=5); ap.add_argument('--probes', type=int, default=400)
-    ap.add_argument('--seconds', type=float, default=5.0); ap.add_argument('--log'); ap.add_argument('-v', '--verbose', action='store_true')
-    a = ap.parse_args()
-    counts, reports = run(a.seed, a.n, a.world, a.noarith, a.depth, a.probes, a.seconds, a.log, a.verbose)
+    ap.add_argument('--seconds', type=float, default=5.0); ap.add_argument('--log'); ap.add_argument('-v', '--verbose', action='store_true'); ap.add_argument('--json')
+    a = ap.parse_args(); info = {}
+    counts, reports = run(a.seed, a.n, a.world, a.noarith, a.depth, a.probes, a.seconds, a.log, a.verbose, info=info)
+    if a.json:
+        import json
+        rec = dict(info, seed=a.seed, n=a.n, noarith=a.noarith, depth=a.depth, probes=a.probes, seconds_per_statement=a.seconds, counts=counts, time=time.strftime('%Y-%m-%dT%H:%M:%S%z'),
+                   reports=[[r[0], bool(r[1]), r[2], str(r[3])[:400]] for r in reports])
+        with open(a.json, 'a') as f: f.write(json.dumps(rec, sort_keys=True) + '\n')
     sys.exit(1 if counts['REJECTED'] or counts['UNSOUND'] or counts['ERROR'] else 0)

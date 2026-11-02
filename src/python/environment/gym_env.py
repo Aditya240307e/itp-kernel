@@ -310,8 +310,21 @@ class Profile:
 PROBE_FUEL = {Kind.RING: 50_000_000, Kind.LINARITH: 50_000_000, Kind.NLINARITH: 100_000_000, Kind.INTERVAL_CASES: 50_000_000, Kind.LINCOMB: 50_000_000}
 DEFAULT_PROBE_FUEL = 5_000_000
 SETTLE_FUEL = 20_000          # the budget of each conversion check that settles a goal (is it an assumption? is it `x = x`?)
+MENU_FUEL = 5_000_000         # the work budget of each kernel call made while a goal's menu is listed (F87; see Engine.menu): the engine's budget for an action. MENU_CALIBRATION below
+INST_SHARE = 50               # a candidate fact of INSTANTIATE may spend 1/INST_SHARE of it for its normal form (there are up to MAX_INST of them in a menu, made by the agent's pool; see _inst_actions)
+MAX_MENU_SPENT = 8            # candidates one source of INSTANTIATE may drop for spending that before the rest of that source is not looked at
+NF_CACHE = 200_000            # normal forms an engine remembers (see Engine.nf); the memory is cleared when it is full
+# MENU_FUEL AND INST_SHARE, CALIBRATED (unbounded engine, every normal form a menu asked for, by call site, 2026-11-01).  Library: 453 recorded proofs, 6 239 menus, 161 574 forms: the goal's own form (`_menu`) median 38 /
+# p99 9 281 / max 88 914 steps, a candidate fact of INSTANTIATE max 392, a hypothesis' form max 967.  Bank: 195 reference proofs, 503 menus, 21 347 forms: the goal's form median 138 / p99 46 411 / max 217 666, a
+# candidate fact max 434, a hypothesis' form max 902.  So the menu's budget (5 * 10^6) is 23 times the largest form of any goal seen, and a candidate fact's (10^5) 230 times the largest candidate; a cut costs about
+# 0.7 s and 14 ms (7 * 10^6 steps/s on the development machine) and is paid once per engine (Engine.nf remembers it).
 MAX_INTROS = 64
 INTRO_HEADS = ('And', 'Or', 'Iff', 'Ex', 'True')       # the connectives whose introduction rules only split a goal (see Engine.introduces)
+
+
+def out_of_work(e):
+    """is the exception the kernel's answer "this takes more work, or more stack, than I may spend": the work budget (`FuelExhausted`), or the stack guard, which Python sees as a bare RuntimeError?"""
+    return isinstance(e, E.FuelExhausted) or (type(e) is RuntimeError and 'stack exhausted' in str(e))
 
 
 class Engine:
@@ -322,9 +335,10 @@ class Engine:
     probe that is not a refusal of the tactic layer or of the kernel (a TypeError, a stale checkpoint, ...) is a BUG of this code: it is always kept in `bugs`, and a strict engine raises it (after the
     kernel has been rewound); a lenient one counts it as a failed action, so a long search survives it. A refusal that is mistaken for a bug costs a search nothing and hides nothing; a bug that is mistaken
     for a refusal hides every action that hits it, silently."""
-    def __init__(self, w, premises=None, auto_intro=True, autoclose=True, clean=True, probe_fuel=None, kinds=None, strict=None, terms=None, inst_lemmas=(), claims=()):
+    def __init__(self, w, premises=None, auto_intro=True, autoclose=True, clean=True, probe_fuel=None, kinds=None, strict=None, terms=None, inst_lemmas=(), claims=(), menu_fuel=None):
         if w.ctx: raise AuthorError('an engine must be made at the top level')
         self.w = w; self.k = w.k; self.auto_intro = auto_intro; self.autoclose = autoclose; self.clean = clean
+        self.menu_fuel = MENU_FUEL if menu_fuel is None else int(menu_fuel)        # the work budget of each kernel call made while a menu is listed (<= 0: the library's, unbounded; see menu)
         self.kinds = V1_KINDS if kinds is None else frozenset(kinds)              # the kinds of action the menu offers (by default those of the first language; every kind is legal either way)
         self.claim_hints = tuple(claims)                                          # closed statements (kernel handles) that the menu offers as CLAIMs, when it lists that kind
         self.terms = (TERMS_DEFAULT or (kinds is not None and bool(self.kinds & TERM_KINDS))) if terms is None else bool(terms)       # does the menu list the actions that carry terms (INSTANTIATE, USE)? They are legal either way
@@ -339,6 +353,7 @@ class Engine:
         self._lemma_fps = {}; self._intros = {}; self._intro_heads = frozenset()   # global id -> fingerprints of the arguments of its conclusion;  global id -> does it introduce a connective?
         self.type_filter = True                          # offer no lemma about another type than the goal's (switched off by the tests that check the filter loses nothing)
         self._hyp_profiles = NodeCache(w); self._families = NodeCache(w); self._recursive = {}
+        self._nf = NodeCache(w)                          # (term handle, context size) -> its display normal form, or None when it spends the menu's budget (see nf)
         self.name_tag = ''                               # prefixed to the names the engine gives to the hypotheses it introduces (a1, i3, r5): the recorder sets it so that they never clash with an author's names
         self.principles = {}; self.inj_index = {}                 # global id -> gym_acts.Principle;  head constant -> [injectivity lemmas]  (read off the library by `refresh`)
         self._acts_scanned = 0; self._hint_codes = {}; self.table = None
@@ -599,7 +614,35 @@ class Engine:
 
     # -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- the menu
     def menu(self, g):
-        """the legal actions of a goal, with their candidate table. Nothing here is tried: an action may still fail when probed."""
+        """the legal actions of a goal, with their candidate table. Nothing here is tried: an action may still fail when probed.
+
+        WORK BUDGET (F87).  Listing a menu is not a probe, so its kernel calls ran under the library's budget (2 * 10^9 steps: half a minute): the display normal form of one candidate of INSTANTIATE, `9^9` in a
+        unary numeral (387 420 489 successors), ran for 18 to 107 s and then the stack guard (the forms that did finish took up to 98 million steps), and the attempt was lost. Each kernel call made here now runs under `menu_fuel` steps (`MENU_FUEL`: 56 times the
+        largest call of any menu of the library's proofs, 23 times that of the bank's reference proofs), and what spends it is not offered: a candidate of INSTANTIATE (or of the second language's enumerators) whose normal form is too expensive is dropped,
+        a normal form that is only used to look something up falls back to the term itself (`nf`). The budget counts steps, not seconds, so the menu is the same on every machine and every run. Left alone: a probe
+        (its own budget decides), a caller that has set a budget at most as large, and an engine whose `menu_fuel` is <= 0. `stats['menu_spent']` counts what was dropped (it is 0 on every proof of the library and the bank)."""
+        k = self.k; cap = int(self.menu_fuel); saved = k.get_fuel()
+        if cap <= 0 or self.w.probing or 0 < saved <= cap: return self._menu(g)
+        k.set_fuel(cap)
+        try: return self._menu(g)
+        finally: k.set_fuel(saved)
+
+    def nf(self, t, n):
+        """the display normal form of `t` in a context of n hypotheses, or None when finding it spends the work budget (or the stack): such a form is used to compare and to look up, never to decide, and a term whose
+        form is that expensive is not offered (F87). The answer is a function of the term, the context and the budget alone, so it is remembered (a `NodeCache`: nothing is stored inside a probe) -- a menu lists the
+        same facts again and again, and a form that spends the budget would otherwise be paid for in every menu."""
+        key = (t, n, self.k.get_fuel()); r = self._nf.get(key, False)          # (the answer depends on the budget too: a form that spends a small one may not spend a larger)
+        if r is False:
+            try: r = self.k.simp_normalize(t, n)
+            except (E.FuelExhausted, RuntimeError) as e:
+                if not out_of_work(e): raise
+                r = None
+            if len(self._nf) >= NF_CACHE: self._nf.clear()
+            self._nf[key] = r
+        if r is None: self.stats['menu_spent'] += 1
+        return r
+
+    def _menu(self, g):
         w = self.w; k = self.k; nh = g.n_hyps
         actions = []; cands = []; cperm = []                 # (cperm: for each candidate, 1 if it is a rewrite by a permutative equation)
         if not self.auto_intro and unfolds_to_pi(k, g.target): actions.append(Action(Kind.INTRO, 0))
@@ -609,7 +652,8 @@ class Engine:
             actions.append(Action(Kind.CASES, h))
             if self.is_recursive_family(fam): actions.append(Action(Kind.INDUCT, h))
         # --- apply: the library through its index (looked up with the display normal form of the target, which is how lemmas are stated), the hypotheses by the head of their conclusion
-        tnorm = k.simp_normalize(g.target, nh)
+        tnorm = self.nf(g.target, nh)
+        if tnorm is None: tnorm = g.target                   # (F87: the form only looks the lemmas up and compares their arguments with the goal's; the goal itself serves when the form is too expensive)
         gh = conclusion_head(k, g.target); goal_fps = self.arg_fps(tnorm)
         seen = set()
         for c in k.library_candidates(self.lib, tnorm, nh):
@@ -655,11 +699,16 @@ class Engine:
         pool = GT.EMPTY
         if self.terms and self.kinds & TERM_KINDS:
             with self.in_context(g.hyp_types, g.hyp_names):
-                use_type = self._exists_type(g.target) if Kind.USE in self.kinds else None
-                sources = self._inst_sources(g) if Kind.INSTANTIATE in self.kinds else []
+                try:
+                    use_type = self._exists_type(g.target) if Kind.USE in self.kinds else None
+                    sources = self._inst_sources(g) if Kind.INSTANTIATE in self.kinds else []
+                    if use_type is not None or sources:
+                        want = ({use_type} if use_type is not None else set()).union(*[set(src[3][:2]) for src in sources])
+                        pool = GT.build_pool(w, g.hyp_types, g.hyp_names, [g.target] + list(g.hyp_types), want)
+                except (E.FuelExhausted, RuntimeError) as e:       # (F87: reading the goal's terms or making the pool costs more than a menu may spend: this goal offers no action that carries a term)
+                    if not out_of_work(e): raise
+                    self.stats['menu_spent'] += 1; use_type = None; sources = []; pool = GT.EMPTY
                 if use_type is not None or sources:
-                    want = ({use_type} if use_type is not None else set()).union(*[set(src[3][:2]) for src in sources])
-                    pool = GT.build_pool(w, g.hyp_types, g.hyp_names, [g.target] + list(g.hyp_types), want)
                     if use_type is not None: actions.extend(self._use_actions(use_type, pool))
                     if sources: self._inst_actions(g, pool, cands, actions, sources)
                     cperm.extend([0] * (len(cands) - len(cperm)))
@@ -724,13 +773,26 @@ class Engine:
         return out
 
     def _inst_actions(self, g, pool, cands, actions, sources):
-        """INSTANTIATE for every source whose first quantifier's type the pool has terms of: with one term, or with two when there are two quantifiers; the facts that are already hypotheses (up to the display
-        normal form) are left out. The terms are the first of the pool's, simplest first."""
+        """INSTANTIATE for every source whose first quantifier's type the pool has terms of: with one term, or with two when there are two quantifiers; the facts that are already hypotheses (up to
+        normal form) are left out. The terms are the first of the pool's, simplest first.
+
+        F87.  The facts are made by the agent's pool, up to MAX_INST of them in a menu, and one of them can have a normal form that does not stop (`9^9` in a unary numeral). The normal form of each runs under
+        1/INST_SHARE of the menu's budget (the hypotheses' own forms, which are not a combinatorial matter, under all of it); a fact that spends it is not offered, and after MAX_MENU_SPENT of them the rest of that
+        source is not looked at."""
         k = self.k; nh = g.n_hyps
-        existing = set(g.hyp_types) | {k.simp_normalize(t, nh) for t in g.hyp_types}
-        count = 0
+        existing = set(g.hyp_types) | {f for f in (self.nf(t, nh) for t in g.hyp_types) if f is not None}
+        inner = int(self.menu_fuel) // INST_SHARE if self.menu_fuel > 0 else 0; saved = k.get_fuel()
+        narrow = inner > 0 and not self.w.probing and not 0 < saved <= inner
+        if narrow: k.set_fuel(inner)
+        try: self._inst_loop(g, pool, cands, actions, sources, existing)
+        finally:
+            if narrow: k.set_fuel(saved)
+
+    def _inst_loop(self, g, pool, cands, actions, sources, existing):
+        k = self.k; nh = g.n_hyps; count = 0
         for term, ty, ctx, doms in sources:
             if not pool.of_type.get(doms[0]): continue
+            dropped = 0
             two = len(doms) >= 2 and bool(pool.of_type.get(doms[1]))
             lists = [pool.of_type[doms[0]][:INST_TWO if two else INST_ONE]] + ([pool.of_type[doms[1]][:INST_TWO]] if two else [])
             ci = None
@@ -738,7 +800,12 @@ class Engine:
                 if count >= MAX_INST: return
                 inst = ty
                 for i in combo: inst = k.instantiate(k.view(inst)[2], [pool.terms[i]])
-                if k.simp_normalize(inst, nh) in existing: continue
+                form = self.nf(inst, nh)
+                if form is None:                                   # (F87: the fact's normal form costs more than a candidate may spend: not offered)
+                    dropped += 1
+                    if dropped >= MAX_MENU_SPENT: break
+                    continue
+                if form in existing: continue
                 if ci is None: cands.append((term, False, None)); ci = len(cands) - 1
                 actions.append(Action(Kind.INSTANTIATE, ci, tuple(combo))); count += 1
 
@@ -1050,10 +1117,17 @@ class Engine:
 
     # -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- live proofs
     def start(self, stmt, name=None):
-        """a live proof state for a closed statement (the real thing: its extracted term is a proof), with its first goal settled"""
-        p = Proof(self.w, self.w.term(stmt, 'statement'), name)
-        p.norm()
-        self.settle(p)
+        """a live proof state for a closed statement (the real thing: its extracted term is a proof), with its first goal settled. Not a probe either: its kernel calls run under `menu_fuel` steps like a
+        menu's (F87), so a statement whose normal form does not stop (`9^9` in a unary numeral) is `FuelExhausted` at once, not the stack guard after minutes."""
+        k = self.k; cap = int(self.menu_fuel); saved = k.get_fuel()
+        narrow = cap > 0 and not self.w.probing and not 0 < saved <= cap
+        if narrow: k.set_fuel(cap)
+        try:
+            p = Proof(self.w, self.w.term(stmt, 'statement'), name)
+            p.norm()
+            self.settle(p)
+        finally:
+            if narrow: k.set_fuel(saved)
         return p
 
     def replay(self, p, action, menu):

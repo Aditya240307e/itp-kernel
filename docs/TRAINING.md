@@ -181,7 +181,7 @@ experiments are built to measure, rather than assume, whether they help.
   actions replay); **D** the environment (Gymnasium's API, mask, rewards only for kernel-checked proofs, truncation, reproducible seeds, scripted runs decision by decision); **E** the RL loop; **F** goals, budget and hindsight (the environment starts on any closed statement given as data, and the episode is solved by the example's own proof).
 * **S47** (`tests/environment/s47_hindsight_tests.py`): the proof tree of an episode and what each action achieved; every reference proof of the bank replayed with the tree on, the examples (hindsight
   theorems) pinned, replayed in a fresh engine and accepted by the independent checker; a corrupted record yields no false example.
-* **S51** (`tests/learner/s51_suite_tests.py`, 1 216 checks): the training suite and the experiment runner. **A** the statistics against values worked out by hand (Student-t, Wilson, Holm, Chao1, paired
+* **S51** (`tests/learner/s51_suite_tests.py`, 2 332 checks): the training suite and the experiment runner. **A** the statistics against values worked out by hand (Student-t, Wilson, Holm, Chao1, paired
   tests, bootstrap, rarefaction); **B** the run graph of every profile (unique ids, acyclic, the closure of a target, the seeds and overrides, the synthetic-set exclusion and the training commands: no test data
   in them) and the estimator; **C** the collector on a runs directory written by hand (solved-within-budget matrices, intervals, comparisons, the strict view, subsets, the report, the warnings); **D**
   hindsight on a small world (what the harvest keeps is exactly what the proof tree says was proved; every theorem replays in a fresh engine of another configuration; corrupted proofs are dropped and
@@ -189,8 +189,15 @@ experiments are built to measure, rather than assume, whether they help.
   goals (train problems and train sub-theorems only, reproducible sampling, the budget); **G** the provers and the protocol (an unsolved search spends budget + 1 probes; "solved within B" read off the
   largest budget is what a run with budget B finds; rows, resumption, both regimes, the second opinion); **H** a real run of `ml_ei.py` with hindsight and bootstrapping, then `ml_evaluate.py` with
   `--lemmas auto` (also when no lemma was admitted, and the loud failure when the file is gone); **I** the shell scripts and a real scheduler on trivial commands (needs, failure, skip, resume, cores,
-  memory packing, `--force`, `--cascade`, the lock).
-* **S45, S46** (`tests/repo/`): the repository -- layout, registry, imports from a fresh interpreter, the frozen kernel's checksums, links, the dataset's digests, that every example runs, the release archive.
+  memory packing, `--force`, `--cascade`, the lock); **J, K, L** the profiled benchmark (the exclusive-time ledger adds up, latency percentiles, repeated passes, workers, the cost of checking a proof, every cell of the
+  benchmark tables read back from a `bench.json` made by hand); **M, N** the studies of the network and of the start (encoders, widths, scaling laws, learning from scratch, `ml_init`, `--arch` / `--init`);
+  **O** the soundness folder (`exp_soundness.py`) on records made by hand with known answers: every summary, verdict, table and number, and the whole stage on a tiny selection; **P** the statement audit
+  (`exp_audit.py`): ten records with every caution, every kind of failure and every origin, the ledger of second readers (a reading counts for the digest it was written for), the import of a review sheet, the
+  verdict (FAILED, INCOMPLETE, CLEAN); **Q** the code the evidence is about (the digest of src, tests, mutants and the manifest of the dataset -- documents do not count --, `dirty` for code only, the digest at the
+  start and at the end of a run, the warnings of the report). O, P and Q are themselves tested by fault injection (`make tool-mutants`, finding F88).
+* **S45, S46** (`tests/repo/`): the repository -- layout, registry, imports from a fresh interpreter, the frozen kernel's checksums, links, the dataset's digests, that every example runs, the release archive. S45 sections M-P protect the tools of the evidence: **M** the driver machinery and the digest of the code, **N** `tools/check_numbers.py` (what a macro, a table or
+  a figure may be called, which folders it reads, the code the runs of a report recorded), **O** the catalogue of faults for these tools (every fault replaces text that occurs once, changes it and leaves a file that
+  compiles) and **P** the runner of that catalogue (`mutants/check_tools.py`) on catalogues made for the test.
 * **S48** (the generator), **S49, S50** (the problem sets: texts, statements, answers, duplicates, proofs), and the kernel, tactic, environment and bank gates protect everything below the learner.
 
 ## 10. Reproduce

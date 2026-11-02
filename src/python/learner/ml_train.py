@@ -101,7 +101,7 @@ NEW_HEADS = ('critic.', 'mgr.', 'size.')
 
 
 def make_net(bags, cfg):
-    return M.PolicyNet(bags, d=cfg['d'], layers=cfg['layers'], heads=cfg['heads'], ff=cfg['ff'], dropout=cfg['dropout'])
+    return M.PolicyNet(bags, d=cfg['d'], layers=cfg['layers'], heads=cfg['heads'], ff=cfg['ff'], dropout=cfg['dropout'], arch=cfg.get('arch', 'transformer'))      # (a checkpoint made before the encoders were swappable has no `arch`: it is a transformer)
 
 
 def save(net, cfg, path, extra=None):
@@ -109,6 +109,11 @@ def save(net, cfg, path, extra=None):
 
 
 WORLD_BUFFERS = ('all_idx', 'all_off', 'con_idx', 'con_off', 'arity')            # (what a world says about its globals: not weights; a checkpoint made before they were left out of it has them)
+
+
+def load_config(path):
+    """the configuration a checkpoint was made with (architecture, sizes, training settings), without building the network"""
+    return torch.load(path, map_location='cpu', weights_only=False)['config']
 
 
 def load(path, bags):
@@ -150,6 +155,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument('data'); ap.add_argument('--out', default='model.pt'); ap.add_argument('--epochs', type=int, default=30)
     ap.add_argument('--d', type=int, default=128); ap.add_argument('--layers', type=int, default=3); ap.add_argument('--heads', type=int, default=4); ap.add_argument('--ff', type=int, default=384)
+    ap.add_argument('--arch', default='transformer', choices=M.ARCHS, help='the encoder of the goal (ml_model.ARCHS)')
     ap.add_argument('--dropout', type=float, default=0.1); ap.add_argument('--lr', type=float, default=1e-3); ap.add_argument('--wd', type=float, default=0.01)
     ap.add_argument('--batch', type=int, default=32); ap.add_argument('--seed', type=int, default=0); ap.add_argument('--threads', type=int, default=1)
     ap.add_argument('--no-lib', action='store_true'); ap.add_argument('--no-strict', action='store_true')
@@ -166,7 +172,7 @@ def main(argv=None):
     if a.no_strict: tr = [s for s in tr if not s.name.endswith('/strict')]
     train_steps = tr + ([] if a.no_lib else tr_lib)
     print('train steps: bank %d + library %d; dev: bank %d, library %d' % (len(tr), 0 if a.no_lib else len(tr_lib), len(dv_bank), len(dv_lib)), flush=True)
-    cfg = {'d': a.d, 'layers': a.layers, 'heads': a.heads, 'ff': a.ff, 'dropout': a.dropout, 'lr': a.lr, 'wd': a.wd, 'batch': a.batch, 'epochs': a.epochs, 'seed': a.seed}
+    cfg = {'d': a.d, 'layers': a.layers, 'heads': a.heads, 'ff': a.ff, 'dropout': a.dropout, 'lr': a.lr, 'wd': a.wd, 'batch': a.batch, 'epochs': a.epochs, 'seed': a.seed, 'arch': a.arch}
     net = make_net(ctx.bags, cfg)
     print('parameters %d' % sum(p.numel() for p in net.parameters()), flush=True)
     dev_sets = {'dev_all': dv_bank + dv_lib, 'dev_bank': dv_bank, 'dev_lib': dv_lib}

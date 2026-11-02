@@ -3,7 +3,9 @@
     net = PolicyNet(bags)                     # bags: ml_features.GlobalBags of the world (index arrays of every global's symbols)
     out = net(batch)                          # batch: ml_data.collate(..); out['loss'], out['logits'] per time step, out['value']
 
-THE ENCODER.  A transformer over the goal's tokens (hypotheses, target) gives a vector for the whole goal (the `[CLS]` position) and one for every hypothesis (the mean over its tokens).
+THE ENCODER.  A transformer over the goal's tokens (hypotheses, target) gives a vector for the whole goal (the `[CLS]` position) and one for every hypothesis (the mean over its tokens).  The encoder is a
+swappable block (`arch`, see ARCHS): the transformer, a bidirectional GRU, a CNN with dilated convolutions, or a BAG of tokens (every token by itself, no context: the baseline that says how much the structure of
+the goal matters).  Everything else -- the options, the decoder, the heads -- is the same for all of them, so the architectures are compared as encoders and nothing else.
 THE DECODER.  An action is assembled by a sequence of decisions (gym_policy): a recurrent cell carries what has been decided so far (the kind of action, the lemma, the tokens of a term said so far).  At each
 decision the network forms a query from the goal, the recurrent state, the decision's name, the kind of action and the expected type of the term being said (the HOLE: the mean of the embeddings of its tokens),
 and scores each OPTION by a dot product with the option's embedding.
@@ -32,20 +34,83 @@ def num_index(a):
     return 65 + min(abs(a).bit_length(), 40) + (41 if a < 0 else 0)
 
 
-class PolicyNet(nn.Module):
-    def __init__(self, bags, d=128, layers=3, heads=4, ff=384, dropout=0.1, max_len=512):
+ARCHS = ('transformer', 'bigru', 'cnn', 'bow')
+
+
+class BiGRUEncoder(nn.Module):
+    """a bidirectional GRU (`layers` stacked, d // 2 per direction) over the tokens of a goal: the state at a position has read the whole goal, so the [CLS] token's state is the goal's vector.  The padding is packed
+    away (the backward direction starts at the last real token), so the states of a goal do not depend on what it is batched with."""
+    pooled = 'first'; positional = True
+
+    def __init__(self, d, layers, ff, dropout):
         super().__init__()
-        self.d = d
+        if d % 2: raise ValueError('the bidirectional GRU needs an even d (got %d)' % d)
+        self.rnn = nn.GRU(d, d // 2, num_layers=layers, batch_first=True, bidirectional=True, dropout=dropout if layers > 1 else 0.0)
+
+    def forward(self, x, src_key_padding_mask=None):
+        if src_key_padding_mask is None: return self.rnn(x)[0]
+        L = x.shape[1]; lengths = (~src_key_padding_mask).sum(1).clamp(min=1).cpu()
+        packed = nn.utils.rnn.pack_padded_sequence(x, lengths, batch_first=True, enforce_sorted=False)
+        return nn.utils.rnn.pad_packed_sequence(self.rnn(packed)[0], batch_first=True, total_length=L)[0]
+
+
+class ConvEncoder(nn.Module):
+    """residual 1-d convolutions (kernel 5, dilations 1, 2, 4, ...) over the tokens: each position sees a window of the goal that grows with the layers (at three layers, 29 tokens).  The padding is zeroed before
+    every convolution, so what a goal's tokens see does not depend on what it is batched with.  The vector of the goal is the mean of its tokens' states."""
+    pooled = 'mean'; positional = True
+
+    def __init__(self, d, layers, ff, dropout, kernel=5):
+        super().__init__()
+        self.convs = nn.ModuleList(nn.Conv1d(d, d, kernel, padding=(kernel // 2) * (2 ** i), dilation=2 ** i) for i in range(layers))
+        self.norms = nn.ModuleList(nn.LayerNorm(d) for _ in range(layers)); self.drop = nn.Dropout(dropout)
+
+    def forward(self, x, src_key_padding_mask=None):
+        keep = None if src_key_padding_mask is None else (~src_key_padding_mask)[..., None].to(x.dtype)
+        for conv, norm in zip(self.convs, self.norms):
+            y = conv((x if keep is None else x * keep).transpose(1, 2)).transpose(1, 2)
+            x = norm(x + self.drop(Fn.gelu(y)))
+        return x
+
+
+class BagEncoder(nn.Module):
+    """a bag of tokens: every token is transformed by itself (`layers` residual blocks of width `ff`), nothing looks at its neighbours, and there are no positions; the goal is the mean of its tokens' states and a
+    hypothesis the mean of its own.  What the network can know of a goal is which symbols occur in it and how often."""
+    pooled = 'mean'; positional = False
+
+    def __init__(self, d, layers, ff, dropout):
+        super().__init__()
+        self.blocks = nn.ModuleList(nn.Sequential(nn.LayerNorm(d), nn.Linear(d, ff), nn.GELU(), nn.Dropout(dropout), nn.Linear(ff, d)) for _ in range(layers))
+
+    def forward(self, x, src_key_padding_mask=None):
+        for b in self.blocks: x = x + b(x)
+        return x
+
+
+ENCODERS = {'bigru': BiGRUEncoder, 'cnn': ConvEncoder, 'bow': BagEncoder}
+
+
+class PolicyNet(nn.Module):
+    def __init__(self, bags, d=128, layers=3, heads=4, ff=384, dropout=0.1, max_len=512, arch='transformer'):
+        super().__init__()
+        if arch not in ARCHS: raise ValueError('unknown encoder %r (one of %s)' % (arch, ', '.join(ARCHS)))
+        self.d = d; self.arch = arch
         # (what the world says about its globals -- the symbols of their types -- is not learned: these buffers are not part of a checkpoint, `set_globals` puts the current world's in, so that one set of weights
         # serves the library alone, the whole bank and a library that has grown)
         for name in ('all_idx', 'all_off', 'con_idx', 'con_off', 'arity'): self.register_buffer(name, torch.zeros(0, dtype=torch.long), persistent=False)
         self.n_globals = 0
         self.set_globals(bags)
+        # (the transformer is built first and in the order it always was, so that its initial weights are the ones it has always had for a seed; an encoder without positions has no table of them, so that the
+        # parameter counts of the architectures are the parameters that are used)
+        tf = arch == 'transformer'
+        self.pooled = 'first' if tf else ENCODERS[arch].pooled; self.positional = True if tf else ENCODERS[arch].positional
         self.tok = nn.Embedding(F.VOCAB, d, padding_idx=0)
-        self.pos = nn.Embedding(max_len, d)
+        if self.positional: self.pos = nn.Embedding(max_len, d)
         self.segE = nn.Embedding(3, d)
-        layer = nn.TransformerEncoderLayer(d, heads, ff, dropout, batch_first=True, norm_first=True, activation='gelu')
-        self.enc = nn.TransformerEncoder(layer, layers, enable_nested_tensor=False)
+        if tf:
+            layer = nn.TransformerEncoderLayer(d, heads, ff, dropout, batch_first=True, norm_first=True, activation='gelu')
+            self.enc = nn.TransformerEncoder(layer, layers, enable_nested_tensor=False)
+        else:
+            self.enc = ENCODERS[arch](d, layers, ff, dropout)
         self.ln = nn.LayerNorm(d)
         # globals
         self.bag_all = nn.EmbeddingBag(F.VOCAB, d, mode='mean'); self.bag_con = nn.EmbeddingBag(F.VOCAB, d, mode='mean')
@@ -78,13 +143,16 @@ class PolicyNet(nn.Module):
 
     # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ encoder
     def encode(self, tokens, seg, mask, hyp_of, n_hyps):
-        """cls (S, d); hyp (S, H, d) the mean over each hypothesis' tokens"""
+        """cls (S, d): the goal; hyp (S, H, d): the mean over each hypothesis' tokens"""
         S, L = tokens.shape
-        x = self.tok(tokens) + self.pos(torch.arange(L, device=tokens.device))[None] + self.segE(seg)
+        x = self.tok(tokens)
+        if self.positional: x = x + self.pos(torch.arange(L, device=tokens.device))[None]
+        x = x + self.segE(seg)
         x = self.drop(x)
         x = self.enc(x, src_key_padding_mask=~mask)
         x = self.ln(x)
-        cls = x[:, 0]
+        if self.pooled == 'first': cls = x[:, 0]                                                 # (the [CLS] token has seen the whole goal)
+        else: m = mask.to(x.dtype)[..., None]; cls = (x * m).sum(1) / m.sum(1).clamp(min=1.0)    # (the mean over the goal's real tokens)
         H = int(n_hyps.max().item()) if S else 0
         H = max(H, 1)
         idx = hyp_of.clamp(min=0) + torch.arange(S, device=tokens.device)[:, None] * H            # (S, L)

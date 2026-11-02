@@ -16,9 +16,10 @@ def _git(*args):
 
 
 def git_state():
-    """(commit, dirty): the commit the code is at (empty when it is not a git checkout) and whether files of the tracked tree differ from it"""
+    """(commit, dirty): the commit the code is at (empty when it is not a git checkout) and whether the CODE (itp_paths.CODE_PATHS: src, tests, mutants, the manifest of the dataset) differs from it -- a changed file, or a new one.
+    A document, the paper, a tool or a script that is edited is not dirty: it cannot change what a run does"""
     commit = _git('rev-parse', 'HEAD')
-    dirty = bool(_git('status', '--porcelain', '--untracked-files=no')) if commit else None
+    dirty = bool(_git('status', '--porcelain', '--untracked-files=normal', '--', *itp_paths.CODE_PATHSPEC)) if commit else None
     return commit, dirty
 
 

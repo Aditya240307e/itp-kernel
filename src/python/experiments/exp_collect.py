@@ -137,6 +137,17 @@ class Collected:
             for fin in self.finals.values():
                 pass
 
+    def final_values(self, stage, name, path):
+        """{seed: value} of `final.json[path[0]][path[1]]...` for the runs `stage/name/s*` (a held-out metric of the best epoch: ('best', 'synth_test_iid', 'loss'); the parameters: ('n_params',)); runs without the value are left out"""
+        out = {}
+        for rid, f in self.finals.items():
+            parts = rid.split('/')
+            if len(parts) != 3 or parts[0] != stage or parts[1] != name or not parts[2][1:].isdigit() or parts[2][0] != 's': continue
+            v = f
+            for k in path: v = v.get(k) if isinstance(v, dict) else None
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and not (isinstance(v, float) and math.isnan(v)): out[int(parts[2][1:])] = float(v)
+        return out
+
     def synth_used(self, n):
         """how many synthetic theorems the pre-training runs of nominal size n trained on (the smallest over the seeds that finished; None: no final.json says)"""
         v = [f.get('synth_theorems') for rid, f in self.finals.items() if rid.startswith('pre/n%d/' % n) and isinstance(f.get('synth_theorems'), int)]
@@ -233,9 +244,12 @@ class Collected:
         ok = ~(np.isnan(A).any(axis=0) | np.isnan(B).any(axis=0))
         A = A[:, ok]; B = B[:, ok]
         ra = A.mean(axis=1) if A.size else np.array([]); rb = B.mean(axis=1) if B.size else np.array([])
-        return {'seeds': common, 'a': list(ra), 'b': list(rb), 'n_problems': int(ok.sum()), 'dropped': int((~ok).sum()),
+        nan3 = {'mean': NAN, 'low': NAN, 'high': NAN}
+        return {'seeds': common, 'a': list(ra), 'b': list(rb), 'n_problems': int(ok.sum()), 'dropped': int((~ok).sum()), 'names': [n for n, k in zip(names, ok) if k],
                 'diff': ST.paired_seed_diff(ra, rb) if len(common) else {'mean': NAN, 'low': NAN, 'high': NAN, 'p': NAN, 'n': 0},
-                'problem': ST.paired_problem_bootstrap(A, B, seed=seed) if A.size and B.size else {'mean': NAN, 'low': NAN, 'high': NAN}}
+                'problem': ST.paired_problem_bootstrap(A, B, seed=seed) if A.size and B.size else dict(nan3),
+                'crossed': ST.crossed_bootstrap(A, B, seed=seed) if A.size and B.size else dict(nan3),
+                'mde80': ST.paired_mde(A, B) if A.size and B.size else NAN}
 
     # ------------------------------------------------------------------------------------------------------------------------------------------------------------ logs
     def log_runs(self, stage, variant):

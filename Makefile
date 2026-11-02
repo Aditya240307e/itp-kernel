@@ -4,7 +4,7 @@
 PY ?= python3
 J  ?= 2
 
-.PHONY: help kernel gates gates-ml gates-repo gates-synth gates-all dataset-verify examples mutants-check sanitize dist clean check-env smoke experiments status report paper
+.PHONY: help kernel gates gates-ml gates-repo gates-synth gates-all dataset-verify examples mutants-check tool-mutants soundness audit sanitize dist clean check-env smoke experiments status report paper
 
 help:
 	@echo "make kernel          build the hybrid kernel and the frozen reference kernel into build/"
@@ -15,14 +15,17 @@ help:
 	@echo "make gates-all       every gate (54; about an hour on two cores)"
 	@echo "make dataset-verify  replay every recorded proof and sub-theorem of data/dataset_v2 in a fresh engine (about 25 minutes, 3 GB)"
 	@echo "make examples        run the examples"
-	@echo "make mutants-check   check that every mutant of the catalogue still applies to the code (seconds); the mutation run itself: python3 mutants/mutate.py PREFIX"
+	@echo "make mutants-check   check that every mutant of the catalogues (the kernel's, and the faults of the tools below) still applies to the code (seconds); the mutation run itself: python3 mutants/mutate.py PREFIX"
+	@echo "make tool-mutants    inject faults into the tools that make the evidence (soundness folder, statement audit, number checker, identity of the code) and check that their tests fail for each one; 252 faults, 47 minutes on two cores (J=8: a few)"
+	@echo "make soundness      the soundness evidence in one stamped folder (results/soundness): every gate, every mutant, the fuzz campaigns, kernel against the independent checker, the findings; hours (J=8 for the big machine)"
+	@echo "make audit          the statement audit in one stamped folder (results/audit): every statement of the bank against its intended meaning, the cautions, the ledger of second readers, a review sheet; minutes"
 	@echo "make sanitize        build the kernel with ASan + UBSan and run the gates under it (long)"
 	@echo "make dist            pack the repository into dist/*.tar.gz and dist/*.zip   (GIT=1 adds the history as a .git directory; ADD='paper/main.pdf' adds files git does not hold; ARTIFACTS=dir adds trained models under artifacts/)"
 	@echo "make check-env       is this machine ready for the experiments? (python, torch, CUDA, memory, disk)"
 	@echo "make smoke           the whole experiment pipeline on a tiny world (about 70 minutes of run time on two cores): do this before a real run"
 	@echo "make experiments     the experiments of the paper, resumable   (PROFILE=small|full  SEEDS=0-4  DEVICE=cuda  JOBS=n ...: scripts/env.sh)"
 	@echo "make status          what is done, running, failed"
-	@echo "make report          tables, figures and numbers from the runs so far (+ paper/generated/ for the full profile)"
+	@echo "make report          the results folder (results/$$PROFILE) from the runs so far: tables, figures, per-problem outcomes, statistics, provenance, manifest (PUBLISH=1: also paper/generated/)"
 	@echo "make paper           build paper/main.pdf (needs latexmk)"
 	@echo "make clean           remove build/, dist/ and the Python caches"
 
@@ -52,6 +55,10 @@ examples: kernel
 
 mutants-check:
 	$(PY) mutants/mutate.py --check
+	$(PY) mutants/check_tools.py --check
+
+tool-mutants: kernel
+	$(PY) mutants/check_tools.py --jobs $(J)
 
 sanitize: kernel
 	$(PY) tools/sanitize.py
@@ -76,6 +83,12 @@ status:
 
 report:
 	$(SETTINGS)./scripts/07_report.sh
+
+soundness: kernel
+	$(SETTINGS)JOBS=$(J) ./scripts/08_soundness.sh
+
+audit: kernel
+	$(SETTINGS)./scripts/09_audit.sh
 
 paper:
 	$(MAKE) -C paper

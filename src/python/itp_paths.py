@@ -15,7 +15,7 @@ the working directory or from an environment variable: a copy of the directories
 self-consistent tree.  (Complete means COMPLETE: the gates import `curriculum` and `hypergraph` from legacy/.  A copy that lacks a directory the gates need makes every gate fail, and then every mutant
 looks caught -- `python3 mutants/mutate.py --selftest` and the layout gate S45 check that an unmutated copy passes a gate.)
 
-Constants: ROOT SRC_PY SRC_CPP TESTS GOLDEN MUTANTS EXAMPLES DOCS DATA LEGACY BUILD COPIED_DIRS
+Constants: ROOT SRC_PY SRC_CPP TESTS GOLDEN MUTANTS EXAMPLES DOCS DATA LEGACY BUILD COPIED_DIRS CODE_DIRS CODE_FILES CODE_PATHS DOC_SUFFIXES CODE_PATHSPEC
 """
 import os, sys
 
@@ -31,6 +31,10 @@ DATA = os.path.join(ROOT, 'data')
 LEGACY = os.path.join(ROOT, 'legacy')
 BUILD = os.environ.get('ITP_BUILD_DIR') or os.path.join(ROOT, 'build')
 
+CODE_DIRS = ('src', 'tests', 'mutants'); CODE_FILES = ('data/dataset_v2/manifest.json',); CODE_PATHS = CODE_DIRS + CODE_FILES          # THE CODE: what the digest of the tree covers (mutants/mutate.py) and what `dirty` means (exp_repo.git_state, ml_meta.git_state).  Evidence
+                                                                                     # (gates, mutants, the soundness and audit folders, every run of the matrix) is bound to the digest of these paths, so editing a document, the paper, a tool or a script never makes it stale
+DOC_SUFFIXES = ('.md',)                                  # a document below a code directory (tests/README.md) is a document, not code: neither the digest nor `dirty` looks at it
+CODE_PATHSPEC = CODE_PATHS + tuple(':(exclude)*' + e for e in DOC_SUFFIXES)          # the same code as a git pathspec (`git status -- <these>`)
 COPIED_DIRS = ('src', 'tests', 'legacy', 'data')         # what a self-contained copy of the tree needs besides build/ (tools/sanitize.py and mutants/mutate.py copy exactly these)
 _NOT_SOURCE = ('golden',)
 
