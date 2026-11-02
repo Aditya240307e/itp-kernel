@@ -307,7 +307,7 @@ class Profile:
 
 
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ the engine
-PROBE_FUEL = {Kind.RING: 50_000_000, Kind.LINARITH: 50_000_000, Kind.NLINARITH: 100_000_000, Kind.INTERVAL_CASES: 50_000_000, Kind.LINCOMB: 50_000_000}
+PROBE_FUEL = {Kind.RING: 50_000_000, Kind.LINARITH: 50_000_000, Kind.NLINARITH: 150_000_000, Kind.INTERVAL_CASES: 50_000_000, Kind.LINCOMB: 50_000_000}
 DEFAULT_PROBE_FUEL = 5_000_000
 SETTLE_FUEL = 20_000          # the budget of each conversion check that settles a goal (is it an assumption? is it `x = x`?)
 MENU_FUEL = 5_000_000         # the work budget of each kernel call made while a goal's menu is listed (F87; see Engine.menu): the engine's budget for an action. MENU_CALIBRATION below

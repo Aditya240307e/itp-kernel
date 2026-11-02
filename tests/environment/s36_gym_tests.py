@@ -837,7 +837,7 @@ def sec_I(c):
     expect(term is not None, 'I  the new lemma is used by the search: the statement is proved')
     # everything the probes saw going wrong was one of the layers' own refusals
     seen = collections_counter(c)
-    unexpected = set(seen) - {'AuthorError', 'ActionError', 'ITPError', 'FuelExhausted', 'RuntimeError'}
+    unexpected = set(seen) - {'AuthorError', 'ActionError', 'ITPError', 'FuelExhausted', 'RuntimeError', 'RingWorkExhausted'}          # (RingWorkExhausted, F90: the tactic layer's own spent budget; here the starved ring probe of section B)
     expect(not unexpected, 'I  every failure a probe saw is a refusal of the tactic layer or of the kernel, never an error of the environment itself (%s; unexpected: %s)' % (dict(seen), sorted(unexpected)))
     expect(sum(seen.values()) > 100, 'I  ... and there were failures to look at (%d)' % sum(seen.values()))
 

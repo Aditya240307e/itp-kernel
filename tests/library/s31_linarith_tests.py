@@ -397,6 +397,9 @@ def main():
     nl('3 <= a |- 6a <= a*a + 9 (the square of a hypothesis, no hint)', 1, [lambda v: le(lit(3), v[0])], lambda v: le(mul(lit(6), v[0]), add(mul(v[0], v[0]), lit(9))))
     nl('0 <= a*a (a square found in the goal)', 1, [], lambda v: le(zero, mul(v[0], v[0])))
     nl('0 <= a^2 (a power found in the goal)', 1, [], lambda v: le(zero, pw(v[0], inst.N.lit(2))))
+    nl('0 <= Z.sqr a (a Z.sqr found in the goal)', 1, [], lambda v: le(zero, zsqr(v[0])))
+    nl('Z.sqr a <= b |- 0 <= b (a Z.sqr found in a hypothesis)', 2, [lambda v: le(zsqr(v[0]), v[1])], lambda v: le(zero, v[1]))
+    nl('refused: Z.sqr a <= 0', 1, [], lambda v: le(zsqr(v[0]), zero), want_ok=False)
     nl('2ab <= a^2 + b^2 with the hint (a-b)^2', 2, [], lambda v: le(mul(lit(2), mul(v[0], v[1])), add(mul(v[0], v[0]), mul(v[1], v[1]))), hints=(sq('x0', 'x1'),))
     nl('4ab <= (a+b)^2 with the hint (a-b)^2', 2, [], lambda v: le(mul(lit(4), mul(v[0], v[1])), mul(add(v[0], v[1]), add(v[0], v[1]))), hints=(sq('x0', 'x1'),))
     nl('ab + bc + ca <= a^2 + b^2 + c^2 with three hints', 3, [], lambda v: le(add(add(mul(v[0], v[1]), mul(v[1], v[2])), mul(v[2], v[0])), add(add(mul(v[0], v[0]), mul(v[1], v[1])), mul(v[2], v[2]))),
@@ -426,11 +429,11 @@ def main():
     real = LA.combination
     stmt = run.statement(2, [lambda v: le(v[0], v[1]), lambda v: le(v[1], v[0])], lambda v: lt(v[0], v[1]))        # not provable; hypotheses are consistent
     try:
-        LA.combination = lambda polys: ({i: 1 for i in range(len(polys))}, 1)         # a certificate that is wrong (the facts do not add up to -1)
+        LA.combination = lambda polys, meter=None: ({i: 1 for i in range(len(polys))}, 1)         # a certificate that is wrong (the facts do not add up to -1)
         ok, msg = run.prove(stmt, 2, 2)
         expect(not ok and 'internal error' in msg, 'E  a wrong certificate is caught by ring, not turned into a proof (%s)' % msg[:120])
         stmt2 = run.statement(2, [lambda v: le(v[0], v[1])], lambda v: le(v[1], v[0]))
-        LA.combination = lambda polys: ({0: 2}, 1)
+        LA.combination = lambda polys, meter=None: ({0: 2}, 1)
         ok, msg = run.prove(stmt2, 2, 1); expect(not ok, 'E  another wrong certificate is not a proof either')
     finally: LA.combination = real
     # corrupted proofs: the kernel and the independent checker agree on every one, and most are rejected
@@ -509,6 +512,114 @@ def main():
     expect(n_checked >= 25 and not bad, 'F  the independent checker re-checks %d of the %d theorems proved here without a rejection: %s' % (n_checked, len(run.proved), bad[:3]))
     tf = time.time() - t2
 
+    # ------------------------------------------------------------------------------------------------------------------ H. the work budget (finding F90; the meter is ring.WorkMeter, its own tests are in S25)
+    # `nlinarith` on a goal with nested squares never returned: the polynomials have thousands of monomials, the facts are the squares and the products of pairs of facts, and the exact simplex rewrites a tableau
+    # of (monomials) x (facts + monomials) cells at every pivot, in Python, where neither the kernel's fuel nor a time limit looked at between actions can stop it.  The meter charges one unit for each product of
+    # two monomials, one for each entry of a live column at every round of pruning, one for the monomials of the facts, one for each eight cells of the tableau when it is made and at every pivot, and the matrix
+    # given to SciPy: all of it BEFORE the memory is allocated.
+    WM = R.WorkMeter
+    n_same = 0
+    for case in range(150):
+        nvars = rng.randrange(1, 6); nfacts = rng.randrange(1, 12)
+        polys = random_system(rng, nvars, nfacts, density=rng.choice([0.3, 0.6, 1.0]))
+        n_same += expect(LA.combination(polys) == LA.combination(polys, WM(R.NO_LIMIT)), 'H  a meter that does not stop anything changes nothing about the certificate: %s' % (polys,))
+    chain4 = [{((1, 1),): 1, ((0, 1),): -1}, {((2, 1),): 1, ((1, 1),): -1}, {((3, 1),): 1, ((2, 1),): -1}, {((0, 1),): 1, ((3, 1),): -1, (): -1}]
+    shifted = [{m: c << 300 for m, c in P.items()} for P in chain4]              # (the same system with every coefficient multiplied by 2^300: the numbers of the tableau have more than 256 bits, so a pivot costs twice as much)
+    pinned = [('a chain of four facts around a cycle', chain4, 37), ('the same with every coefficient multiplied by 2^300', shifted, 81), ('a random system of 3 variables and 8 facts (seed 1)', random_system(random.Random(1), 3, 8, density=0.8), 71),
+              ('a random system of 6 variables and 14 facts (seed 1)', random_system(random.Random(1), 6, 14, density=0.8), 361)]
+    for label_, polys_, want_ in pinned:
+        wm_ = WM(R.NO_LIMIT); res_ = LA.combination(polys_, wm_)
+        expect(res_ is not None and wm_.work == want_, 'H  the work of the search on %s is %d units (pinned: %d)' % (label_, wm_.work, want_))
+        wm2_ = WM(want_ - 1)
+        refuses_ = False
+        try: LA.combination(polys_, wm2_)
+        except R.RingWorkExhausted: refuses_ = True
+        expect(refuses_, 'H  ... and a limit of %d units stops it' % (want_ - 1))
+        wm3_ = WM(want_)
+        expect(LA.combination(polys_, wm3_) == res_ and wm3_.work == want_, 'H  ... while a limit of %d units does not' % want_)
+    p100 = {((i, 1),): 1 for i in range(100)}; wm_ = WM(R.NO_LIMIT); sq_ = LA.p_mul(p100, p100, wm_)
+    expect(len(sq_) == 5050 and wm_.work == 100 * 100 and sq_ == LA.p_mul(p100, p100), 'H  the product of two sums of 100 monomials takes 10 000 units (one for each product of two monomials), meter or not')
+    t_ = time.time()
+    try: LA.p_mul(p100, p100, WM(9_999)); stopped_ = False
+    except R.RingWorkExhausted: stopped_ = True
+    expect(stopped_ and time.time() - t_ < 0.5, 'H  ... and a limit of 9 999 stops it before any product is made')
+    cols_ = [{0: 1, 1: -1}, {0: -1, 1: 1}, {2: 1}]; wm_ = WM(R.NO_LIMIT)
+    expect(LA.prune(cols_, 4, wm_) == LA.prune(cols_, 4) == [0, 1] and wm_.work == 9, 'H  pruning charges the entries of the live columns at each round (5 and 4: %d units) and finds the same columns' % wm_.work)
+    big_cols = [{i: 1, 600: -1} for i in range(600)]; t_ = time.time()
+    try: LA.simplex(big_cols, 601, 600, WM(10_000)); stopped_ = False
+    except R.RingWorkExhausted: stopped_ = True
+    expect(stopped_ and time.time() - t_ < 0.5, 'H  a tableau of 601 x 1202 cells (90 000 units) is refused under a limit of 10 000 before it is made (%.3f s)' % (time.time() - t_))
+    amb_ = k.get_fuel()
+    for fuel_ in (123_450, amb_):
+        k.set_fuel(fuel_)
+        try: lim_ = LA.Problem(w).rg.meter.limit
+        finally: k.set_fuel(amb_)
+        expect(lim_ == R.ring_work_limit(fuel_), 'H  the problem of a linarith call takes its limit from the kernel budget at the time it is made (%d steps: %d units)' % (fuel_, lim_))
+    # the reader spends units on sums and negations (every result is kept by the memo), on products and powers; the pins are the work of reading these terms with a ring that has no limit
+    ph = Proof(w, F([Z] * 201, lambda *v: Eq(v[0], v[0])), 'hmeter'); ph.intro(*['v%d' % i for i in range(201)])
+    with ph.focus():
+        vh = [ph.h('v%d' % i) for i in range(201)]
+        def read_work(t, limit=R.NO_LIMIT):
+            rg_ = R.Ring(w, inst); rg_.meter.limit = limit; rd_ = LA.Reader(rg_); got_ = rd_.poly(t); return rg_.meter.work, got_
+        s200 = vh[0]
+        for v_ in vh[1:200]: s200 = zadd(s200, v_)
+        a_, b_, c_ = vh[0], vh[1], vh[2]; pw_ = w['Z.pow']; nl_ = inst.N.lit
+        t_ab1 = zadd(zadd(a_, b_), Z1); t_abc1 = zadd(zadd(zadd(a_, b_), c_), Z1); nest3 = t_ab1
+        for _ in range(3): nest3 = zsqr(nest3)
+        pins_r = [('a sum of 200 atoms', s200, 20099), ('its negation', zneg(s200), 20299), ('the difference of it and itself', zsub(s200, s200), 20499), ('it plus one', zadd(s200, Z1), 20300),
+                  ('(a + 1)^3', pw_(zadd(a_, Z1), nl_(3)), 14), ('(a + b + 1) squared (Z.sqr)', zsqr(t_ab1), 14), ('(a + b + 1) * (a - b)', zmul(t_ab1, zsub(a_, b_)), 13),
+                  ('(a + b + c + 1)^5', pw_(t_abc1, nl_(5)), 269), ('three nested squares of a + b + 1', nest3, 275)]
+        for label_, t_, want_ in pins_r:
+            got_w, _ = read_work(t_)
+            expect(got_w == want_, 'H  reading %s takes %d units of work (pinned: %d)' % (label_, got_w, want_))
+        s142 = vh[0]
+        for v_ in vh[1:142]: s142 = zadd(s142, v_)
+        P_big = zsqr(s142); chain_ = P_big
+        for i_ in range(30): chain_ = zadd(chain_, inst.lit(i_ + 2))
+        wP, gotP = read_work(P_big); wC, gotC = read_work(chain_)
+        expect(wP == 30316 and len(gotP) == 10153 and wC == 334965 and len(gotC) == 10154, 'H  the square of a sum of 142 atoms takes 30 316 units and a chain of 30 sums of it 334 965 (%d, %d)' % (wP, wC))
+        rg_ = R.Ring(w, inst); rg_.meter.limit = 100_000; rd_ = LA.Reader(rg_)
+        try: rd_.poly(chain_); stopped_ = False
+        except R.RingWorkExhausted: stopped_ = True
+        n_big_ = sum(1 for v_ in rd_.memo.values() if len(v_) > 5000)
+        expect(stopped_ and rg_.meter.work == 101_400 and n_big_ == 7, 'H  a chain of sums of a big polynomial stops after seven results of 10 000 monomials, not after thirty (stopped: %s, work %d, big results kept: %d)' % (stopped_, rg_.meter.work, n_big_))
+        # `search` hands the meter of the problem to `combination`
+        def fresh_problem():
+            pb_ = LA.Problem(w); pb_.add_hypothesis(zle(vh[0], vh[1]), vh[0], 'h1'); pb_.add_hypothesis(zle(vh[1], vh[2]), vh[1], 'h2'); pb_.add_hypothesis(zlt(vh[2], vh[0]), vh[2], 'h3'); return pb_
+        pb_a = fresh_problem(); read_w = pb_a.rg.meter.work; pb_a.rg.meter.limit = read_w + 1
+        try: LA.search(pb_a, False); stopped_ = False
+        except R.RingWorkExhausted: stopped_ = True
+        pb_b = fresh_problem(); res_b = LA.search(pb_b, False)
+        expect(stopped_ and res_b is not None and pb_b.rg.meter.work > read_w + 1, 'H  the search spends the units of the problem it was given (reading the facts took %d, the whole search %d)' % (read_w, pb_b.rg.meter.work))
+    # the matrix given to SciPy is charged, a unit for every eight cells: the same system through the float path with a fixed guess (all columns), so that SciPy itself does not matter, costs exactly that more
+    seen_ = []; saved_fs, saved_el = LA.float_support, LA.EXACT_LIMIT
+    LA.float_support = lambda cols, nrows, crow: (seen_.append((len(cols), nrows)), list(range(len(cols))))[1]
+    try:
+        for nv_, nf_, sd_ in ((6, 14, 1), (12, 60, 3)):
+            polys_ = random_system(random.Random(sd_), nv_, nf_, density=0.8); del seen_[:]
+            LA.EXACT_LIMIT = 10 ** 9; wm_e = WM(R.NO_LIMIT); r_e = LA.combination(polys_, wm_e)
+            LA.EXACT_LIMIT = 0; wm_f = WM(R.NO_LIMIT); r_f = LA.combination(polys_, wm_f)
+            cells_, rows_ = seen_[0]
+            expect(r_e == r_f and len(seen_) == 1 and wm_f.work - wm_e.work == cells_ * rows_ // 8 + 1 and LA.CELLS_PER_UNIT == 8 and LA.CELLS_REWRITTEN_PER_UNIT == 16, 'H  the matrix for SciPy (%d columns, %d rows) costs %d units more than the exact path (%d)' % (cells_, rows_, cells_ * rows_ // 8 + 1, wm_f.work - wm_e.work))
+    finally: LA.float_support, LA.EXACT_LIMIT = saved_fs, saved_el
+    # a tableau that the budget does not allow is refused BEFORE its memory is allocated (a 3000 x 6001 tableau is 144 MB)
+    import tracemalloc
+    cols_big = [{i: 1} for i in range(3000)]
+    tracemalloc.start(); tracemalloc.reset_peak()
+    try:
+        try: LA.simplex(cols_big, 3000, 2999, WM(10_000)); stopped_ = False
+        except R.RingWorkExhausted: stopped_ = True
+        peak_ = tracemalloc.get_traced_memory()[1]
+    finally: tracemalloc.stop()
+    expect(stopped_ and peak_ < 20 << 20, 'H  a tableau of 3000 x 6001 cells is refused before it is allocated (peak %.1f MB)' % (peak_ / 2 ** 20))
+    pa_ = {((i, 1),): 1 for i in range(400)}; pb2_ = {((400 + i, 1),): 1 for i in range(400)}
+    tracemalloc.start(); tracemalloc.reset_peak()
+    try:
+        try: LA.p_mul(pa_, pb2_, WM(9_999)); stopped_ = False
+        except R.RingWorkExhausted: stopped_ = True
+        peak_ = tracemalloc.get_traced_memory()[1]
+    finally: tracemalloc.stop()
+    expect(stopped_ and peak_ < 4 << 20, 'H  a product of 400 x 400 monomials (160 000 units) is refused before any of it is made (peak %.2f MB)' % (peak_ / 2 ** 20))
     print("   %d checks; world built in %.1f s; reader: %d expressions; search: %d contradictory and %d satisfiable systems, %d larger ones in both modes; %d theorems proved and admitted; "
           "corrupted proofs %s; chain of %d: %.2f s, cycle of %d: %.2f s, SciPy-guided system: %.2f s; independent re-check of %d theorems in %.1f s (%.1f s total)" %
           (CHECKS[0], tb, n_read, n_infeas, n_feas, n_big, len(run.proved), kinds, m, dt_chain, 12, dt_cycle, dt_big, n_checked, tf, time.time() - t_start))

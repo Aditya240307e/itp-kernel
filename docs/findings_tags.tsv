@@ -114,3 +114,4 @@ F86	engine	resource
 F87	engine	resource
 F88	pipeline	process	the tests of the soundness folder, the number checker and the statement audit passed with the code broken (found by injecting single-line faults)
 F89	data	wrong	a caution of the statement audit that fired on 29% of the bank and warned of nothing (thin_box)
+F90	tactic,engine	resource	a tactic that computes in Python before the kernel's budget applies (ring, linarith, nlinarith) ran a worker out of memory on a sampled action; found by the first evaluation of a trained policy

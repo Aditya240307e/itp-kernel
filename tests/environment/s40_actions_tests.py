@@ -26,7 +26,7 @@ import os as _os, sys as _sys; _sys.path.insert(0, _os.path.join(_os.path.dirnam
 import os, sys, io, time, json, random, collections, functools, hashlib, traceback
 sys.setrecursionlimit(200000)
 import itp_env_lnl as E
-import imo_lib, recorder as REC
+import imo_lib, recorder as REC, ring as RNG
 import gym_env as G, gym_build as GB, gym_acts as A
 from gym_env import Kind, Action
 from author import AuthorError, Term
@@ -1391,6 +1391,46 @@ def sec_E(c):
         expect([a.codes for a in fw(g_f1)] == [((('v', 2, 0),), (('v', 1, 0),))], 'E8 (control) FORWARD offers the modus ponens of  f 0 = 0 -> f 3 = 3 + 1  with  f 0 = 0 (%s)' % (fw(g_f1),))
         g_f2 = hand(g_f1, [('hQ', lambda f, hA, hAB: Eq8(f(lit8(1) + lit8(2)), lit8(4)))])
         expect(fw(g_f2) == [], 'E8 FORWARD is not offered when a hypothesis says the conclusion in another spelling (f 3 = 3 + 1 against f (1 + 2) = 4): %s' % (fw(g_f2),))
+    # ---- E9. the work budget of a ring probe (F90).  `ring` builds its proof in Python before the kernel sees any of it, so the kernel's fuel did not bound it: in the first pilot of a trained policy, a RING action on a
+    # goal with nested squares (sqr (sqr (sqr (sqr (a + b + 1)))): the degree doubles at every level) allocated memory at 15 MB/s until the machine gave up, and the time limit, which is looked at between actions, did
+    # not help.  The builder now counts its work and stops at what the probe's kernel budget allows: the probe is out of work (ST_FUEL, a bigger budget might succeed), in seconds, and leaves nothing behind.
+    Z9 = w['Z']; zadd9, zsqr9 = w['Z.add'], w['Z.sqr']; one9 = RNG.instance_for(w, Z9).lit(1); amb9 = k.get_fuel()
+    def nested9(depth):
+        def sides(a, b):
+            x, y = zadd9(zadd9(a, b), one9), zadd9(zadd9(b, a), one9)
+            for _ in range(depth): x, y = zsqr9(x), zsqr9(y)
+            return w.Eq(x, y)
+        return w.forall_([Z9, Z9], sides)
+    def ring_probe9(depth, fuel=None, kind=Kind.RING, **kw):
+        e_ = G.Engine(w, kinds={kind}, strict=True, **kw); g_ = G.Episode(e_, nested9(depth)).goal(); m_ = e_.menu(g_)
+        ring_ = [a_ for a_ in m_.actions if a_.kind == kind]; s0_ = state(k, w); t_ = time.time()
+        out_, st_ = e_.probe_status(g_, ring_[0], m_, fuel=fuel) if ring_ else (None, 'no ring action')
+        return e_, out_, st_, time.time() - t_, state(k, w) == s0_
+    # the limits the probes' budgets give: over the library's tests and the 268 problems of the bank (measured 2026-11-03: about 7 000 ring calls, 17 000 linear and 840 nonlinear linarith searches) the largest ring takes
+    # 1 405 units in the bank and 10 855 in the tests, the largest linarith search 6 214, the largest nlinarith 532 362 (0.6 s, the whole call with the proof of its certificate).  The limit of a ring or linarith probe
+    # (1 000 000 units: about 3 s and 80 MB at the worst) is 92 times the largest ring and 160 times the largest linarith search; that of nlinarith (3 000 000, `PROBE_FUEL` 150 000 000) is 5.6 times the largest call.  A calibration
+    # that has drifted out of this range is the finding, so the probes below, which would then run for minutes, are not made.
+    top_ring = RNG.ring_work_limit(G.PROBE_FUEL[Kind.RING]); top_nl = RNG.ring_work_limit(G.PROBE_FUEL[Kind.NLINARITH])
+    calibrated = expect(500_000 <= top_ring <= 2_000_000 and 1_700_000 <= top_nl <= 5_000_000 and RNG.ring_work_limit(G.PROBE_FUEL[Kind.LINARITH]) == top_ring, 'E9 the work limit of a ring probe (%d units) is between 500 000 and 2 000 000, that of nlinarith (%d) between 1 700 000 and 5 000 000' % (top_ring, top_nl))
+    if calibrated:
+        e9, out9, st9, dt9, same9 = ring_probe9(3)
+        expect(out9 == [] and st9 == G.ST_OK and same9 and not e9.errors, 'E9 (control) ring closes 3 nested squares over Z (%.2f s): ST_OK, no goal left, the kernel as it was' % dt9)
+        e9, out9, st9, dt9, same9 = ring_probe9(7)
+        expect(out9 is None and st9 == G.ST_FUEL and same9 and k.get_fuel() == amb9, 'E9 7 nested squares (a degree of 128): the probe is out of work, not refused and not a bug (%s), the kernel and its budget as they were' % (st9,))
+        expect(dt9 < 60 and e9.errors.get('RingWorkExhausted') == 1 and e9.stats['probe_fuel'] == 1 and e9.stats['probe_bug'] == 0 and not e9.bugs, 'E9 ... after %.1f s, counted as a spent budget of the normaliser (%s; %d out of work, %d bugs)' % (dt9, dict(e9.errors), e9.stats['probe_fuel'], e9.stats['probe_bug']))
+        # the limit follows the budget of the probe: 3 nested squares need about 12 000 units; a budget that allows 8 000 stops the normaliser, the default budget does not
+        e9, out9, st9, dt9, same9 = ring_probe9(3, fuel=8_000 * RNG.RING_STEPS_PER_UNIT)
+        expect(out9 is None and st9 == G.ST_FUEL and e9.errors.get('RingWorkExhausted') == 1 and same9, 'E9 a budget that allows 8 000 units of work stops 3 nested squares (about 12 000 units) in the normaliser (%s)' % (dict(e9.errors),))
+        e9, out9, st9, dt9, same9 = ring_probe9(3, fuel=20_000 * RNG.RING_STEPS_PER_UNIT)
+        expect(not e9.errors.get('RingWorkExhausted') and same9, 'E9 ... a budget that allows 20 000 units does not (it may still be too small for the kernel to check the proof: %s)' % (st9,))
+        e9, out9, st9, dt9, same9 = ring_probe9(3, fuel=0)
+        expect(out9 == [] and st9 == G.ST_OK and not e9.errors, 'E9 ... and with no budget at all (0: unlimited) there is no limit on the work either')
+        # the same class in the other two tactics that compute in Python before a proof term exists: the reader and the exact simplex of linarith / nlinarith (a scan of every kind of action on six pathological goals found
+        # `nlinarith` on 6 nested squares without an answer after 150 s, and `linarith` 28 s on (a + b + 1)^200 before it said no)
+        for kind9 in (Kind.LINARITH, Kind.NLINARITH):
+            e9, out9, st9, dt9, same9 = ring_probe9(6, kind=kind9)
+            expect(out9 is None and st9 == G.ST_FUEL and same9 and k.get_fuel() == amb9 and e9.errors.get('RingWorkExhausted') == 1 and e9.stats['probe_fuel'] == 1 and e9.stats['probe_bug'] == 0 and not e9.bugs and dt9 < 60,
+                   'E9 %s on 6 nested squares is out of work (%s) after %.1f s, counted as a spent budget (%s), the kernel as it was' % (kind9.name, st9, dt9, dict(e9.errors)))
 
 
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ F. the recorder

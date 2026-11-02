@@ -814,6 +814,40 @@ def main():
     expect(nm is not None and k.node_info(w.global_value(nm).n)[2] == 2**31 - 1, 'H  the tree of that proof is too big to count (its size saturates)')
     expect(dt70 < 12.0, 'H  powers with 70-bit exponents are admitted in under 12 s (took %.2f s)' % dt70)
 
+    # ------------------------------------------------------------------------------------------------------------------ J. the work budget of a ring call over Z (finding F90; the unit tests of the meter are in S25)
+    amb_fuel = k.get_fuel(); steps = R.RING_STEPS_PER_UNIT; lz, ln = inst.lit, inst_n.lit
+    def run_in_context(fuel, build, doms):
+        """(the normaliser, what prove_eq gave or the AuthorError it raised, seconds), the normaliser made under a kernel budget of `fuel` steps"""
+        got = []
+        def body(*vs):
+            lhs, rhs = build(*vs); k.set_fuel(fuel)
+            try:
+                rg = R.Ring(w, inst); t_ = time.time()
+                try: out = rg.prove_eq(lhs, rhs)
+                except AuthorError as e_: out = e_
+                got.append((rg, out, time.time() - t_))
+            finally: k.set_fuel(amb_fuel)
+            return Eq(lhs, rhs)
+        F(doms, body)
+        return got[0]
+    def nest(depth, sw=False):
+        def sides(a, b):
+            x, y = zadd(zadd(a, b), lz(1)), zadd(zadd(b, a), lz(1))
+            for _ in range(depth): x, y = zsqr(x), zsqr(y)
+            return x, y
+        return sides
+    pins_z = [('(a-b)^2 = a^2 + b^2 - 2ab', 113, lambda a, b: (zpow(zsub(a, b), ln(2)), zsub(zadd(zpow(a, ln(2)), zpow(b, ln(2))), zmul(lz(2), zmul(a, b))))),
+              ('-3 (a - b) = 3 b - 3 a', 62, lambda a, b: (zmul(zneg(lz(3)), zsub(a, b)), zsub(zmul(lz(3), b), zmul(lz(3), a)))),
+              ('three nested squares of a + b + 1', 12451, nest(3))]
+    for label, want, build_ in pins_z:
+        rg_p, out_p, _ = run_in_context(0, build_, [Z, Z])
+        expect(out_p[0] is not None and rg_p.meter.work == want, 'J  the work of %s over Z is %d units (pinned: %d)' % (label, rg_p.meter.work, want))
+    rg_ = R.Ring(w, inst)
+    expect(rg_.exp_ring() is not rg_ and rg_.exp_ring().meter is rg_.meter and rg_.sub_ring(inst_n).meter is rg_.meter, 'J  over Z the normaliser of the exponents (N) and the one of another number system share the meter of the call that made them')
+    rg_x, out_x, dt_x = run_in_context(2 * 12451 * steps, nest(9), [Z, Z])
+    expect(isinstance(out_x, R.RingWorkExhausted) and out_x.fuel is True and 24902 < rg_x.meter.work <= 3 * 24902 and dt_x < 30.0, 'J  9 nested squares over Z (the goal that stopped the first pilot) spend a budget of 24 902 units after %d units, in %.2f s: the work budget runs out' % (rg_x.meter.work, dt_x))
+    expect(k.get_fuel() == amb_fuel, 'J  ... and the kernel\'s budget is as it was')
+
     print("   %d checks; world built in %.1f s; %d statements and %d ring lemmas compared; %d closed evaluations; random expressions: %d true identities proved, %d false ones refused; %d normal forms; "
           "%d order facts; independent re-check of %d globals in %.1f s; %d corrupted proofs %s in %.1f s; (a-b)^8 %.2f s, (a-1)^32 %.2f s (%.1f s total)" %
           (CHECKS[0], tb, len(spec), len(rspec), n_ar, equal_proved, unequal_refused, n_nf, n_le + n_lt, n_checked, tg, sum(kinds.values()), kinds, tf2, dt8, dt32, time.time() - t_start))

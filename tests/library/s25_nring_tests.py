@@ -432,6 +432,89 @@ def main():
     expect(nm is not None and k.node_info(w.global_value(nm).n)[2] == 2**31 - 1, 'H  the tree of that proof is too big to count (its size saturates)')
     expect(dt70 < 10.0, 'H  powers with 70-bit exponents are admitted in under 10 s (took %.2f s)' % dt70)
 
+    # ------------------------------------------------------------------------------------------------------------------ I. the work budget of a ring call (finding F90)
+    # `ring` builds its proof in Python, before the kernel sees any of it, so the kernel's fuel does not bound that work, and a time limit that is looked at between actions does not either.  A goal with nested
+    # squares (sqr (sqr (sqr (a + b + 1))): the degree doubles at every level, so the normal form has thousands of monomials) made the proof builder allocate 15 MB/s until the machine gave up: a policy builds
+    # such a goal by instantiating, and the first pilot of a trained policy found it.  So the builder counts its own work, in units, and stops when the units pass what the kernel's budget of the call allows.
+    amb_fuel = k.get_fuel(); steps = R.RING_STEPS_PER_UNIT
+    def squares(x, depth):
+        for _ in range(depth): x = nmul(x, x)
+        return x
+    def run_in_context(fuel, build, doms, inst):
+        """(the normaliser, what prove_eq gave or the AuthorError it raised, seconds): a fresh normaliser made under a kernel budget of `fuel` steps, on the two sides that build(*variables) makes"""
+        got = []
+        def body(*vs):
+            lhs, rhs = build(*vs); k.set_fuel(fuel)
+            try:
+                rg = R.Ring(w, inst); t_ = time.time()
+                try: out = rg.prove_eq(lhs, rhs)
+                except AuthorError as e_: out = e_
+                got.append((rg, out, time.time() - t_))
+            finally: k.set_fuel(amb_fuel)
+            return Eq(lhs, rhs)
+        F(doms, body)
+        return got[0]
+    expect(R.ring_work_limit(0) == R.NO_LIMIT and R.ring_work_limit(-7) == R.NO_LIMIT, 'I  a kernel budget of 0 or less (unlimited) is no limit on the work either')
+    expect(R.ring_work_limit(10 * steps) == 10 and R.ring_work_limit(11 * steps - 1) == 10 and R.ring_work_limit(11 * steps) == 11, 'I  the limit is the kernel budget divided by the steps of a unit, rounded down')
+    expect(issubclass(R.RingWorkExhausted, AuthorError) and R.RingWorkExhausted.fuel is True and AuthorError.fuel is False, 'I  running out of work is an AuthorError that says `fuel` (a spent budget: a bigger one might succeed), a refusal does not')
+    for fuel_ in (3 * steps, 12_345_678, amb_fuel):
+        k.set_fuel(fuel_)
+        try: lim_ = R.Ring(w, inst_n).meter.limit
+        finally: k.set_fuel(amb_fuel)
+        expect(lim_ == R.ring_work_limit(fuel_), 'I  a normaliser takes its limit from the kernel budget at the time it is made (%d steps: %d units)' % (fuel_, lim_))
+    k.set_fuel(0)
+    try: lim0 = R.Ring(w, inst_n).meter.limit
+    finally: k.set_fuel(amb_fuel)
+    expect(lim0 == R.NO_LIMIT, 'I  ... and has no limit when the kernel has none')
+    rg_ = R.Ring(w, inst_n); sub_ = rg_.sub_ring(inst_nat)
+    expect(sub_ is not rg_ and sub_.meter is rg_.meter and rg_.sub_ring(inst_n) is rg_ and rg_.exp_ring().meter is rg_.meter, 'I  the normaliser of another number system, and that of the exponents, share the meter of the call that made them (their work counts)')
+    # the exact boundary: an identity that takes W units passes with a limit of W and stops with a limit of W - 1 (the limit is the budget divided by the steps of a unit, rounded down)
+    ident = lambda a, b, c: (npow(nadd(nadd(nadd(a, b), c), lit_n(1)), lit_n(4)), nmul(npow(nadd(nadd(nadd(c, b), a), lit_n(1)), lit_n(2)), npow(nadd(nadd(nadd(b, a), c), lit_n(1)), lit_n(2))))
+    rg0, out0, _ = run_in_context(0, ident, [N, N, N], inst_n); W = rg0.meter.work
+    expect(out0[0] is not None and rg0.meter.limit == R.NO_LIMIT and W > 500, 'I  (a+b+c+1)^4 = (c+b+a+1)^2 (b+a+c+1)^2 is proved with no limit; it takes %d units of work' % W)
+    rg0b, out0b, _ = run_in_context(0, ident, [N, N, N], inst_n)
+    expect(rg0b.meter.work == W, 'I  the work of a call is a function of the call alone (%d, %d)' % (W, rg0b.meter.work))
+    for fuel_, passes in ((W * steps, True), (W * steps + steps - 1, True), ((W - 1) * steps + steps - 1, False), ((W - 1) * steps, False), (W * steps // 2, False)):
+        rg_i, out_i, _ = run_in_context(fuel_, ident, [N, N, N], inst_n)
+        if passes: expect(out_i[0] is not None and rg_i.meter.work == W, 'I  a limit of %d units (a budget of %d steps) is enough for the %d units' % (rg_i.meter.limit, fuel_, W))
+        else: expect(isinstance(out_i, R.RingWorkExhausted) and 'work budget' in str(out_i), 'I  a limit of %d units (a budget of %d steps) is not enough for the %d units: the work budget runs out' % (rg_i.meter.limit, fuel_, W))
+    # the work of a few small identities is pinned: each place that charges work (a lemma application, the monomials read for a sum, a binary numeral, a unary numeral) is seen by one of them
+    big_k = 10**30 + 7; nat_add, nat_mul, nat_pow = w['add'], w['mul'], w['pow']; lit_nat = inst_nat.lit
+    pins_n = [('a + b = b + a', 12, inst_n, [N, N], lambda a, b: (nadd(a, b), nadd(b, a))),
+              ('(a+b)^2 = a^2 + 2ab + b^2', 89, inst_n, [N, N], lambda a, b: (npow(nadd(a, b), lit_n(2)), nadd(nadd(npow(a, lit_n(2)), nmul(lit_n(2), nmul(a, b))), npow(b, lit_n(2))))),
+              ('(a+K)^2 with a numeral K of 100 bits', 67, inst_n, [N], lambda a: (npow(nadd(a, lit_n(big_k)), lit_n(2)), nadd(nadd(npow(a, lit_n(2)), nmul(lit_n(2 * big_k), a)), lit_n(big_k * big_k)))),
+              ('a * K = K * a with a numeral K of 513 bits (a unit for 256 bits)', 24, inst_n, [N], lambda a: (nmul(a, lit_n(2**512 + 1)), nmul(lit_n(2**512 + 1), a))),
+              ('(a+b+c)^6 = (c+b+a)^3 (b+a+c)^3 over the unary naturals (a unit for each successor of a coefficient)', 11235, inst_nat, [Nat, Nat, Nat],
+               lambda a, b, c: (nat_pow(nat_add(nat_add(a, b), c), lit_nat(6)), nat_mul(nat_pow(nat_add(nat_add(c, b), a), lit_nat(3)), nat_pow(nat_add(nat_add(b, a), c), lit_nat(3)))))]
+    for label, want, inst_, doms_, build_ in pins_n:
+        rg_p, out_p, _ = run_in_context(0, build_, doms_, inst_)
+        expect(out_p[0] is not None and rg_p.meter.work == want, 'I  the work of %s is %d units (pinned: %d)' % (label, rg_p.meter.work, want))
+    # nested squares: the work grows with the degree (the meter is not vacuous) and a limit stops it after a bounded amount of work, in seconds
+    def nested(depth): return lambda a, b, c: (squares(nadd(nadd(a, b), lit_n(1)), depth), squares(nadd(nadd(b, a), lit_n(1)), depth))
+    works = {}
+    for depth in (2, 3):
+        rg_d, out_d, _ = run_in_context(0, nested(depth), [N, N, N], inst_n); works[depth] = rg_d.meter.work
+        expect(out_d[0] is not None, 'I  %d nested squares of a + b + 1 are normalised and proved equal to the same with b + a when nothing limits the work (%d units)' % (depth, works[depth]))
+    expect(works[2] * 3 < works[3], 'I  the work grows with the nesting (%s units for 2 and 3 squares: the degree doubles, the work more than triples)' % (works,))
+    limit_units = 2 * works[3]
+    rg_x, out_x, dt_x = run_in_context(limit_units * steps, nested(9), [N, N, N], inst_n)
+    expect(isinstance(out_x, R.RingWorkExhausted) and out_x.fuel is True and 'work budget' in str(out_x), 'I  9 nested squares (a degree of 512) spend a budget of %d units: the work budget runs out (%s)' % (limit_units, type(out_x).__name__))
+    expect(limit_units < rg_x.meter.work <= 3 * limit_units, 'I  ... after %d units: more than the limit, and no more than the limit and the work already done (the last charge is at most the monomials already made)' % rg_x.meter.work)
+    expect(dt_x < 30.0, 'I  ... in %.2f s, not in minutes' % dt_x)
+    expect(k.get_fuel() == amb_fuel, 'I  ... and the kernel\'s budget is as it was')
+    # through the tactic: an AuthorError that says `fuel`, and the world is as it was; a false identity within the budget is a refusal and does not
+    n_before = len(w.gid)
+    k.set_fuel(limit_units * steps)
+    try:
+        w.prove('s25_deep', F([N, N], lambda a, b: Eq(squares(nadd(nadd(a, b), lit_n(1)), 9), squares(nadd(nadd(b, a), lit_n(1)), 9))), lambda p: (p.intro('a', 'b'), p.ring())); e_deep = None
+    except AuthorError as e_: e_deep = e_
+    finally: k.set_fuel(amb_fuel)
+    expect(e_deep is not None and e_deep.fuel is True and 's25_deep' not in w.gid and len(w.gid) == n_before, 'I  the tactic: ring on 9 nested squares under that budget raises an AuthorError that says `fuel` and declares nothing (%s)' % (None if e_deep is None else str(e_deep).splitlines()[0][:100],))
+    try:
+        w.prove('s25_false', F([N, N], lambda a, b: Eq(nadd(a, b), nadd(nadd(a, b), lit_n(1)))), lambda p: (p.intro('a', 'b'), p.ring())); e_false = None
+    except AuthorError as e_: e_false = e_
+    expect(e_false is not None and e_false.fuel is False and 'different normal forms' in str(e_false), 'I  a false identity within the budget is a refusal, not a spent budget (%s)' % (None if e_false is None else str(e_false).splitlines()[0][:80],))
+
     print("   %d checks; random expressions: %d true identities proved, %d false ones refused; %d normal forms compared; independent re-check of %d globals in %.1f s; %d corrupted proofs %s in %.1f s; (a+b)^8 %.2f s, (a+1)^32 %.2f s (%.1f s total)" %
           (CHECKS[0], equal_proved, unequal_refused, n_nf, len(chk.g), tg, sum(kinds.values()), kinds, tf, dt8, dt32, time.time() - t_start))
     for f in FAIL[:40]: print("   FAIL " + f)

@@ -29,6 +29,34 @@ import itp_env_lnl as E
 from author import AuthorError, Term, NodeCache
 
 
+# ---------------------------------------------------------------------------------------------------------------------------------------------- the work budget (finding F90)
+# `ring` builds its proof in Python, before the kernel sees a single step of it, so the kernel's work budget (its `fuel`) does not bound it, and neither does a time limit that is looked at between actions.
+# A goal with nested squares (`sqr (sqr (sqr (sqr (a + b + 1))))`, which a sampling policy builds by instantiating) doubles the degree at every level; its normal form has thousands of monomials and the proof
+# builder allocated memory at 15 MB/s until the machine gave up. So the builder counts its own work, in UNITS, and stops when it has done what the kernel could not have checked in its budget anyway.
+NO_LIMIT = 1 << 62
+RING_STEPS_PER_UNIT = 50      # kernel steps per unit of work: the budget of a `ring` call is  fuel // RING_STEPS_PER_UNIT  units (see ring_work_limit)
+
+
+def ring_work_limit(fuel):
+    """the most units of work a `ring` call may do when the kernel's budget for the call is `fuel` steps (0 or less: no budget, no limit)"""
+    return fuel // RING_STEPS_PER_UNIT if fuel > 0 else NO_LIMIT
+
+
+class RingWorkExhausted(AuthorError):
+    """`ring` spent its work budget. A bigger budget might have succeeded, so the error says `fuel` (the engine reads it as a spent budget, never as a refusal on logical grounds: finding F86)"""
+    fuel = True
+
+
+class WorkMeter:
+    """the work one `ring` call has done, in units: one for each lemma application built, one for each monomial read when a sum is made into a term, and for the numeral of a coefficient (`Semiring.lit_cost`: a unit for 256 bits of a binary numeral, one for each successor of a unary one).
+    The normaliser of the exponents and those of other number systems that a call makes share the meter of the call that made them"""
+    __slots__ = ('work', 'limit')
+    def __init__(self, limit): self.work = 0; self.limit = limit
+    def spend(self, n):
+        self.work += n
+        if self.work > self.limit: raise RingWorkExhausted('ring: the work budget ran out (%d units of work needed; the budget of the call allows %d)' % (self.work, self.limit))
+
+
 class Pf:
     """a proof term together with the equation it proves: proof : lhs = rhs"""
     __slots__ = ('proof', 'lhs', 'rhs')
@@ -62,6 +90,9 @@ class Semiring:
     """what `Ring` needs to know about a number system. Subclasses set `ty` (the carrier), `ety` (the type of exponents), `zero`, `one`, `pfx` (the prefix of the `ring_*` lemmas), `ops` (global id -> 'add' | 'mul' |
     'pow' | 'succ'), the number system's own `zero_add` and `add_zero` laws, and provide the term builders add / mul / pow / eadd, the numerals lit / elit and their readers numeral / enumeral."""
     pfx = 'ring_'
+    def lit_cost(self, k):
+        """the units of work of building the numeral k (see WorkMeter): a unit for 256 bits, as the digits of a binary numeral are what costs"""
+        return 1 + (k.bit_length() >> 8)
     def num_eq(self, lhs, rhs):
         """a proof of  lhs = rhs  for two closed numeral expressions of the carrier with the same value: the kernel checks it by evaluation"""
         return Pf(self.w['refl'](self.ty, rhs), lhs, rhs)
@@ -85,6 +116,7 @@ class SemiringNat(Semiring):
     def mul(self, a, b): return self._mul(a, b)
     def pow(self, a, e): return self._pow(a, e)
     eadd = add
+    def lit_cost(self, k): return 1 + k            # (a unary numeral has k successors)
     def lit(self, k):
         t = self.lit_cache.get(k)
         if t is None:
@@ -273,8 +305,9 @@ def instance_for(w, A):
 
 # ---------------------------------------------------------------------------------------------------------------------------------------------- the normaliser
 class Ring:
-    def __init__(self, w, inst):
+    def __init__(self, w, inst, meter=None):
         self.w = w; self.R = inst; self.A = inst.ty
+        self.meter = meter if meter is not None else WorkMeter(ring_work_limit(w.k.get_fuel()))      # (F90: the budget of the kernel call this normaliser is made for)
         self.atoms = []; self.atom_idx = {}
         self.zero_nf = NF((), inst.zero)
         self._poly_memo = {}; self._mono_memo = {}; self._add_memo = {}; self._mul_memo = {}; self._nf_memo = {}; self._pow_memo = {}; self._cexp_memo = {}; self._exp = None
@@ -285,6 +318,7 @@ class Ring:
     def mono_term(self, m):
         t = self._mono_memo.get(m.key())
         if t is None:
+            self.meter.spend(self.R.lit_cost(m.coeff))
             R = self.R
             t = R.lit(m.coeff)
             for (i, e) in reversed(m.vars): t = R.mul(R.pow(self.atoms[i], R.elit(e)), t)
@@ -294,6 +328,7 @@ class Ring:
         monos = tuple(monos); key = tuple(m.key() for m in monos)
         nf = self._poly_memo.get(key)
         if nf is None:
+            self.meter.spend(len(monos))
             R = self.R; t = R.zero
             for m in reversed(monos): t = R.add(self.mono_term(m), t)
             nf = NF(monos, t); self._poly_memo[key] = nf
@@ -303,6 +338,7 @@ class Ring:
 
     # ------------------------------------------------------------------------------------------------------------------ proof combinators
     def L(self, name, *args):
+        self.meter.spend(1)
         c = self._lc.get(name)
         if c is None: c = self._lc[name] = self.w[self.R.pfx + name]
         return c(*args)
@@ -435,7 +471,7 @@ class Ring:
         """the normaliser for the numbers of another number system (the argument of an atom may be a natural number where the atom is an integer)"""
         if inst.ty.n == self.A.n: return self
         r = self._subs.get(inst.ty.n)
-        if r is None: r = self._subs[inst.ty.n] = Ring(self.w, inst)
+        if r is None: r = self._subs[inst.ty.n] = Ring(self.w, inst, self.meter)
         return r
 
     def canon_arg(self, a):
@@ -557,7 +593,7 @@ class Ring:
             else:
                 einst = instance_for(self.w, R.ety)
                 if einst is None: raise AuthorError('ring: no commutative-semiring structure is known for the exponent type %s' % self.w.show(R.ety))
-                self._exp = Ring(self.w, einst)
+                self._exp = Ring(self.w, einst, self.meter)
         return self._exp
 
     def const_exp(self, t):

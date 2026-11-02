@@ -28,6 +28,8 @@ import ring as R
 MAX_MONOS = 20000            # a polynomial with more monomials than this is refused (the expansion of a huge power is not a thing to attempt)
 EXACT_LIMIT = 40000          # rows * columns up to which the exact simplex is used without a first guess from SciPy
 MAX_PRODUCTS = 600           # nlinarith: the most products of two facts it forms
+CELLS_PER_UNIT = 8           # cells of the simplex tableau (and entries of the matrix given to SciPy) that cost one unit of the work meter (F90; see ring.WorkMeter) when they are MADE: eight pointers are 64 bytes, as much memory as the 80 bytes of a unit of `ring`
+CELLS_REWRITTEN_PER_UNIT = 16    # cells that a pivot rewrites for one unit: a cell is two multiplications, a subtraction and a division of integers, about 0.1 to 0.25 microseconds (measured on the bank's nlinarith calls and on random systems), a unit of `ring` about 2.7
 STATS = {'float_guess': 0}  # how often the support guessed by SciPy was the one the exact simplex went on to solve (tests read it: a guess that is never used would be invisible otherwise)
 
 
@@ -58,8 +60,9 @@ def p_add(p, q, sign=1):
 def p_scale(p, c): return {m: c * v for m, v in p.items()} if c else {}
 
 
-def p_mul(p, q):
+def p_mul(p, q, meter=None):
     if not p or not q: return {}
+    if meter is not None: meter.spend(len(p) * len(q))              # (one unit for each product of two monomials, charged before the loop: F90)
     r = {}
     for m1, c1 in p.items():
         for m2, c2 in q.items():
@@ -70,14 +73,14 @@ def p_mul(p, q):
     return r
 
 
-def p_pow(p, e):
+def p_pow(p, e, meter=None):
     if e == 0: return {(): 1}
     if len(p) > 1 and e > 64: raise AuthorError('linarith: the power %d of a sum is not expanded' % e)
     r = {(): 1}; b = p
     while e:
-        if e & 1: r = p_mul(r, b)
+        if e & 1: r = p_mul(r, b, meter)
         e >>= 1
-        if e: b = p_mul(b, b)
+        if e: b = p_mul(b, b, meter)
     return r
 
 
@@ -86,6 +89,13 @@ class Reader:
     that numbers the atoms), so what the search finds is what `ring` will check"""
     def __init__(self, rg):
         self.rg = rg; self.R = rg.R; self.w = rg.w; self.memo = {}
+
+    def add_polys(self, p, q, sign=1):
+        """p + sign * q: one unit for each monomial of the operands, spent before the result is made (the memo keeps every result, so a long chain of sums of a big polynomial is not free: F90)"""
+        self.rg.meter.spend(len(p) + len(q)); return p_add(p, q, sign)
+
+    def neg_poly(self, p):
+        self.rg.meter.spend(len(p)); return p_scale(p, -1)
 
     def poly(self, t):
         hit = self.memo.get(t)
@@ -96,23 +106,24 @@ class Reader:
         else:
             head, args = w.spine(t); hv = w.k.view(head.n)
             kind = R_.ops.get(hv[1]) if hv[0] == 'const' else None
-            if kind == 'add' and len(args) == 2: res = p_add(self.poly(args[0]), self.poly(args[1]))
-            elif kind == 'mul' and len(args) == 2: res = p_mul(self.poly(args[0]), self.poly(args[1]))
-            elif kind == 'pow' and len(args) == 2 and (e := rg.const_exp(args[1])[0]) is not None: res = p_pow(self.poly(args[0]), e)
-            elif kind == 'neg' and len(args) == 1: res = p_scale(self.poly(args[0]), -1)
-            elif kind == 'sub' and len(args) == 2: res = p_add(self.poly(args[0]), self.poly(args[1]), -1)
-            elif kind == 'sqr' and len(args) == 1: res = p_mul(self.poly(args[0]), self.poly(args[0]))         # `Z.sqr t` is what the display normal form makes of `t ^ 2`
+            if kind == 'add' and len(args) == 2: res = self.add_polys(self.poly(args[0]), self.poly(args[1]))
+            elif kind == 'mul' and len(args) == 2: res = p_mul(self.poly(args[0]), self.poly(args[1]), rg.meter)
+            elif kind == 'pow' and len(args) == 2 and (e := rg.const_exp(args[1])[0]) is not None: res = p_pow(self.poly(args[0]), e, rg.meter)
+            elif kind == 'neg' and len(args) == 1: res = self.neg_poly(self.poly(args[0]))
+            elif kind == 'sub' and len(args) == 2: res = self.add_polys(self.poly(args[0]), self.poly(args[1]), -1)
+            elif kind == 'sqr' and len(args) == 1: res = p_mul(self.poly(args[0]), self.poly(args[0]), rg.meter)         # `Z.sqr t` is what the display normal form makes of `t ^ 2`
             else: res = {((rg.atom(t), 1),): 1}
         self.memo[t] = res
         return res
 
 
 # ---------------------------------------------------------------------------------------------------------------------------------------------- the search: a linear program
-def prune(cols, nrows):
+def prune(cols, nrows, meter=None):
     """the columns that can have a positive multiplier at all: a column with a monomial that no other live column cancels is dead, and so on until nothing changes. cols[i] is {row: coefficient}; the last row is
     the constant row, which is never a reason to prune"""
     alive = set(range(len(cols))); crow = nrows - 1
     while True:
+        if meter is not None: meter.spend(sum(len(cols[i]) for i in alive))          # (one unit for each entry of a live column, at each round: F90)
         pos = {}; neg = {}
         for i in alive:
             for r, c in cols[i].items():
@@ -123,10 +134,12 @@ def prune(cols, nrows):
         alive.difference_update(dead)
 
 
-def simplex(cols, nrows, crow):
+def simplex(cols, nrows, crow, meter=None):
     """integers m_i >= 0 and D >= 1 with  sum_i m_i * cols[i] = D * e_crow,  or None when there is no solution. Phase one of the simplex method with Bland's rule, in integer-preserving arithmetic:
     the tableau holds the integers  det(B) * (B^-1 [A | I | b]), so every entry is an exact integer and no fraction is ever formed"""
     m = len(cols); width = m + nrows + 1; rhs = width - 1
+    cells = nrows * width // CELLS_PER_UNIT + 1
+    if meter is not None: meter.spend(cells)                             # (the tableau, before it is made: F90)
     T = [[0] * width for _ in range(nrows)]
     for i, col in enumerate(cols):
         for r, c in col.items(): T[r][i] = c
@@ -149,6 +162,9 @@ def simplex(cols, nrows, crow):
             if lhs < rgt or (lhs == rgt and basis[r] < basis[best]): best = r
         if best < 0: return None                                           # unbounded: cannot happen for a sum of non-negative artificial variables
         pr = T[best]; p = pr[c]
+        if meter is not None:                                                # (a pivot rewrites the rows that have an entry in the column of the pivot -- all of them unless the pivot is the determinant -- and the row of costs; a number of more than 256 bits costs more: F90)
+            touched = sum(1 for i in range(nrows) if i != best and (p != D or T[i][c] != 0))
+            meter.spend(((touched + 1) * width // CELLS_REWRITTEN_PER_UNIT + 1) * (1 + (max(D.bit_length(), p.bit_length()) >> 8)))
         for i in range(nrows):
             if i == best: continue
             row = T[i]; f = row[c]
@@ -179,13 +195,14 @@ def float_support(cols, nrows, crow):
         return None
 
 
-def combination(polys):
+def combination(polys, meter=None):
     """integers m_i >= 0 (a dict index -> m_i) and kappa >= 1 with  sum_i m_i * polys[i] == -kappa  as polynomials, or None"""
     rows = {}
     for P in polys:
         for m in P:
             if m and m not in rows: rows[m] = len(rows)
     crow = len(rows); nrows = crow + 1
+    if meter is not None: meter.spend(sum(len(P) for P in polys))        # (one unit for each monomial of each fact: F90)
     cols = []
     for P in polys:
         col = {rows[m]: c for m, c in P.items() if m}
@@ -193,17 +210,18 @@ def combination(polys):
         if c0: col[crow] = -c0
         cols.append(col)
     if not any(c0 < 0 for c0 in (P.get((), 0) for P in polys)): return None            # the constant must be driven negative
-    alive = prune(cols, nrows)
+    alive = prune(cols, nrows, meter)
     live_cols = [cols[i] for i in alive]
     if not any(crow in c for c in live_cols): return None
     res = None
     if len(live_cols) * nrows > EXACT_LIMIT:
+        if meter is not None: meter.spend(len(live_cols) * nrows // CELLS_PER_UNIT + 1)       # (the matrix given to SciPy, before it is made: F90)
         sup = float_support(live_cols, nrows, crow)
         if sup:
-            r = simplex([live_cols[i] for i in sup], nrows, crow)
+            r = simplex([live_cols[i] for i in sup], nrows, crow, meter)
             if r is not None: res = ({alive[sup[i]]: v for i, v in r[0].items()}, r[1]); STATS['float_guess'] += 1
     if res is None:
-        r = simplex(live_cols, nrows, crow)
+        r = simplex(live_cols, nrows, crow, meter)
         if r is not None: res = ({alive[i]: v for i, v in r[0].items()}, r[1])
     if res is None: return None
     sol, D = res
@@ -335,7 +353,7 @@ def search(pb, nonlinear):
                 pb.add_fact(pb.zmul(a.term, b.term), (lambda a, b: lambda neg: w['Z.mul_nonneg'](a.term, b.term, a.proof(neg), b.proof(neg)))(a, b), 'product'); n += 1
         pb.add_casts()
     facts = pb.facts
-    res = combination([f.poly for f in facts])
+    res = combination([f.poly for f in facts], pb.rg.meter)
     return None if res is None else (res[0], res[1], facts)
 
 
