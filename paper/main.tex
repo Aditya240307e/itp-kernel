@@ -27,7 +27,7 @@
 \newcommand{\code}[1]{\texttt{#1}}
 \newcommand{\probe}{\emph{probe}}
 
-\title{A Small Trusted Kernel as a Learning Environment: Synthetic Theorems, Hindsight, and Olympiad Algebra and Number Theory}
+\title{A Small Trusted Kernel as a Learning Environment: Synthetic Theorems, Hindsight, and Algebra and Number Theory Towards Olympiad Level}
 \author{\name Anonymous \email anonymous@example.org \\ \addr Anonymous}                              % hidden by the tmlr style unless [accepted] or [preprint]
 \def\month{MM}\def\year{YYYY}\def\openreview{\url{https://openreview.net/forum?id=XXXX}}
 
@@ -36,8 +36,8 @@
 
 \begin{abstract}
 A learned theorem prover is only as trustworthy as the checker behind it, yet the environments in which provers are trained usually inherit the size of the proof assistant they are built on.
-We present a gym for learning olympiad algebra and number theory against a \emph{small trusted kernel}: a \N{RepoKernelLines}-line C++23 kernel for dependent type theory with definitional proof irrelevance, quotients and a deterministic work budget, a second checker written independently from the typing rules, and an untrusted Python layer with tactics, decision procedures that emit kernel-checkable certificates, and an environment without a text interface in which an agent sees goals as tokens and chooses among the options the engine declares legal.
-We contribute (i) a benchmark of \N{BankProblems} formal problems from the IMO, its shortlists, the AIME and the APMO, problems written in the manner of the AMC, and classical sources, \N{BankProved} of them with kernel-checked reference proofs, split by problem family; (ii) a generator of kernel-checked synthetic theorems and an analysis of how far it saturates; (iii) hindsight relabelling in which every goal an attempt closes is a kernel-checked theorem, used as a training goal, as training data and, after checking, as a lemma of a growing library that never sees a held-out problem; and (iv) a protocol that measures provers in engine probes, with training seeds as replicates, and a study of synthetic pre-training, PPO, expert iteration, hindsight, a bootstrapped library, MCTS and a manager--worker agent over \N{NSeeds} seeds.
+We present a gym for learning algebra and number theory, from single arithmetic steps towards olympiad problems, against a \emph{small trusted kernel}: a \N{RepoKernelLines}-line C++23 kernel for dependent type theory with definitional proof irrelevance, quotients and a deterministic work budget, a second checker written independently from the typing rules, and an untrusted Python layer with tactics, decision procedures that emit kernel-checkable certificates, and an environment without a text interface in which an agent sees goals as tokens and chooses among the options the engine declares legal.
+We contribute (i) a benchmark of \N{BankProblems} formal problems from the IMO, its shortlists, the AIME and the APMO, problems written in the manner of the AMC, and classical sources, \N{BankProved} of them with kernel-checked reference proofs, split by problem family; (ii) a generator of kernel-checked synthetic theorems and an analysis of how far it saturates; (iii) kernel-replayed hindsight, in which every goal an attempt closes is a theorem whose proof the kernel re-checks, used as a training goal, as training data and, after checking, as a lemma of a growing library that never sees a held-out problem; and (iv) a protocol that measures provers in engine probes, with training seeds as replicates, and a study of synthetic pre-training, PPO, expert iteration, hindsight, a bootstrapped library, MCTS and a manager--worker agent over \N{NSeeds} seeds.
 \todo{two sentences: the main result of Table~\ref{tab:main} and the clearest negative result}
 Kernel, gym, data, scripts and logs are released.
 \end{abstract}
@@ -50,14 +50,14 @@ This is the property that makes formal mathematics attractive as a training sign
 The environments in which provers are trained, however, are mostly built on the large proof assistants whose libraries they need (Lean, Coq, Isabelle, HOL Light;~\citealp{demoura2015lean,harrison1996hol,nipkow2002isabelle,yang2019coqgym,bansal2019holist,yang2023leandojo}), and the objects a learner manipulates are the proof assistant's text.
 
 We ask what can be learned when the whole stack is small enough to be audited, instrumented and run on a laptop-class machine: the kernel, the tactics, the library, the environment, the data generator and the learners.
-We build such a stack and use it on a deliberately narrow target, algebra and number theory at the level of olympiads, where statements are short, a large part of the work is calculation that decision procedures can certify, and the part that is not is the choice of lemma and of the next step.
+We build such a stack and use it on a deliberately narrow target, algebra and number theory from a single arithmetic step up to olympiad problems (the olympiad tier is mostly statements without proofs and an open challenge), where statements are short, a large part of the work is calculation that decision procedures can certify, and the part that is not is the choice of lemma and of the next step.
 
 \paragraph{Contributions.}
 \begin{enumerate}
 \item \textbf{A trusted kernel and a gym on top of it} (\S\ref{sec:system}): a \N{RepoKernelLines}-line kernel, a separately written checker, tactics and certified decision procedures (\code{ring}, \code{linarith}, \code{nlinarith}) above the kernel, and a Gymnasium environment in which goals are data, actions are chosen among legal options and the cost of a search is counted in \probe{}s.
 \item \textbf{A benchmark} (\S\ref{sec:bank}) of \N{BankProblems} formal problems with texts, a machine-checked faithfulness test of each formal statement against an executable specification, \N{BankProved} kernel-checked reference proofs, provenance labels, a screen for near-duplicates, and splits by problem family.
 \item \textbf{A synthetic theorem generator} (\S\ref{sec:synth}) that grows proof trees backwards from library lemmas, labels every theorem by depth, lemmas and hypotheses, excludes the benchmark's statements by digest and by shape, and comes with saturation statistics.
-\item \textbf{Hindsight with a kernel} (\S\ref{sec:methods}): every goal closed during an attempt is a theorem with a proof the kernel re-checks; we use these theorems as goals, as training data, and (train side only) as lemmas of a library that grows during training.
+\item \textbf{Hindsight with a kernel} (\S\ref{sec:methods}): hindsight relabelling on proof trees is known~\citep{poesia2024learning}; here every goal closed during an attempt is a theorem with a proof the kernel re-checks, and we use these theorems as goals, as training data, and (train side only) as lemmas of a library that grows during training. \todo{say exactly what differs from \citet{poesia2024learning} after reading it; the library there is fixed}
 \item \textbf{A protocol and a study} (\S\ref{sec:protocol}, \S\ref{sec:results}) with \N{NSeeds} replicates per method: pre-training on synthetic theorems, behaviour cloning, PPO, expert iteration, hindsight and library ablations, five provers, throughput and memory.
 \end{enumerate}
 
@@ -69,6 +69,7 @@ This paper does not claim state-of-the-art results on an established benchmark. 
 
 \paragraph{Environments and benchmarks for formal proof.}
 HOList~\citep{bansal2019holist}, CoqGym~\citep{yang2019coqgym}, GamePad~\citep{huang2019gamepad} and LeanDojo~\citep{yang2023leandojo} expose a proof assistant to learners; miniF2F~\citep{zheng2022minif2f} provides olympiad-level statements in several systems; INT~\citep{wu2021int} generates inequality problems synthetically.
+Pantograph~\citep{aniva2024pantograph} and the Kimina Lean Server~\citep{dossantos2025kimina} give Lean~4 a machine interface and a fast verification service for reinforcement-learning pipelines, and PVSGym~\citep{acharya2025pvsgym} a gym for the PVS prover.
 Peano~\citep{poesia2023peano} is closest in spirit: a small dependently typed proof environment whose set of valid next steps is finite, used to learn from scratch.
 Our environment differs in having its own kernel with a second checker, a library from Peano arithmetic to elementary number theory with certified decision procedures, a benchmark of competition problems rather than textbook exercises, and an action interface that is options and typed term-building rather than text.
 
