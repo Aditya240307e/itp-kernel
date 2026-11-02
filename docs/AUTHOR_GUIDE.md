@@ -168,7 +168,7 @@ by looking at test (PAPER_PLAN 3.2). Tuning was not done: the recipe is one for 
 ## 9. The limitations, as a reviewer will list them (condense into the paper)
 
 1. Soundness is tested, not proved; the checker is independent in code, not in authorship; the mutation catalogue is hand-written and does not cover the bank, learner, generator or pipeline.
-2. Statement faithfulness is checked against a spec written by the same people; no second reader has confirmed any statement yet (0 of 268).
+2. Statement faithfulness is checked against a spec written by the same people; no second reader has confirmed any statement yet (0 of 268). `docs/SECOND_READER.md` is the handout and `tools/review_packs.py` makes the packs: do this before the freeze, because an `unfaithful` verdict changes the dataset.
 3. The olympiad part is small: 20 dev and 58 test problems, 35 of the 40 provable test problems of levels 1-3; the IMO tier is mostly statements without proofs. Rates have wide intervals.
 4. One family of synthetic theorems; the library is elementary (unary `Nat`, binary `N`, `Z`, divisibility, gcd, primes); no real analysis, no geometry, no combinatorics beyond what is encoded.
 5. No tuning: the same recipe for every method; the ranking of methods may change with tuning.

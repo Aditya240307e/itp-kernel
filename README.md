@@ -85,9 +85,9 @@ tests/                     the gates by role (kernel, library, environment, prob
 mutants/                   the mutation catalogue (1647 mutants) and its driver
 examples/                  runnable examples; examples/repros holds scripts that reproduce fixed defects
 data/dataset_v2/           the dataset (JSON + card + manifest);  data/results/v1/ the result files of the first runs on the earlier dataset (historical)
-docs/                      FINDINGS (the tracker), ROADMAP, KERNEL_DESIGN, ACTIONS, BANK, GENERATOR, ARCHITECTURE_RL, TRAINING, EXPERIMENTS, PAPER_PLAN, AUTHOR_GUIDE, PRIOR_WORK
+docs/                      FINDINGS (the tracker), ROADMAP, KERNEL_DESIGN, ACTIONS, BANK, GENERATOR, ARCHITECTURE_RL, TRAINING, EXPERIMENTS, PAPER_PLAN, AUTHOR_GUIDE, PRIOR_WORK, SECOND_READER
 legacy/                    the previous generation's modules, tests and notes (some gates import curriculum / hypergraph from here)
-tools/                     sanitizer run, environment check, release archive (make_dist.py), the check of a LaTeX source against the results folders (check_numbers.py)
+tools/                     sanitizer run, environment check, release archive (make_dist.py), the check of a LaTeX source against the results folders (check_numbers.py), the packs for second readers (review_packs.py)
 ```
 
 Modules are imported by their plain names (`import gym_env`); the names are unique across the tree (S45 checks it).
@@ -101,6 +101,7 @@ Modules are imported by their plain names (`import gym_env`); the names are uniq
 * `docs/ARCHITECTURE_RL.md` -- how a learner should be structured to climb from imitation to a manager/worker design; `docs/TRAINING.md` -- what exists and what it achieves (little, honestly).
 * `docs/EXPERIMENTS.md` -- the experiments of the paper: questions, protocol, statistics, the run graph, the scripts, what the results can and cannot show.
 * `docs/AUTHOR_GUIDE.md` -- what the person who signs the paper must be able to explain: the system on one page, why the kernel is believable and where that evidence ends, what the numbers of the bank mean (the test split holds 40 provable problems, 35 of them of levels 1-3), what each experiment may claim, the limitations as a reviewer will list them, the prior work to read before claiming novelty, twenty questions an editor may ask and a self-test.
+* `docs/SECOND_READER.md` -- a handout for a colleague who reads formal statements against their problems (notation, a checklist, the four verdicts, worked examples), with `tools/review_packs.py`, which splits the audit's review sheet into packs (for example the 58 test statements, two readers each); the verdicts go back through `exp_audit.py import-reviews`. Do it before the freeze.
 * `docs/PRIOR_WORK.md` -- what the literature says about the closest systems (Peano, Minimo, INT, LeanDojo, Pantograph, Kimina Lean Server, PVSGym), checked on 2026-11-02 and tagged read / not found / memory, a feature matrix with `?` where it could not be verified, what that changes in the claims (hindsight is not new), and the options for a Lean comparison.
 * `docs/PAPER_PLAN.md` -- the plan of the paper: each claim, the evidence for it and the table, figure or number that carries it; the hypotheses and the words for results, fixed before the runs; the run order on the big machine with a go/no-go criterion at each step; the paper section by section; the submission checklist. `tools/check_numbers.py` checks a hand-typed LaTeX source against the results folders.
 * `docs/ROADMAP.md` -- what is missing for IMO-level and undergraduate mathematics, and a calibrated plan.

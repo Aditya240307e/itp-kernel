@@ -265,6 +265,8 @@ Verdict: **FAILED** when a check fails, a problem could not be checked, a second
 `MANIFEST.sha256`, and the **review sheet** (`review_sheet.md` to read, `review_sheet.csv` to fill in) that lists the statements still to be read, the hidden test split first, each with the problem text, the statement as a formula
 and the digest to put in the ledger.
 
+`tools/review_packs.py AUDIT_DIR --readers 4 --copies 2` splits the sheet into one pack per reader (the hidden test split by default, each statement read by two people, the handout `docs/SECOND_READER.md` inside each pack); it changes nothing in the repository.
+
 A second reader reads the sheet, fills in `verdict` (`faithful`, `adapted`, `ambiguous`, `unfaithful`) and `reviewer` in the CSV, and
 `python3 src/python/experiments/exp_audit.py import-reviews review_sheet.csv --reviewer NAME` appends the lines to the ledger (all or nothing; a wrong row is named and nothing is written); `exp_audit.py report` then counts them. A reading by the
 person who wrote the statement is recorded with the role `author` and does not count.
