@@ -58,7 +58,7 @@ Environment: S51_TRACE=1 prints timings, S51_ONLY=A,B selects sections, S51_DATA
 The tools these sections test are themselves tested by fault injection: mutants/check_tools.py injects faults into exp_soundness (section O), exp_audit (P) and the record of the code (Q), and these sections must fail for each (finding F88).
 """
 import os as _os, sys as _sys; _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', '..', 'src', 'python')); import itp_paths  # noqa: E402,F401
-import os, sys, json, math, time, copy, glob, shutil, tempfile, argparse, itertools, subprocess, collections, traceback, statistics, types
+import os, sys, io, json, math, time, copy, glob, shutil, tempfile, argparse, itertools, subprocess, collections, traceback, statistics, types
 sys.setrecursionlimit(200000)
 for _sub in ('experiments',): _sys.path.insert(0, os.path.join(itp_paths.ROOT, 'src', 'python', _sub))
 
@@ -233,7 +233,8 @@ def sec_B(c):
             expect(runs['ft/bc/s%d' % s].needs == ('pre/n%d/s%d' % (max(P['synth_sizes']), s),), 'B12 %s: fine-tuning continues from the pre-trained network of its own seed' % name)
             expect('--init' not in runs['ft/bc_scratch/s%d' % s].argv, 'B13 %s: bc_scratch starts from random weights' % name)
         expect(runs['eval/baselines'].needs == ('data/dataset',) and not any('--model' in a for a in runs['eval/baselines'].argv), 'B14 %s: the baselines use no network' % name)
-        expect(all('prefix,strict' in r.argv for i, r in runs.items() if r.stage == 'eval'), 'B15 %s: every evaluation runs both regimes' % name)
+        expect(all('prefix,strict' in r.argv for i, r in runs.items() if r.stage == 'eval' and not i.startswith('eval/synth/')), 'B15 %s: every olympiad evaluation runs both regimes' % name)
+        expect(all('ml_eval_synth.py' in ' '.join(r.argv) and 'prefix,strict' not in r.argv and r.tags.get('group') == 'synth' for i, r in runs.items() if i.startswith('eval/synth/')) and any(i.startswith('eval/synth/') for i in runs), 'B15b %s: the evaluations of the synthetic theorems are their own group, run by ml_eval_synth.py' % name)
     expect(sizes['smoke'] < sizes['small'] and sizes['small'] < sizes['full'], 'B16 the profiles grow: smoke %d < small %d < full %d runs' % (sizes['smoke'], sizes['small'], sizes['full']))
 
     r5 = SP.build('full', runs_dir='/r'); r7 = SP.build('full', seeds=list(range(7)), runs_dir='/r')
@@ -344,9 +345,11 @@ def studies_in_matrix():
         expect(arg(bench, '--archs').split(',') == ['transformer'] + list(P['archs']) and arg(bench, '--widths').split(',') == [str(w) for w in sorted({128} | set(P['widths']))], 'B58 %s: the benchmark costs the encoders and the widths of the studies' % name)
     # the studies can be switched off: what remains is the comparison of the learners
     off = SP.build('small', runs_dir='/r', overrides={'archs': (), 'widths': (), 'scratch': ()})
-    expect(not [i for i in off if i.startswith(('init/', 'eval/arch', 'eval/size', 'eval/scratch'))] and not [i for i in off if '_bigru' in i or '_w64' in i or 'scratch_' in i] and len(off) == 77, 'B59 without the studies the matrix is that of the learners (%d runs)' % len(off))
+    expect(not [i for i in off if i.startswith(('eval/arch', 'eval/size', 'eval/scratch')) or (i.startswith('init/') and not i.startswith('init/transformer/'))] and not [i for i in off if '_bigru' in i or '_w64' in i or 'scratch_' in i]
+           and len([i for i in off if i.startswith('init/')]) == int(SP.profile('small')['seeds']) and len([i for i in off if i.startswith('eval/synth/')]) == 9 and len(off) == 89,
+           'B59 without the studies the matrix is that of the learners (77 runs), the untrained control (one init per seed) and the 9 evaluations of the synthetic theorems (%d runs)' % len(off))
     one = SP.build('small', runs_dir='/r', overrides={'archs': ('cnn',), 'arch_learners': ('bc',), 'widths': (), 'scratch': ('ppo@bow',)})
-    expect('ft/bc_cnn/s0' in one and 'rl/ei_her_cnn/s0' not in one and 'rl/scratch_ppo_bow/s0' in one and 'init/bow/s0' in one and 'init/transformer/s0' not in one, 'B60 a single study can be asked for alone')
+    expect('ft/bc_cnn/s0' in one and 'rl/ei_her_cnn/s0' not in one and 'rl/scratch_ppo_bow/s0' in one and {i for i in one if i.startswith('init/') and i.endswith('/s0')} == {'init/bow/s0', 'init/transformer/s0'}, 'B60 a single study can be asked for alone (the transformer init is the control of the synthetic theorems)')
     for what, ov in (('an unknown encoder', {'archs': ('lstm',)}), ('the transformer as an alternative to itself', {'archs': ('transformer',)}), ('an encoder twice', {'archs': ('cnn', 'cnn')}), ('a learner that needs a library', {'arch_learners': ('bc', 'ei_her_boot')}),
                      ('a learner that does not continue from bc', {'width_learners': ('ei_mw',)}), ('a width that is not a multiple of 32', {'widths': (48,)}), ('the default width', {'widths': (128,)}), ('a scratch learner that is unknown', {'scratch': ('sgd',)}),
                      ('a scratch encoder that is unknown', {'scratch': ('ppo@lstm',)}), ('no iterations', {'scratch_mult': 0})):
@@ -2603,7 +2606,153 @@ def sec_Q(c):
     finally: shutil.rmtree(tmp, ignore_errors=True)
 
 
-SECTIONS = [('A', sec_A, False), ('B', sec_B, False), ('C', sec_C, False), ('D', sec_D, True), ('E', sec_E, True), ('F', sec_F, True), ('G', sec_G, True), ('H', sec_H, True), ('I', sec_I, False), ('J', sec_J, False), ('K', sec_K, True), ('L', sec_L, False), ('M', sec_M, False), ('N', sec_N, True), ('O', sec_O, False), ('P', sec_P, True), ('Q', sec_Q, False)]
+def sec_R(c):
+    """R: the code on a machine it was not written on (macOS on Apple silicon): the memory, the cores and the CPU where /proc does not exist, the budgets the runner takes, the units of the peak memory, the pre-flight tool"""
+    import ml_meta as MT, importlib.util
+    real = (MT._read, MT._sysctl)
+    try:
+        mac = {'machdep.cpu.brand_string': 'Apple M3 Pro', 'hw.memsize': '19327352832', 'hw.perflevel0.logicalcpu': '6', 'hw.perflevel1.logicalcpu': '6'}
+        MT._read = lambda path: ''; MT._sysctl = lambda name: mac.get(name, '')                          # (a Mac: no /proc, but sysctl)
+        expect(MT.cpu_model() == 'Apple M3 Pro', 'R1 the CPU of a Mac is read from sysctl: %r' % (MT.cpu_model(),))
+        expect(MT.memory_gb() == 18.0, 'R2 the memory of a Mac is hw.memsize: %r' % (MT.memory_gb(),))
+        expect(MT.usable_cores() == 6, 'R3 an Apple-silicon Mac counts its performance cores only: %r' % (MT.usable_cores(),))
+        MT._sysctl = lambda name: ''                                                                      # (nothing tells: the page size and the number of pages)
+        m = MT.memory_gb(); expect(m is None or m > 0, 'R4 without /proc and sysctl the memory comes from sysconf or is unknown: %r' % (m,))
+        expect(MT.usable_cores() >= 1 and MT.cpu_model(), 'R5 the cores and the CPU have an answer whatever the system')
+        MT._read = lambda path: {'/proc/meminfo': 'MemTotal:       16384000 kB\nMemFree: 1 kB\n', '/proc/cpuinfo': 'processor\t: 0\nmodel name\t: Some CPU @ 3GHz\n',
+                                 '/proc/self/status': 'VmHWM:\t  2048 kB\nVmRSS:\t  1024 kB\n'}.get(path, '')
+        expect(abs(MT.memory_gb() - 15.6) < 0.06 and MT.cpu_model() == 'Some CPU @ 3GHz' and MT.rss_mb() == 1.0 and MT.peak_rss_mb() == 2.0, 'R6 Linux is still read from /proc: %r %r %r %r' % (MT.memory_gb(), MT.cpu_model(), MT.rss_mb(), MT.peak_rss_mb()))
+    finally: MT._read, MT._sysctl = real
+    expect(MT.maxrss_mb(150994944, 'darwin') == 144.0 and MT.maxrss_mb(147456, 'linux') == 144.0, 'R7 ru_maxrss is bytes on macOS and kilobytes on Linux: %r %r' % (MT.maxrss_mb(150994944, 'darwin'), MT.maxrss_mb(147456, 'linux')))
+    expect(RUN.mem_total_gb() > 0, 'R8 the runner knows the memory of the machine')
+    expect(RUN.default_budgets(18.0, 6, 'darwin') == (6, 12.0) and RUN.default_budgets(36.0, 12, 'darwin') == (12, 30.0) and RUN.default_budgets(8.0, 8, 'darwin') == (8, 4.0),
+           'R9 a Mac keeps 6 GB (or half) for the system: %r %r %r' % (RUN.default_budgets(18.0, 6, 'darwin'), RUN.default_budgets(36.0, 12, 'darwin'), RUN.default_budgets(8.0, 8, 'darwin')))
+    cores, mem = RUN.default_budgets(64.0, 16, 'linux')
+    expect(cores == 16 and close(mem, 54.4) and RUN.default_budgets(8.0, 0, 'linux')[0] == 1, 'R10 a server gives the runs 85%% of its memory and at least one core: %r' % ((cores, mem),))
+    spec = importlib.util.spec_from_file_location('itp_preflight', os.path.join(itp_paths.ROOT, 'tools', 'preflight.py')); PF = importlib.util.module_from_spec(spec); spec.loader.exec_module(PF)
+    ver = [("c++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0", ('gcc', 13, True)), ("Apple clang version 16.0.0 (clang-1600.0.26.6)\nTarget: arm64-apple-darwin24.1.0", ('apple', 16, True)),
+           ("Apple clang version 15.0.0 (clang-1500.3.9.4)", ('apple', 15, False)), ("Homebrew clang version 18.1.8\nTarget: arm64-apple-darwin", ('clang', 18, True)),
+           ("clang version 16.0.6", ('clang', 16, False)), ("g++-14 (Homebrew GCC 14.2.0) 14.2.0", ('gcc', 14, True)), ("c++ (GCC) 12.2.0", ('gcc', 12, False)), ("something else", (None, 0, None))]
+    got = [(PF.parse_compiler_version(t)[:2] + (PF.compiler_ok(*PF.parse_compiler_version(t)[:2]),)) for t, _ in ver]
+    expect(got == [w for _, w in ver], 'R11 the compiler is told apart (Apple clang 16 has libc++ 17; clang needs 17, gcc 13): %r' % (got,))
+    expect(PF.parse_power_source("Now drawing from 'AC Power'\n -InternalBattery-0 100%") == 'ac' and PF.parse_power_source("Now drawing from 'Battery Power'") == 'battery' and PF.parse_power_source('') is None,
+           'R12 pmset -g batt: the power source')
+    expect(PF.parse_low_power_mode(' lowpowermode         1\n sleep 1') is True and PF.parse_low_power_mode('lowpowermode 0') is False and PF.parse_low_power_mode('') is None, 'R13 pmset -g: Low Power Mode')
+    expect(PF.parse_bash_version('3.2.57(1)-release') == (3, 2) and PF.parse_bash_version('5.2.37(1)-release\n') == (5, 2) and PF.parse_bash_version('') is None, 'R13b the shell version: the macOS default is bash 3.2')
+    expect(PF.fork_probe_ok(0, 'x\nRESULT [1, 2, 3, 4]\n') and not PF.fork_probe_ok(1, 'RESULT [1, 2, 3, 4]') and not PF.fork_probe_ok(0, 'RESULT [1.0, 2.0, 3.0, 4.0]') and not PF.fork_probe_ok(0, ''), 'R13c the fork probe is judged by its exit code and its four results in order')
+    if sys.platform.startswith('linux'):                                                                   # (the probe itself, as the pre-flight runs it: it printed floats once and was judged a failure on every machine)
+        rc_, txt_ = PF.run([sys.executable, '-c', PF.FORK_PROBE % {'root': itp_paths.ROOT}], 150)
+        expect(PF.fork_probe_ok(rc_, txt_), 'R13d the fork probe of the pre-flight succeeds where forked workers next to torch work (Linux): exit %s %r' % (rc_, txt_[-200:]))
+    sw = PF.parse_swapusage('total = 2048.00M  used = 1023.25M  free = 1024.75M  (encrypted)')
+    expect(sw == {'total_mb': 2048.0, 'used_mb': 1023.25, 'free_mb': 1024.75} and PF.parse_swapusage('total = 1.50G used = 0.00M free = 1.50G')['total_mb'] == 1536.0 and PF.parse_swapusage('garbage') == {}, 'R14 vm.swapusage: %r' % (sw,))
+    # the held-out synthetic theorems: the runs of the graph, their cost, and the table (a fixture of rows: blind, and a network under two searches and two seeds)
+    P_ = SP.profile('small'); runs_ = SP.build('small'); sy = {i: r for i, r in runs_.items() if i.startswith('eval/synth/')}
+    expect('eval/synth/baselines' in sy and {'eval/synth/init', 'eval/synth/bc_scratch', 'eval/synth/bc', 'eval/synth/ppo', 'eval/synth/ei_her'} <= set(sy) and 'init/transformer/s0' in runs_ and all('eval/synth/pre_n%d' % n in sy for n in P_['synth_sizes'] if n),
+           'R16 the graph evaluates the olympiad-only network, every pre-trained size, the fine-tuned and the reinforcement learners on the held-out synthetic theorems: %r' % (sorted(sy),))
+    b = sy['eval/synth/baselines']; m5 = sy['eval/synth/pre_n500']
+    expect('--solver' in b.argv and b.argv[b.argv.index('--solver') + 1] == 'blind' and '--model' not in b.argv and b.cores >= 1 and m5.argv.count('--model') == P_['seeds'] and 'pre/n500/s2' in ' '.join(m5.needs)
+           and [m5.argv[i + 1] for i, x in enumerate(m5.argv) if x == '--solver'] == ['sample', 'ida'], 'R17 blind runs once without a network; a network is evaluated at every seed in one run, under the searches of the profile: %r' % (m5.argv[-12:],))
+    expect([sy['eval/synth/init'].argv[i + 1] for i, x in enumerate(sy['eval/synth/init'].argv) if x == '--solver'] == ['ida'] and sy['eval/synth/init'].argv.count('--model') == P_['seeds'], 'R17b the untrained control runs under IDA* only, at every seed (sampling a random policy runs every theorem to the time limit)')
+    pre_ = runs_['pre/n500/s0']; expect('--patience' in pre_.argv and pre_.argv[pre_.argv.index('--patience') + 1] == '2' and pre_.argv[pre_.argv.index('--epochs') + 1] == '14'
+                                         and '--patience' not in SP.build('smoke')['pre/n100/s0'].argv, 'R18 pre-training stops early where the profile says so (and runs its epochs where it does not): %r' % (pre_.argv[-9:],))
+    est = EST.estimate(runs_, P_, {'train_steps': 6476, 'dev': 20, 'test': 58, 'strict_extra': 0}, EST.RATES)
+    est_off = EST.estimate(SP.build('small', overrides={'pre_patience': 0}), SP.profile('small', {'pre_patience': 0}), {'train_steps': 6476, 'dev': 20, 'test': 58, 'strict_extra': 0}, EST.RATES)
+    expect(est['eval'][0] == len([r for r in runs_.values() if r.stage == 'eval']) and est['pre'][1] < est_off['pre'][1], 'R19 the estimate counts the synthetic evaluations, and early stopping lowers the pre-training estimate: %r %r' % (est['eval'][0], (est['pre'][1], est_off['pre'][1])))
+    tmp = tempfile.mkdtemp(dir=os.environ.get('S51_TMP') or None)
+    try:
+        rng = np.random.default_rng(3)
+        def put(variant, rows):
+            d = os.path.join(tmp, 'eval', 'synth', variant); os.makedirs(d); open(os.path.join(d, 'rows.jsonl'), 'w').write('\n'.join(json.dumps(r) for r in rows) + '\n'); open(os.path.join(d, 'meta.json'), 'w').write('{}')
+        names = {sp: ['%s_%d' % (sp, i) for i in range(40)] for sp in ('test_iid', 'test_comp')}
+        def rows_of(method, model, spec, seed, p):
+            return [dict(name=n, regime='library', split=sp, level=3, method=method, model=model, spec=spec, seed=seed, solved=bool(rng.random() < p), probes=50, seconds=0.1, steps=4) for sp in names for n in names[sp]]
+        put('baselines', rows_of('blind', None, 'blind', 0, 0.5))
+        put('pre_n500', [r for sd in (0, 1) for spec, p in (('ida', 0.8), ('sample', 0.3)) for r in rows_of('pre_n500+' + spec, 'pre_n500', spec, sd, p)])
+        json.dump({'name': 'small', 'headline': 200, 'synth_eval_probes': 200, 'synth_sizes': [0, 500]}, open(os.path.join(tmp, 'PROFILE.json'), 'w')); json.dump({}, open(os.path.join(tmp, 'GRAPH.json'), 'w'))
+        C = EC.load(tmp); T_ = TB.synth_table(C, C.profile)
+        by = {(r[0], r[1]): r for r in T_.rows} if T_ else {}
+        ida = by.get(('pre-trained on 500 synthetic theorems (no olympiad data)', 'ida')); smp = by.get(('pre-trained on 500 synthetic theorems (no olympiad data)', 'sample')); bl = by.get((TB.LABELS['blind'], 'blind'))
+        expect(T_ is not None and bl is not None and ida is not None and smp is not None and ida[2] == 2 and T_.header[3:5] == ['test_iid', 'test_comp'] and ida[5].startswith('+') and smp[5].startswith('-') and bl[5] == '(reference)',
+               'R20 the synthetic table has blind search as its reference and the gain (or loss) of every network and search: %r' % (T_.rows if T_ else None,))
+        expect('synth' not in {r['group'] for r in C.rows} and 'synth' in {r['group'] for r in C.view('library').rows}, 'R21 the rows of the synthetic theorems are in the library regime, so the olympiad tables never see them')
+    finally: shutil.rmtree(tmp, ignore_errors=True)
+    def h7_fixture(init_thresholds, splits=('test_iid', 'test_comp')):
+        """rows of the synthetic evaluation with known outcomes (a theorem is solved if its index is below the threshold; nested, so every gain is a superset): blind 20 of 40, the untrained network `init_thresholds` per seed, the networks of 500 and 1500 theorems"""
+        tmp_ = tempfile.mkdtemp(dir=os.environ.get('S51_TMP') or None)
+        names_ = {sp: ['%s_%d' % (sp, i) for i in range(40)] for sp in splits}
+        def put_(variant, method, model, spec, thresholds, extra=0):
+            d_ = os.path.join(tmp_, 'eval', 'synth', variant); os.makedirs(d_); open(os.path.join(d_, 'meta.json'), 'w').write('{}')
+            rows_ = [dict(name=n, regime='library', split=sp, level=3, method=method, model=model, spec=spec, seed=sd, solved=i < t + extra, probes=50 if i < t else 1500, seconds=0.1, steps=4)
+                     for sd, t in enumerate(thresholds) for sp in names_ for i, n in enumerate(names_[sp])]                          # (`extra`: theorems solved only far beyond the networks' budget, as blind search does)
+            open(os.path.join(d_, 'rows.jsonl'), 'w').write('\n'.join(json.dumps(r) for r in rows_) + '\n')
+        put_('baselines', 'blind', None, 'blind', [20], extra=5); put_('init', 'init+ida', 'init', 'ida', init_thresholds)
+        put_('pre_n500', 'pre_n500+ida', 'pre_n500', 'ida', [26, 28, 30]); put_('pre_n1500', 'pre_n1500+ida', 'pre_n1500', 'ida', [32, 33, 34])
+        json.dump({'name': 'small', 'headline': 200, 'synth_eval_probes': 200, 'synth_sizes': [0, 500, 1500], 'eval_budgets': [10, 20, 50, 100, 200], 'synth_eval_blind_mult': 10}, open(os.path.join(tmp_, 'PROFILE.json'), 'w')); json.dump({}, open(os.path.join(tmp_, 'GRAPH.json'), 'w'))
+        return tmp_
+    for thr, want, why in (([20, 22, 24], ['supported', 'supported'], 'a trained network that beats blind search and the untrained network'), ([32, 33, 34], ['supported', 'not distinguishable'], 'an untrained network that does as well as the trained one')):
+        tmp = h7_fixture(thr)
+        try:
+            T_ = TB.h7_table(EC.load(tmp), EC.load(tmp).profile)
+            rows_ = {(r[0].split(' minus ')[1].split(' (')[0], r[1]): r for r in T_.rows} if T_ else {}
+            got = [rows_.get((k, 'test_iid'), [None] * 9)[8] for k in ('blind search', 'untrained network + ida')]
+            exp_ = rows_.get(('pre_n500 + ida', 'test_comp'))
+            ec_ = [r for r in (T_.rows if T_ else []) if 'equal compute' in r[0]]
+            expect(len(ec_) == 2 and all(r[4].startswith('+20.0') for r in ec_) and 'with 2000 probes' in ec_[0][0] and T_ is not None and len(T_.rows) == 8 and got == want and all(rows_[(k, sp)][2] == 3 and rows_[(k, sp)][3] == 40 for k in ('blind search', 'untrained network + ida') for sp in ('test_iid', 'test_comp'))
+                   and exp_ is not None and exp_[8] == 'exploratory' and exp_[6] == '--' and rows_[('blind search', 'test_iid')][4].startswith('+32.5'),
+                   'R24 H7 (%s): the words of 3.5 for the gain over blind search and over the untrained network, the exploratory row without a verdict: %r' % (why, [(r[0], r[1], r[4], r[6], r[8]) for r in T_.rows] if T_ else None))
+            if thr == [20, 22, 24]:                                                                               # (the figure of the same rows: one panel per split, a curve per search, its data in the csv)
+                import csv as _csv
+                FG_ = __import__('exp_figures'); C_ = EC.load(tmp); paths_ = FG_.fig_synth(C_, C_.profile, tmp, FG_._mpl())
+                rows_f = list(_csv.DictReader(open(os.path.join(tmp, 'fig_synth.csv')))) if paths_ else []
+                ser_ = {(r['panel'], r['series']) for r in rows_f if r['kind'] == 'line'}
+                top_ = {r['x']: float(r['y']) for r in rows_f if r['kind'] == 'line' and r['series'] == 'pre-trained on 1500, IDA*' and r['panel'].startswith('test_iid')}
+                bl_ = {r['x']: float(r['y']) for r in rows_f if r['kind'] == 'line' and r['series'] == 'blind search (to 2000 probes)' and r['panel'].startswith('test_iid')}
+                expect(paths_ and all(os.path.getsize(q) > 1500 for q in paths_) and ('test_iid (40 theorems)', 'blind search (to 2000 probes)') in ser_ and ('test_comp (40 theorems)', 'untrained network, IDA*') in ser_ and ('test_iid (40 theorems)', 'pre-trained on 1500, sampled') not in ser_
+                       and abs(top_.get('200', -1) - 0.825) < 1e-9 and top_.get('10') == 0.0 and abs(bl_.get('2000', -1) - 0.625) < 1e-9 and abs(bl_.get('200', -1) - 0.5) < 1e-9, 'R24b fig_synth draws a curve for each search of each split and keeps the numbers in its csv: %r %r' % (sorted(ser_), top_))
+        finally: shutil.rmtree(tmp, ignore_errors=True)
+    tmp = h7_fixture([20, 22, 24], splits=('dev',))                                                         # (a pilot evaluates the synthetic dev split only)
+    try:
+        C_ = EC.load(tmp); T1_ = TB.h7_table(C_, C_.profile); T2_ = TB.synth_table(C_, C_.profile)
+        expect(T1_ is not None and {r[1] for r in T1_.rows} == {'dev'} and T2_ is not None and T2_.header[3:5] == ['dev', 'Δ vs blind, dev (pp)'], 'R25 a pilot that evaluates the synthetic dev split gets the same tables: %r' % (T1_.rows if T1_ else None,))
+    finally: shutil.rmtree(tmp, ignore_errors=True)
+    spec_ = importlib.util.spec_from_file_location('itp_run_gates', os.path.join(itp_paths.ROOT, 'tests', 'run_gates.py')); RG = importlib.util.module_from_spec(spec_); spec_.loader.exec_module(RG)
+    lim_ = [c for c in (list(RG.REG.GATE_CMDS) + list(RG.REG.BANK_GATE_CMDS) + list(RG.REG.ML_GATE_CMDS) + list(RG.REG.REPO_GATE_CMDS) + list(RG.REG.SYNTH_GATE_CMDS)) if RG.needs_rlimit_as(c)]
+    expect(sorted(os.path.basename(c[0]) for c in lim_) == ['s19_boundary_tests.py', 's25_nring_tests.py', 's30_zlib_tests.py', 's31_linarith_tests.py', 's34_nt_tests.py', 's37_atoms_tests.py', 's40_actions_tests.py', 's50_proofs_tests.py'],
+           'R26 the gates that need RLIMIT_AS are found from their source (a Mac skips them; docs/EXPERIMENTS.md lists them): %r' % (sorted(os.path.basename(c[0]) for c in lim_),))
+    real_platform = sys.platform
+    try:
+        sys.platform = 'darwin'; so = sys.stdout; sys.stdout = io.StringIO()
+        try: rc_ = RG.main(['s19_boundary_tests.py'])
+        finally: out_ = sys.stdout.getvalue(); sys.stdout = so
+    finally: sys.platform = real_platform
+    expect(rc_ == 0 and 'SKIP' in out_ and 's19_boundary_tests.py' in out_ and '0/0 gates passed' in out_ and '1 skipped' in out_, 'R27 on a Mac a gate that needs RLIMIT_AS is skipped, said so and does not fail the run: %r' % (out_,))
+    FGt_ = __import__('exp_figures')
+    expect(FGt_.thin_ticks([10, 20, 30, 40, 60, 500, 600]) == [10, 20, 40, 60, 600] and FGt_.thin_ticks([10, 20, 50, 100, 200, 500, 1000, 2000]) == [10, 20, 50, 100, 200, 500, 1000, 2000] and FGt_.thin_ticks([]) == [] and FGt_.thin_ticks([7]) == [7],
+           'R28 the labels of a log axis that would touch are thinned (the largest kept), the usual budgets are not: %r' % (FGt_.thin_ticks([10, 20, 30, 40, 60, 500, 600]),))
+    fin_ = lambda n_hist, best, pat=2: {'history': [{}] * n_hist, 'best_epoch': best, 'args': {'patience': pat, 'epochs': 14}}
+    expect([EC.pre_converged(f) for f in (fin_(6, 3), fin_(6, 4), fin_(14, 13), fin_(14, 12), fin_(14, 11), fin_(5, 2, 0), {})] == [True, False, False, False, True, None, None],
+           'R22 a pre-training run has converged if its dev loss has not improved for `patience` epochs, has not if the epochs ran out sooner, and the question has no answer without early stopping')
+    tmp = tempfile.mkdtemp(dir=os.environ.get('S51_TMP') or None)
+    try:
+        for n_, f_ in ((500, fin_(14, 13)), (1500, fin_(6, 3))):
+            d_ = os.path.join(tmp, 'pre', 'n%d' % n_, 's0'); os.makedirs(d_); json.dump(f_, open(os.path.join(d_, 'final.json'), 'w'))
+        json.dump({'name': 'small', 'headline': 200, 'synth_sizes': [0, 500, 1500], 'pre_patience': 2}, open(os.path.join(tmp, 'PROFILE.json'), 'w')); json.dump({}, open(os.path.join(tmp, 'GRAPH.json'), 'w'))
+        w_ = [x for x in EC.load(tmp).warnings if 'had not converged' in x]
+        expect(len(w_) == 1 and 'size 500' in w_[0] and 'pre/n500/s0' in w_[0] and 'H1' in w_[0], 'R23 the report warns for a size whose pre-training ran out of epochs while still improving, and for no other: %r' % (w_,))
+    finally: shutil.rmtree(tmp, ignore_errors=True)
+    tmp = tempfile.mkdtemp(dir=os.environ.get('S51_TMP') or None)
+    try:
+        so = sys.stdout; sys.stdout = open(os.devnull, 'w')
+        try: rc = PF.main(['--quick', '--out', tmp])
+        finally: sys.stdout.close(); sys.stdout = so
+        rep = json.load(open(os.path.join(tmp, 'preflight.json')))
+        expect(rc in (0, 1) and rep['machine']['cores_usable'] >= 1 and rep['checks'] and rep['recommended']['mem_gb'] > 0 and all(set(x) == {'ok', 'name', 'detail'} for x in rep['checks']),
+               'R15 the quick pre-flight runs to the end and writes its record: %r' % (list(rep),))
+        PF.REPORT.clear()
+    finally: shutil.rmtree(tmp, ignore_errors=True)
+
+
+SECTIONS = [('A', sec_A, False), ('B', sec_B, False), ('C', sec_C, False), ('D', sec_D, True), ('E', sec_E, True), ('F', sec_F, True), ('G', sec_G, True), ('H', sec_H, True), ('I', sec_I, False), ('J', sec_J, False), ('K', sec_K, True), ('L', sec_L, False), ('M', sec_M, False), ('N', sec_N, True), ('O', sec_O, False), ('P', sec_P, True), ('Q', sec_Q, False), ('R', sec_R, False)]
 
 
 def main():

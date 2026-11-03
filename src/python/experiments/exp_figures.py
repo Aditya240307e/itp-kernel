@@ -105,7 +105,7 @@ def plotted_data(fig):
 def save(plt, fig, outdir, name, seeds_note=True):
     os.makedirs(outdir, exist_ok=True)
     paths = []
-    if FEW_SEEDS and seeds_note: fig.text(0.995, 0.004, '%d seeds: no intervals over seeds are drawn' % N_SEEDS, ha='right', va='bottom', fontsize=6, color=INK2)
+    if FEW_SEEDS and seeds_note: fig.text(0.995, 0.004, '%d seed%s: no intervals over seeds are drawn' % (N_SEEDS, '' if N_SEEDS == 1 else 's'), ha='right', va='bottom', fontsize=6, color=INK2)
     for ext in ('pdf', 'png'):
         p = os.path.join(outdir, '%s.%s' % (name, ext)); fig.savefig(p, bbox_inches='tight'); paths.append(p)
     try:
@@ -643,9 +643,53 @@ def fig_scratch(C, P, out, plt):
     fig.tight_layout(); return save(plt, fig, out, 'fig_scratch')
 
 
+def thin_ticks(ticks, ratio=1.35):
+    """the ticks of a log axis without the ones whose label would touch the next larger one's (less than `ratio` apart); the largest is always kept"""
+    kept = []
+    for t in sorted(ticks, reverse=True):
+        if not kept or kept[-1] / t >= ratio: kept.append(t)
+    return sorted(kept)
+
+
+def fig_synth(C, P, out, plt):
+    """the held-out SYNTHETIC theorems (ml_eval_synth): the share solved against the probes, one panel per split -- blind search, the untrained network under IDA* (the control), the pre-trained networks under IDA*, and the largest one
+    sampled (the policy as a heuristic for a search that backtracks and as the generator of one attempt).  The curves are the evidence of H7."""
+    V = C.view('library')
+    if 'synth' not in {r['group'] for r in V.rows}: return None
+    splits = [sp for sp in TB.SYNTH_SPLITS if V.names(sp, 'all', 'synth')]
+    cap = int(P.get('synth_eval_probes') or 0); budgets = [b for b in P.get('eval_budgets', ()) if b <= cap]
+    if not splits or not budgets: return None
+    sizes = sorted(set(P.get('synth_sizes', ())) - {0}); have = set(V.variants('synth')); ida = TB.H7_SEARCH
+    ls_sizes = [(0, (1, 1.5)), (0, (4, 2)), (0, (3, 1, 1, 1)), '-']                                   # (the sizes of one search, told apart by line style; the largest is solid)
+    Bb = TB.blind_budget(P); wide = sorted(set(budgets) | ({b for b in (500, 1000, 2000, 5000, 10000) if cap < b < Bb} | {Bb} if Bb else set()))     # (blind search ran on to its larger budget: its curve goes there, the networks' stop at theirs)
+    plan = [('blind', 'blind', GREY, (0, (4, 2)), '+', 'blind search%s' % (' (to %d probes)' % Bb if Bb else ''))]
+    if 'init' in have: plan.append(('init', ida, GREY2, (0, (1, 1.5)), 'x', 'untrained network, IDA*'))
+    for k, n in enumerate(sizes):
+        plan.append(('pre_n%d' % n, ida, ORANGE, ls_sizes[len(ls_sizes) - len(sizes) + k] if len(sizes) <= len(ls_sizes) else '-', '^', 'pre-trained on %d, IDA*' % n))
+    if sizes: plan.append(('pre_n%d' % sizes[-1], 'sample', BLUE, '-', 'o', 'pre-trained on %d, sampled' % sizes[-1]))
+    fig, axes = plt.subplots(1, len(splits), figsize=(3.6 * len(splits), 3.0), sharey=True, squeeze=False); axes = list(axes.ravel()); drawn = 0
+    for ax, sp in zip(axes, splits):
+        ends = []
+        for v, sv, colour, ls, mk, label in plan:
+            if v not in have or sv not in V.solvers('synth', v): continue
+            bs = wide if v == 'blind' else budgets
+            cv = V.curve('synth', v, sv, sp, bs)
+            band(ax, bs, cv['mean'], cv['low'], cv['high'], colour, ls, mk, label, ms=4); drawn += 1
+            fin = _finite(cv['mean'])
+            if fin: ends.append((bs[-1], fin[-1], label, colour))
+        tk = thin_ticks(wide); ax.set_xscale('log'); ax.set_xticks(tk); ax.set_xticklabels([str(b) for b in tk], fontsize=6.5); ax.minorticks_off(); ax.set_ylim(bottom=0); pct_axis(ax)
+        ax.set_title('%s (%d theorems)' % (sp, len(V.names(sp, 'all', 'synth')))); ax.set_xlabel('probes per theorem (log scale)')
+        end_labels(ax, ends)
+    axes[0].set_ylabel('theorems solved (%)')
+    if not drawn: plt.close(fig); return None
+    h, l = axes[-1].get_legend_handles_labels()
+    if h: fig.legend(h, l, loc='lower center', ncol=min(4, len(h)), frameon=False, bbox_to_anchor=(0.5, -0.16))
+    fig.tight_layout(); return save(plt, fig, out, 'fig_synth')
+
+
 FIGURES = [('fig_budget', fig_budget), ('fig_scaling', fig_scaling), ('fig_learning', fig_learning), ('fig_bc', fig_bc), ('fig_ablations', fig_ablations), ('fig_solvers', fig_solvers),
            ('fig_generator', fig_generator), ('fig_library', fig_library), ('fig_levels', fig_levels), ('fig_throughput', fig_throughput), ('fig_breakdown', fig_breakdown), ('fig_latency', fig_latency),
-           ('fig_arch', fig_arch), ('fig_laws', fig_laws), ('fig_scratch', fig_scratch)]
+           ('fig_arch', fig_arch), ('fig_laws', fig_laws), ('fig_scratch', fig_scratch), ('fig_synth', fig_synth)]
 
 
 def make_all(C, outdir, only=None, log=print):

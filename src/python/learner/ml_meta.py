@@ -23,37 +23,69 @@ def git_state():
     return commit, dirty
 
 
-def cpu_model():
+def _read(path):
+    """the text of a file ('' where it cannot be read: /proc does not exist on a Mac)"""
     try:
-        for line in open('/proc/cpuinfo'):
-            if line.lower().startswith('model name'): return line.split(':', 1)[1].strip()
-    except OSError: pass
-    return platform.processor() or platform.machine()
+        with open(path) as f: return f.read()
+    except OSError: return ''
+
+
+def _sysctl(name):
+    """`sysctl -n NAME` ('' where there is no sysctl or no such name): how macOS and the BSDs tell what Linux keeps in /proc"""
+    try:
+        r = subprocess.run(['sysctl', '-n', name], capture_output=True, text=True, timeout=10)
+        return r.stdout.strip() if r.returncode == 0 else ''
+    except Exception: return ''
+
+
+def cpu_model():
+    for line in _read('/proc/cpuinfo').splitlines():
+        if line.lower().startswith('model name'): return line.split(':', 1)[1].strip()
+    return _sysctl('machdep.cpu.brand_string') or platform.processor() or platform.machine()           # (macOS: 'Apple M3 Pro')
 
 
 def memory_gb():
-    try:
-        for line in open('/proc/meminfo'):
-            if line.startswith('MemTotal:'): return round(int(line.split()[1]) / 1048576, 1)
-    except OSError: pass
-    return None
+    """the physical memory in GB (Linux: /proc/meminfo; macOS: hw.memsize), None where neither tells"""
+    for line in _read('/proc/meminfo').splitlines():
+        if line.startswith('MemTotal:'): return round(int(line.split()[1]) / 1048576, 1)
+    b = _sysctl('hw.memsize')
+    if b.isdigit(): return round(int(b) / 2 ** 30, 1)
+    try: return round(os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') / 2 ** 30, 1)
+    except (ValueError, OSError, AttributeError): return None
+
+
+def usable_cores():
+    """how many processes can run at full speed at once: the cores this process may use (Linux: its affinity mask); on an Apple-silicon Mac only the PERFORMANCE cores (hw.perflevel0), because
+    the efficiency cores run this kind of work at about a third of the speed and a job that lands on one makes the whole matrix wait for it"""
+    perf = _sysctl('hw.perflevel0.logicalcpu')
+    if perf.isdigit() and int(perf) > 0: return int(perf)
+    try: return len(os.sched_getaffinity(0))
+    except (AttributeError, OSError): return os.cpu_count() or 1
 
 
 def rss_mb():
-    """the resident memory of this process in MB (Linux; None elsewhere)"""
+    """the resident memory of this process in MB (Linux: /proc; elsewhere `ps`; None if neither answers)"""
+    for line in _read('/proc/self/status').splitlines():
+        if line.startswith('VmRSS:'): return int(line.split()[1]) / 1024.0
     try:
-        for line in open('/proc/self/status'):
-            if line.startswith('VmRSS:'): return int(line.split()[1]) / 1024.0
-    except OSError: pass
-    return None
+        r = subprocess.run(['ps', '-o', 'rss=', '-p', str(os.getpid())], capture_output=True, text=True, timeout=10)
+        return int(r.stdout.split()[0]) / 1024.0
+    except Exception: return None
+
+
+def maxrss_mb(v, platform_name):
+    """MB from the `ru_maxrss` of getrusage: bytes on macOS, kilobytes on Linux and the BSDs"""
+    return v / (1048576.0 if platform_name == 'darwin' else 1024.0)
 
 
 def peak_rss_mb():
+    """the largest resident memory of this process so far in MB (Linux: VmHWM; elsewhere getrusage)"""
+    for line in _read('/proc/self/status').splitlines():
+        if line.startswith('VmHWM:'): return int(line.split()[1]) / 1024.0
     try:
-        for line in open('/proc/self/status'):
-            if line.startswith('VmHWM:'): return int(line.split()[1]) / 1024.0
-    except OSError: pass
-    return None
+        import resource
+        return maxrss_mb(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss, sys.platform)
+    except Exception: return None
 
 
 def run_meta(args=None, extra=None):

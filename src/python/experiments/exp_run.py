@@ -12,7 +12,7 @@ A run is DONE when its command exited with status 0 and the files it promises ex
 command again skips what is done and re-runs the rest; every command of the matrix is itself resumable (a training run continues from its last checkpoint, an evaluation from its rows, the generator from its
 shards), so an interrupted run loses at most the work since its last checkpoint.  `--force ID` re-runs a run (and, with --cascade, everything that depends on it).
 
-Logs: `RUNS/logs/<id>.log`.  Resources: `--jobs N` runs at most N commands at once, `--cores C` (default: all) and `--mem-gb G` (default: 85% of the memory) are budgets the scheduler respects with the
+Logs: `RUNS/logs/<id>.log`.  Resources: `--jobs N` runs at most N commands at once, `--cores C` (default: all the cores; on a Mac the performance cores) and `--mem-gb G` (default: 85% of the memory; on a Mac all but 6 GB) are budgets the scheduler respects with the
 estimates of the runs (exp_spec: a run's cores are its --workers).  A failed run blocks the runs that need it; the others go on (--fail-fast stops at the first failure).
 """
 import os as _os, sys as _sys; _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..')); import itp_paths  # noqa: E402,F401
@@ -61,11 +61,17 @@ def parse_seeds(text):
 
 
 def mem_total_gb():
-    try:
-        for line in open('/proc/meminfo'):
-            if line.startswith('MemTotal:'): return int(line.split()[1]) / 1048576.0
-    except OSError: pass
-    return 8.0
+    """the machine's memory in GB (8 if nothing tells)"""
+    import ml_meta as MT
+    return MT.memory_gb() or 8.0
+
+
+def default_budgets(total_gb, cores_usable, system=None):
+    """(cores, GB) the scheduler may use when --cores / --mem-gb are not given.  A server gives the runs 85% of its memory and every core.  A Mac is somebody's laptop: the system and the
+    open applications keep about 6 GB (a share of memory the runs would otherwise take and push the whole machine into swap), and only the performance cores count (ml_meta.usable_cores)"""
+    system = system or sys.platform
+    mem = max(0.5 * total_gb, total_gb - 6.0) if system == 'darwin' else 0.85 * total_gb
+    return max(1, int(cores_usable)), mem
 
 
 def git_commit():
@@ -256,7 +262,8 @@ def main(argv=None):
     for i in todo_force:
         try: os.remove(status_path(Rabs, i))
         except OSError: pass
-    cores = a.cores or (os.cpu_count() or 1); mem = a.mem_gb or 0.85 * mem_total_gb()
+    import ml_meta as MT
+    d_cores, d_mem = default_budgets(mem_total_gb(), MT.usable_cores()); cores = a.cores or d_cores; mem = a.mem_gb or d_mem
     lock = os.path.join(Rabs, '.lock')
     if os.path.exists(lock):
         try:

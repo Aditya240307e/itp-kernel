@@ -209,7 +209,7 @@ def md_report(R, C, T, P, figs, warnings, N):
     else: add('None: every evaluation row is present and no solver raised.')
     add('')
     order = [('system', 'The artefact', None), ('bank', 'The benchmark', None), ('main', 'Main results', 'fig_budget'), ('strict', 'Hiding the helper lemmas of a problem', None), ('ablations', 'Ablations', 'fig_ablations'), ('scaling', 'Scaling with the amount of synthetic data', 'fig_scaling'), ('arch', 'Other encoders of the goal', 'fig_arch'), ('size', 'Other widths', None), ('laws', 'Scaling laws', 'fig_laws'),
-             ('scratch', 'Reinforcement learning from random weights', 'fig_scratch'), ('solvers', 'Provers on the same networks', 'fig_solvers'),
+             ('scratch', 'Reinforcement learning from random weights', 'fig_scratch'), ('solvers', 'Provers on the same networks', 'fig_solvers'), ('synth', 'Held-out synthetic theorems', 'fig_synth'), ('h7', 'The pre-registered comparisons on the synthetic theorems (H7, H8)', None),
              ('mw', 'Manager-worker agent', None), ('levels', 'By difficulty and by contest', 'fig_levels'), ('generator', 'The synthetic theorem set', 'fig_generator'), ('library', 'Bootstrapped library', 'fig_library'),
              ('cost', 'Training cost', 'fig_learning'), ('bench_solvers', 'Throughput', 'fig_throughput'), ('bench_workers', None, None), ('bench_breakdown', 'Where the time goes', 'fig_breakdown'), ('bench_latency', 'Latency', 'fig_latency'),
              ('bench_archs', 'Cost of the encoders and widths', None), ('bench_world', None, None), ('bench_kernel', None, None), ('bench_machine', None, None), ('soundness', 'Soundness', None)]

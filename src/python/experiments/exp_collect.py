@@ -63,6 +63,13 @@ def source_class(source):
     return 'other'
 
 
+
+def pre_converged(fin):
+    """True if a pre-training run stopped because its dev loss had not improved for `patience` epochs, False if it ran out of epochs sooner than that (it was still improving), None if it cannot be told (early stopping off, or no history)"""
+    hist = fin.get('history') or []; patience = int((fin.get('args') or {}).get('patience') or 0); best = fin.get('best_epoch')
+    if not hist or best is None or patience <= 0: return None
+    return len(hist) - 1 - int(best) >= patience
+
 class Matrix:
     """replicates x problems; `seeds` and `names` label the axes; entries 1.0 / 0.0 / NaN (no row)"""
     def __init__(self, seeds, names, data):
@@ -131,6 +138,10 @@ class Collected:
         for n in sorted(set((self.profile or {}).get('synth_sizes') or ()) - {0}):                    # (a pre-training run says how many synthetic theorems it really trained on)
             u = self.synth_used(n)
             if u is not None and u != n: self.warnings.append('pre-training of nominal size %d trained on %d synthetic theorems (the merged set has fewer train theorems than the size asked for)' % (n, u))
+        if (self.profile or {}).get('pre_patience'):                                                # (early stopping is on: H1 is about CONVERGED networks, so a size that ran out of epochs while still improving is told)
+            for n in sorted(set((self.profile or {}).get('synth_sizes') or ()) - {0}):
+                open_ = sorted(rid for rid, fin in self.finals.items() if rid.startswith('pre/n%d/s' % n) and pre_converged(fin) is False)
+                if open_: self.warnings.append('pre-training of size %d had not converged when its epochs ran out (%d of its runs: %s): the held-out loss of that size is an upper bound, and so the exponent of H1 over sizes is not a statement about converged networks -- raise `pre_epochs`' % (n, len(open_), ', '.join(open_[:4]) + (' ...' if len(open_) > 4 else '')))
         for rid, e in self.eval_runs.items():
             if e['meta']: self.meta = e['meta']; break
         if not self.meta:

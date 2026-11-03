@@ -1732,6 +1732,9 @@ MUTANTS = {
  'LM31 simplex: a number of more than 256 bits costs no more': (' * (1 + (max(D.bit_length(), p.bit_length()) >> 8)))', ')', 'linarith.py'),
  'LM30 simplex: a pivot does not charge the row of costs': ('meter.spend(((touched + 1) * width', 'meter.spend(((touched) * width', 'linarith.py'),
  'LM29 simplex: every row is charged at a pivot, whether the pivot changes it or not': ('            touched = sum(1 for i in range(nrows) if i != best and (p != D or T[i][c] != 0))\n', '            touched = nrows - 1\n', 'linarith.py'),
+ 'M114 stack guard (macOS calls): the lowest address of the stack is its top plus its size': ('lowest = top - sz; size = sz;', 'lowest = top + sz; size = sz;'),
+ 'M115 stack guard: the margin kept below the floor is a quarter of the stack, not an eighth': ('size / 8 < (size_t{1} << 20) ? size / 8 : (size_t{1} << 20);', 'size / 4 < (size_t{1} << 20) ? size / 4 : (size_t{1} << 20);'),
+ 'M116 stack guard: the floor is below the lowest address by the margin, not above it': ('slot = static_cast<char*>(lowest) + margin;', 'slot = static_cast<char*>(lowest) - margin;'),
 }
 
 # a gate has failed when it exits non-zero or prints one of these markers

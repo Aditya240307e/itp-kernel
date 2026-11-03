@@ -19,7 +19,7 @@ help:
 	@echo "make tool-mutants    inject faults into the tools that make the evidence (soundness folder, statement audit, number checker, identity of the code) and check that their tests fail for each one; 252 faults, 47 minutes on two cores (J=8: a few)"
 	@echo "make soundness      the soundness evidence in one stamped folder (results/soundness): every gate, every mutant, the fuzz campaigns, kernel against the independent checker, the findings; hours (J=8 for the big machine)"
 	@echo "make audit          the statement audit in one stamped folder (results/audit): every statement of the bank against its intended meaning, the cautions, the ledger of second readers, a review sheet; minutes"
-	@echo "make sanitize        build the kernel with ASan + UBSan and run the gates under it (long)"
+	@echo "make sanitize        build the kernel with ASan + UBSan and run the kernel and bank gates that can run under them (long; it lists the ones it leaves out, and why)"
 	@echo "make dist            pack the repository into dist/*.tar.gz and dist/*.zip   (GIT=1 adds the history as a .git directory; ADD='paper/main.pdf' adds files git does not hold; ARTIFACTS=dir adds trained models under artifacts/)"
 	@echo "make check-env       is this machine ready for the experiments? (python, torch, CUDA, memory, disk)"
 	@echo "make smoke           the whole experiment pipeline on a tiny world (about 70 minutes of run time on two cores): do this before a real run"

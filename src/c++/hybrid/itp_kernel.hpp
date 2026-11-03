@@ -100,11 +100,32 @@ inline int64_t fuel_used() { const ThreadGuardState& g = thread_guard_state(); r
 /// The most steps any call has used since the last reset_fuel_peak() (the current call included); reset_fuel_peak() starts counting again.
 inline int64_t fuel_peak() { const ThreadGuardState& g = thread_guard_state(); return std::max(g.fuel_peak, g.fuel_start - g.fuel); }
 inline void reset_fuel_peak() { thread_guard_state().fuel_peak = 0; }
+// How a thread finds the bounds of its own stack differs by platform. glibc (and musl) have pthread_getattr_np; macOS does not, and instead answers with pthread_get_stackaddr_np -- the HIGH end of
+// the stack, which grows down -- and pthread_get_stacksize_np. (ITP_STACK_BOUNDS_APPLE=1 selects the macOS calls on any system: S18 compiles this header that way against emulations of them.)
+// Anywhere else the bounds are unknown and the guard is off, as it always was for a thread whose bounds cannot be read.
+#ifndef ITP_STACK_BOUNDS_APPLE
+#  if defined(__APPLE__)
+#    define ITP_STACK_BOUNDS_APPLE 1
+#  else
+#    define ITP_STACK_BOUNDS_APPLE 0
+#  endif
+#endif
+/// The lowest address of the calling thread's stack and its size in bytes; lowest == nullptr (and size 0) if they cannot be found.
+inline void thread_stack_bounds(void*& lowest, size_t& size) {
+    lowest = nullptr; size = 0;
+#if ITP_STACK_BOUNDS_APPLE
+    char* const top = static_cast<char*>(pthread_get_stackaddr_np(pthread_self())); const size_t sz = pthread_get_stacksize_np(pthread_self());
+    if (top && sz && sz < reinterpret_cast<uintptr_t>(top)) { lowest = top - sz; size = sz; }
+#elif defined(__linux__)
+    pthread_attr_t attr;
+    if (pthread_getattr_np(pthread_self(), &attr) == 0) { pthread_attr_getstack(&attr, &lowest, &size); pthread_attr_destroy(&attr); }
+#endif
+}
 [[gnu::noinline]] inline void stack_check_slow(const char* sp) {
     char*& slot = stack_floor_slot();
     if (!slot) {
-        pthread_attr_t attr; void* lowest = nullptr; size_t size = 0;
-        if (pthread_getattr_np(pthread_self(), &attr) == 0) { pthread_attr_getstack(&attr, &lowest, &size); pthread_attr_destroy(&attr); }
+        void* lowest = nullptr; size_t size = 0;
+        thread_stack_bounds(lowest, size);
         if (!lowest || size == 0) { slot = reinterpret_cast<char*>(1); return; }                       // unknown stack: do not guard
         const size_t margin = size / 8 < (size_t{1} << 20) ? size / 8 : (size_t{1} << 20);       // 1 MiB (or an eighth of a tiny stack)
         slot = static_cast<char*>(lowest) + margin;
@@ -1899,8 +1920,10 @@ struct VCtor {
     SharedSeq<Value> args;       // shared and immutable: copying a VCtor is O(1), whatever the depth of its arguments
 
     VCtor() = default;
-    VCtor(uint32_t ind, uint32_t ctor, std::vector<Value> a) : ind_type_global_id(ind), ctor_idx(ctor), args(std::move(a)) {}
-    VCtor(uint32_t ind, uint32_t ctor, SharedSeq<Value> a) : ind_type_global_id(ind), ctor_idx(ctor), args(std::move(a)) {}
+    // Declared here, defined below once VFix (the last alternative of Value) is complete: the by-value parameters are destroyed at the end of the body, which needs the
+    // complete Value, and a std::variant over an incomplete alternative is ill-formed. libstdc++ never looks at it that early; libc++ (macOS) does, and refused to compile this.
+    VCtor(uint32_t ind, uint32_t ctor, std::vector<Value> a);
+    VCtor(uint32_t ind, uint32_t ctor, SharedSeq<Value> a);
     // no operator==: Value-domain structs are never compared via == anywhere in this codebase -- semantic comparison always goes through
     // conv_value, and Value-domain values are never hash-consed (unlike the syntax/arena node structs above).
 };
@@ -1921,6 +1944,9 @@ struct VFix {
     NodeId fix_id;
     Env env;
 };
+
+inline VCtor::VCtor(uint32_t ind, uint32_t ctor, std::vector<Value> a) : ind_type_global_id(ind), ctor_idx(ctor), args(std::move(a)) {}
+inline VCtor::VCtor(uint32_t ind, uint32_t ctor, SharedSeq<Value> a) : ind_type_global_id(ind), ctor_idx(ctor), args(std::move(a)) {}
 
 struct ApplyFrame {
     Value arg;

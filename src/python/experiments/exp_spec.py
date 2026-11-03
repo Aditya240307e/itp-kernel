@@ -27,7 +27,7 @@ rough memory estimate.  `exp_run.py` executes the graph (resumably: a run that s
     ei_mw          the manager-worker agent as the actor (from bc_mw)
     ei_mcts        MCTS as the actor           ei_ida   IDA* on the policy's costs as the actor
 
-and the STUDIES that vary the network or the start (each is a profile field, empty = not run: `--set archs=()`):
+and the STUDIES that vary the network or the start (each is a profile field, empty = not run: `--set 'archs=()'`, quoted: the shell reads the brackets):
 
     bc_<arch>      the same learner with another ENCODER of the goal (ml_model.ARCHS: bigru, cnn, bow; the transformer is `bc`): pre-trained on all the synthetic theorems with it, then fine-tuned on the bank
     ei_her_<arch>  ... and the learners of `arch_learners` continued from it (ppo_<arch>, ei_her_<arch>)                                                     [fields: archs, arch_learners]
@@ -38,7 +38,7 @@ and the STUDIES that vary the network or the start (each is a profile field, emp
 and the SOLVERS (ml_agents): blind, uniform (no model), sample, greedy, ida, mcts, mw.  The main comparison evaluates every model with the same solver (`sample`) on the dev and test splits.
 """
 import os as _os, sys as _sys; _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..')); import itp_paths  # noqa: E402,F401
-import os, sys, json, collections, ast
+import os, sys, re, json, collections, ast
 
 PY = 'python3'
 ROOT = itp_paths.ROOT
@@ -53,24 +53,24 @@ PROFILES = {
     'smoke': dict(
         seeds=2, dataset='', smoke_lib_max=60,
         synth_attempts=1800, synth_target=300, synth_jobs=1, synth_sizes=(0, 100, 300), synth_verify_sample=1, synth_seed=1,
-        pre_epochs=2, pre_batch=32, ft_epochs=3, ft_lr=3e-4, scratch_epochs=3, bc_eval_every=0, bc_eval_probes=30,
+        pre_epochs=2, pre_patience=0, pre_batch=32, ft_epochs=3, ft_lr=3e-4, scratch_epochs=3, bc_eval_every=0, bc_eval_probes=30,
         rl_iters=2, rl_episodes=8, rl_probes=40, ppo_iters=3, ppo_episodes=8, ei_updates=5, rl_eval_every=1, rl_eval_probes=30, boot_per_iter=4,
         archs=('bigru',), arch_learners=('bc', 'ei_her'), widths=(64,), width_learners=('bc',), scratch=('ei_her',), scratch_mult=1,
-        eval_probes=60, headline=60, eval_time_limit=5.0, eval_budgets=(10, 20, 30, 40, 60), eval_splits='dev,test', recheck=1, workers=0, device='cpu', threads=1, mem_scale=0.4),
+        eval_probes=60, headline=60, eval_time_limit=5.0, eval_budgets=(10, 20, 30, 40, 60), eval_splits='dev,test', synth_eval_n=12, synth_eval_probes=60, synth_eval_blind_mult=10, synth_eval_splits='test_iid,test_comp', synth_eval_solvers=('blind', 'sample', 'ida'), recheck=1, workers=0, device='cpu', threads=1, mem_scale=0.4),
     'small': dict(
         seeds=3, dataset=FULL_DATASET,
         synth_attempts=40000, synth_target=5000, synth_jobs=2, synth_sizes=(0, 500, 1500, 5000), synth_verify_sample=1, synth_seed=1,
-        pre_epochs=6, pre_batch=64, ft_epochs=12, ft_lr=3e-4, scratch_epochs=20, bc_eval_every=4, bc_eval_probes=100,
+        pre_epochs=14, pre_patience=2, pre_batch=64, ft_epochs=12, ft_lr=3e-4, scratch_epochs=20, bc_eval_every=4, bc_eval_probes=100,
         rl_iters=10, rl_episodes=48, rl_probes=100, ppo_iters=60, ppo_episodes=32, ei_updates=40, rl_eval_every=2, rl_eval_probes=200, boot_per_iter=8,
         archs=('bigru', 'cnn', 'bow'), arch_learners=('bc', 'ei_her'), widths=(64, 256), width_learners=('bc',), scratch=('ei_her', 'ppo'), scratch_mult=3,
-        eval_probes=500, headline=200, eval_time_limit=30.0, eval_budgets=(10, 20, 50, 100, 200, 500), eval_splits='dev,test', recheck=1, workers=2, device='cpu', threads=1, mem_scale=1.0),
+        eval_probes=500, headline=200, eval_time_limit=30.0, eval_budgets=(10, 20, 50, 100, 200, 500), eval_splits='dev,test', synth_eval_n=150, synth_eval_probes=200, synth_eval_blind_mult=10, synth_eval_splits='test_iid,test_comp', synth_eval_solvers=('blind', 'sample', 'ida'), recheck=1, workers=2, device='cpu', threads=1, mem_scale=1.0),
     'full': dict(
         seeds=5, dataset=FULL_DATASET,
         synth_attempts=450000, synth_target=60000, synth_jobs=4, synth_sizes=(0, 1000, 4000, 15000, 60000), synth_verify_sample=1, synth_seed=1,
-        pre_epochs=6, pre_batch=64, ft_epochs=20, ft_lr=3e-4, scratch_epochs=30, bc_eval_every=5, bc_eval_probes=200,
+        pre_epochs=14, pre_patience=2, pre_batch=64, ft_epochs=20, ft_lr=3e-4, scratch_epochs=30, bc_eval_every=5, bc_eval_probes=200,
         rl_iters=30, rl_episodes=128, rl_probes=200, ppo_iters=250, ppo_episodes=64, ei_updates=60, rl_eval_every=3, rl_eval_probes=500, boot_per_iter=16,
         archs=('bigru', 'cnn', 'bow'), arch_learners=('bc', 'ei_her', 'ppo'), widths=(64, 256), width_learners=('bc',), scratch=('ei_her', 'ppo', 'ei_her@bigru', 'ei_her@cnn', 'ei_her@bow'), scratch_mult=3,
-        eval_probes=2000, headline=1000, eval_time_limit=60.0, eval_budgets=(10, 20, 50, 100, 200, 500, 1000, 2000), eval_splits='dev,test', recheck=1, workers=4, device='cpu', threads=1, mem_scale=1.0),
+        eval_probes=2000, headline=1000, eval_time_limit=60.0, eval_budgets=(10, 20, 50, 100, 200, 500, 1000, 2000), eval_splits='dev,test', synth_eval_n=500, synth_eval_probes=500, synth_eval_blind_mult=10, synth_eval_splits='test_iid,test_comp', synth_eval_solvers=('blind', 'sample', 'ida'), recheck=1, workers=4, device='cpu', threads=1, mem_scale=1.0),
 }
 
 # the learners that continue from a behaviour-cloned network: variant -> how
@@ -88,6 +88,7 @@ RL_VARIANTS = collections.OrderedDict([
 MAIN_SOLVER = 'sample'
 SOLVER_STUDY = (('bc', 'ei_her'), ('sample', 'greedy', 'ida', 'mcts', 'mcts:value=critic'))          # the same networks under different provers
 MW_STUDY = (('bc_mw', 'ei_mw'), ('mw', 'mw:gate=never', 'mw:gate=fixed', 'sample'))                  # the manager-worker agent and its ablations
+SYNTH_EVAL_RL = ('ppo', 'ei_her')                                                                      # the reinforcement learners that are also run on the held-out synthetic theorems (the main comparison's)
 BASELINES = ('blind', 'uniform')                                                                        # no network
 
 ARCHS = ('transformer', 'bigru', 'cnn', 'bow')            # the encoders of ml_model.ARCHS (this module does not import torch; S51 checks that the lists agree)
@@ -217,7 +218,7 @@ def build(name, seeds=None, runs_dir=None, overrides=None):
         tag = ('' if arch == 'transformer' else arch + '_') + ('w%d_' % width if width else '')
         rid = 'pre/%sn%d/s%d' % (tag, n, seed)
         a = py('learner', 'ml_bc', D, '--out', out(rid), '--synth', SY, '--synth-max', n, '--no-bank', '--no-lib', '--epochs', P['pre_epochs'], '--lr', 1e-3, '--seed', seed, '--batch', P['pre_batch'],
-               '--workers', W_, *dev) + net_args(arch, width) + ['--resume']
+               '--workers', W_, *dev) + (['--patience', P['pre_patience']] if P['pre_patience'] else []) + net_args(arch, width) + ['--resume']
         tags = {'method': 'pre', 'n_synth': n, 'seed': seed}
         if tag: tags.update(arch=arch, width=width or DEFAULT_WIDTH)
         return add(Run(rid, 'pre', a, needs=['data/synth_merge'], check=[out(rid) + '/final.json', out(rid) + '/best.pt'], tags=tags, mem_gb=MEM_GB['pre'] + 0.05 * n / 1000.0, cores=NC))
@@ -297,6 +298,8 @@ def build(name, seeds=None, runs_dir=None, overrides=None):
     def ckpt(variant, seed):
         """(path of the checkpoint to evaluate, id of the run that makes it)"""
         if variant == 'pre': return out('pre/n%d/s%d' % (smax, seed)) + '/best.pt', 'pre/n%d/s%d' % (smax, seed)
+        if variant == 'init': r_ = init_run('transformer', seed); return out(r_.id) + '/best.pt', r_.id                    # (the untrained network of the same seed: the control of the synthetic evaluation)
+        if re.fullmatch(r'pre_n\d+', variant): n = int(variant[5:]); return out('pre/n%d/s%d' % (n, seed)) + '/best.pt', 'pre/n%d/s%d' % (n, seed)
         stage, f = where[variant]; rid = '%s/%s/s%d' % (stage, variant, seed)
         return out(rid) + '/' + f, rid
 
@@ -327,6 +330,33 @@ def build(name, seeds=None, runs_dir=None, overrides=None):
     a = py('learner', 'ml_evaluate', D, '--out', out('eval/baselines'), '--split', P['eval_splits'], '--regimes', 'prefix,strict', '--probes', P['eval_probes'], '--time-limit', P['eval_time_limit'], '--workers', W_, '--threads', P['threads'])
     for s in BASELINES: a += ['--solver', s]
     add(Run('eval/baselines', 'eval', a, needs=[ds], check=[out('eval/baselines') + '/rows.jsonl'], tags={'group': 'baselines', 'variant': 'baselines', 'solvers': list(BASELINES)}, mem_gb=MEM_GB['eval'] + 0.4 * int(W_), cores=NC))
+
+    # the held-out SYNTHETIC theorems (ml_eval_synth): test_iid (drawn like the training theorems) and test_comp (compositions the training theorems do not contain), proved with the library only.  The olympiad splits have a few dozen
+    # problems; these have hundreds, so "does what the network learned help the search?" gets an interval that is narrow.  Every network whose training saw synthetic theorems -- each pre-trained size, the behaviour-cloned and
+    # the reinforcement learners -- and the olympiad-only network (the point at zero synthetic theorems) run under the network's own searches; the model-free baseline runs once.  `init` is the CONTROL: the network of the same
+    # architecture and seed with random weights, under the same searches -- what the search does when the policy knows nothing, so that a gain over blind search can be attributed to what was learned and not to the search.
+    def synth_evaluation():
+        ssplits = P['synth_eval_splits']; n_eval = len([x for x in ssplits.split(',') if x]) * int(P['synth_eval_n'])
+        base = [s for s in P['synth_eval_solvers'] if s.split(':')[0] in BASELINES]; nets = [s for s in P['synth_eval_solvers'] if s.split(':')[0] not in BASELINES]
+        def common(r_id, probes=None):
+            return py('learner', 'ml_eval_synth', D, SY, '--out', out(r_id), '--split', ssplits, '--limit', P['synth_eval_n'], '--probes', probes or P['synth_eval_probes'], '--time-limit', P['eval_time_limit'], '--workers', W_, '--threads', P['threads'])
+        if base:
+            bp = int(P['synth_eval_probes']) * max(1, int(P['synth_eval_blind_mult']))                                    # (the model-free search gets `mult` times the probes: a network's probe costs about that much more wall-clock, so the table has an equal-compute reference;
+            a = common('eval/synth/baselines', bp)                                                                       #  its rows say at which probe each theorem was solved, so "within the network's probes" is read from the same rows)
+            for s in base: a += ['--solver', s]
+            add(Run('eval/synth/baselines', 'eval', a, needs=['data/synth_merge'], check=[out('eval/synth/baselines') + '/rows.jsonl', out('eval/synth/baselines') + '/meta.json'],
+                    tags={'group': 'synth', 'variant': 'baselines', 'seeds': [0], 'solvers': base, 'synth_n': n_eval, 'probes': bp}, mem_gb=MEM_GB['eval'] + 0.4 * int(W_), cores=NC))
+        if not nets: return
+        variants = ['init', 'bc_scratch'] + ['pre_n%d' % n for n in sizes] + ['bc'] + [v for v in SYNTH_EVAL_RL if v in RL_VARIANTS and v not in boot]
+        for v in variants:
+            r_id = 'eval/synth/%s' % v; a = common(r_id); needs = ['data/synth_merge']
+            sol = [s for s in nets if s.split(':')[0] == 'ida'] if v == 'init' else nets                  # (the control is about the search H7 compares: sampling an untrained network runs every theorem to its time limit and answers nothing)
+            if not sol: continue
+            for s in sol: a += ['--solver', s]
+            for sd in seeds:
+                path, need = ckpt(v, sd); a += ['--model', '%s=%s' % (v, path)]; needs.append(need)
+            add(Run(r_id, 'eval', a, needs=needs, check=[out(r_id) + '/rows.jsonl', out(r_id) + '/meta.json'], tags={'group': 'synth', 'variant': v, 'seeds': list(seeds), 'solvers': sol, 'synth_n': n_eval}, mem_gb=MEM_GB['eval'] + 0.4 * int(W_), cores=NC))
+    synth_evaluation()
 
     # ------------------------------------------------------------------------------------------------------------------------------------------------------------ throughput, report
     add(Run('bench/throughput', 'bench', py('experiments', 'exp_bench', D, '--out', out('bench'), '--model', out('ft/bc/s%d' % seeds[0]) + '/best.pt', '--synth', SY,

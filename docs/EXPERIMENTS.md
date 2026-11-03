@@ -22,6 +22,7 @@ PROFILE=full  scripts/run_all.sh   # the paper: 60 000 synthetic train theorems,
 | E2d Does the encoder of the goal matter, and does the answer depend on the learner? | `pre/<arch>_n<N>`, `ft/bc_<arch>`, `rl/<learner>_<arch>`, `eval/arch/*` (arch in `bigru cnn bow`; the transformer's runs are the main ones) | `arch`, `fig_arch`, `bench_archs` |
 | E2e How do imitation quality and olympiad accuracy scale with the amount of synthetic data and with the size of the network? | `pre/n<N>` (data), `pre/w<d>_n<N>`, `ft/bc_w<d>`, `eval/size/*` (other widths beside the default 128) | `laws`, `size`, `fig_laws` |
 | E2f Can a learner start from nothing? | `init/<arch>/s<k>` (an untrained network), `rl/scratch_<learner>[_<arch>]`, `eval/scratch/*` | `scratch`, `fig_scratch` |
+| E2g Does what the network learned help the search, and is it the network or the search? (held-out synthetic theorems) | `eval/synth/*`: blind search, the untrained network (`init`, the control), every pre-trained size, the fine-tuned and the reinforcement learners, each under the searches of the profile | `synth`, `h7`, `fig_synth` |
 | E3 Which ingredient matters? (ablations) | pre-training: `bc` vs `bc_scratch`; fine-tuning: `bc` vs `pre`; hindsight: `ei_her` vs `ei`, `ppo` vs `ppo_nosub`; bootstrapped library: `ei_her_boot` vs `ei_her`; algorithm: `ei_her` vs `ppo`; actor: `ei_mw`, `ei_mcts`, `ei_ida` vs `ei_her` | `ablations`, `fig_ablations` |
 | E4 Which prover is best for a given network? | `eval/solvers/*`, `eval/mw/*` | `solvers`, `mw`, `fig_solvers` |
 | E5 Is the synthetic data diverse, and when does the generator saturate? | `data/synth_*` | `generator`, `fig_generator` |
@@ -69,7 +70,7 @@ PROFILE=full  scripts/run_all.sh   # the paper: 60 000 synthetic train theorems,
 | evaluation: largest budget (headline), time limit | 60 (60), 5 s | 500 (200), 30 s | 2000 (1000), 60 s |
 | workers per run | 0 | 2 | 4 |
 
-The **studies** (E2d-E2f) are fields of the profile, so that a part can be changed or dropped like any setting -- `--set archs=() --set widths=() --set scratch=()` is the core experiment alone:
+The **studies** (E2d-E2f) are fields of the profile, so that a part can be changed or dropped like any setting -- `--set 'archs=()' --set 'widths=()' --set 'scratch=()'` is the core experiment alone (quote each value: bash and zsh read an unquoted `()` as syntax):
 
 | field | meaning | smoke | small | full |
 |---|---|---|---|---|
@@ -106,6 +107,7 @@ A *run* is a node: an id (its directory under the runs directory), a command, th
 | rl | `rl/<variant>/s<seed>`, variant in `ppo ppo_nosub ei ei_her ei_her_boot ei_mw ei_mcts ei_ida` | RL from the seed's `ft/bc` (`ei_mw` from `ft/bc_mw`) | `ft/*` |
 | eval | `eval/main/<variant>` (`ei_her_boot`: one run per seed, with its own lemma file) | every model, solver `sample`, dev + test, prefix + strict regimes, independent re-check | checkpoints |
 | eval | `eval/solvers/{bc,ei_her}`, `eval/mw/{bc_mw,ei_mw}`, `eval/scale/bc_n<N>`, `eval/baselines` | the prover study, the manager-worker study, the scaling study, the model-free baselines | |
+| eval | `eval/synth/{baselines,init,bc_scratch,pre_n<N>,bc,ppo,ei_her}` | the held-out SYNTHETIC theorems (`ml_eval_synth.py`; regime `library`, so the olympiad tables never see the rows): blind search once; every network, at every seed, under the searches of `synth_eval_solvers`; `init` is the untrained network of the same architecture and seed (the control) | checkpoints, `data/synth_merge` |
 | eval | `eval/arch/<variant>`, `eval/size/<variant>`, `eval/scratch/<variant>` | every variant of a study, solver `sample`, the same splits, regimes and budget as the main results | checkpoints |
 | bench | `bench/throughput`, `bench/kernel` | throughput / memory / worker scaling; the cost of each encoder and width (`--archs`, `--widths`); kernel micro-benchmarks | `ft/bc/s<first>` |
 | report | `report` | tables, figures, numbers | -- |
@@ -143,6 +145,17 @@ architecture and size, and a checkpoint made before the encoders were swappable 
 between encoders (the embeddings and heads are most of the parameters at this vocabulary); `bench_archs` and the table `arch` give them.
 
 Provers (`ml_agents.py`): `blind`, `uniform`, `sample`, `greedy`, `ida`, `mcts` (`mcts:value=critic`), `mw` (`mw:gate=never|fixed`).
+
+### Held-out synthetic theorems (`ml_eval_synth.py`; E2g)
+
+The olympiad dev and test splits have 20 and 58 problems, so a comparison of two provers on them is inside the noise unless the gap is large. The synthetic splits `dev`, `test_iid` (drawn like the training theorems) and `test_comp` (compositions of lemmas the training theorems do not contain) have hundreds to thousands of theorems, each with a kernel-checked reference proof, and no training run saw them (`ml_eval_synth.py` refuses the `train` split). It runs the same provers as `ml_evaluate.py` on them and writes rows of the regime `library` (`rows.jsonl`, `meta.json`), so the olympiad tables never see them:
+
+    python3 src/python/learner/ml_eval_synth.py data/dataset_v2 runs/small/synth --out runs/small/eval/synth/pre_n5000 --split dev --limit 300 \
+        --solver sample --solver ida --model pre_n5000=runs/small/pre/n5000/s0/best.pt --probes 200 --time-limit 20 --workers 2       # --solver blind: no --model needed
+
+The profile fields are `synth_eval_n` (theorems of each split), `synth_eval_probes`, `synth_eval_blind_mult`, `synth_eval_splits`, `synth_eval_solvers`. **A pilot evaluates `dev`** (`--set synth_eval_splits=dev`) and keeps `test_iid` and `test_comp` for the run that counts (PAPER_PLAN 3.2); the tables read whichever of the three are there. Blind search is the same IDA\* with the engine's costs instead of the network's, so the difference between `<network>+ida` and `blind` is what the network's costs add; `eval/synth/init` runs the **untrained** network of the same architecture and seed under the same searches (the control: if it does as well, the gain is the search). The table `synth` gives every network and search with the share solved and the gain over blind search (bootstrap over the theorems), the table `h7` the pre-registered contrasts of PAPER_PLAN 3.4 (paired by seed, Holm, the words of 3.5), and `fig_synth` the share solved against the probes. The report warns when a pre-training size ran out of epochs while its dev loss was still falling (`pre_patience`; the exponent of H1 is only about converged networks). In a pilot with one seed and 200 theorems, IDA\* on the policy solved 10 to 15 points more than blind search and sampling the same policy solved 16 to 22 points fewer (PAPER_PLAN section 9): the policy is a heuristic for a search that backtracks, not a generator of one attempt.
+
+**Probes and seconds.** The budget H7 is about is the *probe* (the unit the platform meters; it does not depend on the hardware). A probe of the network's search costs more wall-clock than a blind probe (a forward pass), about ten times on a CPU in the pilot, so the baselines run gives blind search `synth_eval_blind_mult` (default 10) times the probes of the others (`probes` of its rows says how many) and the tables read both: the `synth` table has a row "blind search (to N probes)" and a seconds-per-theorem column, the `h7` table an exploratory contrast of the largest pre-trained network at `synth_eval_probes` against blind search at its larger budget, and `fig_synth` extends blind search's curve to that budget. In the pilot the policy bought about ten times fewer probes for the same coverage, for the largest network only +4 to +5 points over blind search given ten times the probes (intervals touching 0; about 1.5 times the seconds), and none for the smaller ones (PAPER_PLAN section 9): the paper words the claim as probe efficiency and prints the seconds.
 
 ## 6. Leakage protocol (what keeps the test split clean)
 
@@ -341,7 +354,7 @@ forked before CUDA is touched and use CPU copies of the weights. The code path f
   slope of a log-log line over the range that was measured (a few points per seed, fitted per seed, the interval over seeds); it assumes no asymptote and says nothing outside that range.
 * A learner from random weights is compared with the model-free baselines and with the same learner continued from behaviour cloning; it is not a claim about reinforcement learning in general, only about this environment, these goals and this budget.
 * RL variants share hyper-parameters; none was tuned per method. PPO and expert iteration are compared at equal iterations and by cumulative probes (logs), not at equal wall-clock.
-* The mutation catalogue (1 704 mutants) is the evidence that the gates bite; the full mutation run takes many hours and is not part of this pipeline: `scripts/08_soundness.sh` runs it with the gates, the fuzzers and the checker comparison and states what it shows (7.3); `python3 mutants/mutate.py PREFIX` runs a part.
+* The mutation catalogue (1 707 mutants) is the evidence that the gates bite; the full mutation run takes many hours and is not part of this pipeline: `scripts/08_soundness.sh` runs it with the gates, the fuzzers and the checker comparison and states what it shows (7.3); `python3 mutants/mutate.py PREFIX` runs a part.
 
 ## 10. Compute
 
@@ -353,21 +366,21 @@ ones it measured on YOUR machine (`RUNS/bench/bench.json`; on a GPU pass `--trai
 
 | profile | seeds | runs | run-hours | core-hours | wall-clock on 8 cores, perfect packing |
 |---|---|---|---|---|---|
-| smoke | 2 | 73 (core experiment alone: 55) | 2.4 (2.2) | 2.4 (2.2) | 0.7 h |
-| small | 3 | 135 (77) | 107 (57) | 179 (102) | 23 h (13 h) |
-| full | 5 | 263 (122) | 1 044 (344) | 2 982 (1 111) | 373 h, about 16 days (139 h, six days) |
-| full | 7 | 351 | 1 459 | 4 169 | 522 h |
+| smoke | 2 | 80 (core experiment alone: 62) | 2.6 (2.3) | 2.6 (2.3) | 0.7 h |
+| small | 3 | 143 (85) | 122 (63) | 199 (113) | 25 h (14 h) |
+| full | 5 | 272 (131) | 1 300 (417) | 3 336 (1 282) | 417 h, about 17 days (160 h, almost seven days) |
+| full | 7 | 360 | 1 818 | 4 665 | 584 h |
 
-`exp_estimate.py` prints the same by part of the experiments (core, arch, size, scratch). The full profile's core experiment is 1 111 core-hours; the encoders add 650, the widths 233 and
-learning from random weights 988 (three times the iterations, five learners). A machine with many cores shortens the wall-clock, not the core-hours; `--set archs=() --set widths=() --set scratch=()`, or a shorter list in each field, drops what the machine cannot carry.
+`exp_estimate.py` prints the same by part of the experiments (core, arch, size, scratch). The full profile's core experiment is 1 282 core-hours; the encoders add 703, the widths 363 and
+learning from random weights 988 (three times the iterations, five learners). A machine with many cores shortens the wall-clock, not the core-hours; `--set 'archs=()' --set 'widths=()' --set 'scratch=()'`, or a shorter list in each field, drops what the machine cannot carry.
 
 **One measurement.** The `smoke` profile has been run once from the first stage to the report on the 2-core reference machine (two runs at a time, other jobs competing for the cores): 52 training and evaluation runs
 (data 7 min 25 s, pre-training 3 min 34 s, fine-tuning 3 min 4 s, reinforcement learning 19 min 58 s, evaluation 29 min 45 s; the run times of the runs added up), the two benchmarks (6 min 25 s) and the report
 (10 s): 70 minutes of run time. The estimator with the rates `06_benchmarks.sh` measured there says 0.8 run-hours for the stages before the benchmarks (measured: 1.06) and 1.0 for the benchmarks (measured: 0.11); with its built-in
 rates it said 2.2 for everything. So on this one profile it is within about a third on the training and evaluation stages and pessimistic on the benchmarks. It has not been checked on a larger profile.
 
-`full`, in core-hours: reinforcement learning 797 (40 runs: PPO and the expert-iteration variants), evaluation 215, pre-training 64, fine-tuning 23, data 11, benchmarks 1 -- the RL runs and the evaluation of
-the search solvers are 91 % of it. The cost is linear in the number of seeds (`--seeds 0-6` costs 1.4 times the five-seed training and evaluation, the data and the benchmarks once). To spend less: run the
+`full`, in core-hours (the core experiment): reinforcement learning 797 (40 runs: PPO and the expert-iteration variants), evaluation 346 (the olympiad splits 215, the held-out synthetic theorems 131), pre-training 105, fine-tuning 23, data 11, benchmarks 1 -- the RL runs and the evaluation
+of the search solvers are 89 % of it. The cost is linear in the number of seeds (`--seeds 0-6` costs 1.4 times the five-seed training and evaluation, the data and the benchmarks once). To spend less: run the
 `small` profile; fewer seeds; one method (`--target 'rl/ei_her/*'`); fewer iterations or probes (`--set rl_iters=100 --set eval_probes=500`, section 4); a GPU speeds up the network updates only (proof search stays on
 the CPU).
 
@@ -375,6 +388,28 @@ the CPU).
 theorems keeps about 3 GB of steps in memory. (The gate S50, which replays the whole bank's proofs, holds 1.5 to 2.8 GB itself and peaks at 4.6 GB while an independent-checker process runs -- measured here, 20 minutes in all; on an 8 GB machine do not run it next to another heavy gate -- `tests/run_gates.py` runs the heavy gates one at a time -- and keep `S50_E_MEM`, the memory one independent check may use (1 500 MB), below what is left.) Set `MEM_GB` to what the machine has; the scheduler runs fewer jobs at once rather than more.
 **Disk.** Measured on `smoke`: about 30 MB per training run (checkpoints) and about 10 KB per generator attempt; extrapolated to `full` that is about 3 GB for its 90 training runs and several GB for the
 450 000 generator attempts. Keep 20 GB free.
+
+### Running on a Mac (Apple silicon)
+
+The code was written and tested on Linux. For a Mac (the plan: a medium run on a MacBook Pro M3 Pro with 18 GB, then the big run on a server) the following was done on the Linux machine, and **nothing of it has been run on a Mac yet**: both kernels
+were compiled (syntax only) against LLVM's libc++ 17 headers, the standard library of macOS, which found two blockers in the hybrid kernel (finding F91: a glibc-only call in the stack guard, and a constructor that libc++ refuses); the macOS branch of the
+stack guard is tested against an emulation of the macOS calls (gate S18, section `bounds`); and the places that read Linux's `/proc` or counted every core now have fallbacks (`ml_meta.py`, `exp_run.default_budgets`, `scripts/env.sh`). The first real answer
+is the next command, on the Mac:
+
+    python3 tools/preflight.py                  # 5-10 minutes on a fast machine (22 on a loaded 2-core one: the benchmark of the searches that use a network is most of it); --quick for the machine and the toolchain only; --profile small --seeds 0-2 --set 'archs=()' --set 'widths=()' --set 'scratch=()' to project another run
+
+It checks, in this order: that Python is native arm64 (Rosetta halves the speed), the power source and Low Power Mode, swap, free disk; the compiler (Apple clang 16 = Xcode 16 or newer, or `brew install llvm`, then `CXX=$(brew --prefix llvm)/bin/clang++`) and
+whether its library has C++23 `std::expected` with `and_then` / `transform`; the kernel build (timed) and import; the stack guard (S18's children: a deep term must end in an error on a small thread and in an answer on the main thread, whose stack macOS caps at
+64 MB where Linux gives 1 GiB); forked worker processes next to PyTorch (if they hang, use `WORKERS=0` and parallelise with `JOBS`); and then `exp_bench` on a few problems, with an untrained network of the default size made by `ml_init.py` (the searches that use a network need one; world build and memory, probes per second of each solver, training steps per second,
+speed-up over workers), the projection of the profile with THOSE rates, and the number of runs of each stage that fit in the memory and cores the runner will use. Everything goes to `runs/preflight/preflight.json`.
+
+* **What the runner does on a Mac.** It counts only the performance cores (`hw.perflevel0.logicalcpu`; the efficiency cores run this work at about a third of the speed), keeps 6 GB for the system (an 18 GB Mac gives the runs 12 GB), and sets
+  `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES` so that forked workers are not aborted. Start long runs with `caffeinate -dimsu ./scripts/run_all.sh ...` on AC power. With 12 GB the memory estimate of a run (3.5 to 4 GB; a fine-tuning run swings from
+  3.7 to 6.2 GB with one worker, section 11) allows two or three runs at once: set `JOBS=3 WORKERS=0` first and raise `WORKERS` only if the memory stays well below the budget.
+* **What does not run on a Mac.** The gates that limit the address space (S19, S25, S30, S31, S34, S37, S40, S50: `RLIMIT_AS`, which macOS does not enforce), and so `make gates`, `make soundness`, `make audit`, `make tool-mutants` and `make sanitize`, are for the
+  Linux machine. The memory columns of the throughput benchmark (proportional set size, read from `/proc`) are empty on a Mac: take the system numbers of the paper from the Linux machine. The experiments (`scripts/run_all.sh`, `make experiments`) are what a Mac is for.
+* **Results are not bit-identical across machines.** The kernel's work budget is deterministic (the same input spends the same on every machine) and so is the search for a given network; the network's weights are not (different floating-point kernels on arm64
+  and x86). The outcome digest of `exp_bench` compares runs of the SAME weights. A runs directory can hold runs from both machines (the host is recorded per run); say in the paper which machine made which table.
 
 ## 11. Troubleshooting
 

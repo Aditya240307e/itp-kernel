@@ -19,6 +19,10 @@ import exp_spec as SP, exp_run as RUN
 RATES = {'train_steps_per_s': 55.0, 'probes_per_s': {'sample': 30.0, 'greedy': 30.0, 'ida': 18.0, 'mcts': 5.5, 'mw': 12.0, 'blind': 40.0, 'uniform': 60.0},
          # training speed of the other networks relative to the default (transformer, width 128), measured on the same machine (exp_bench `archs`, batch 64): a bigger or slower network trains in proportionally more time
          'train_ratio': {'bigru@128': 1.21, 'cnn@128': 2.38, 'bow@128': 2.07, 'transformer@64': 2.43, 'transformer@256': 0.26}}
+# seconds per held-out synthetic theorem on the reference machine at a budget of 200 probes (ml_eval_synth; the pilot's 1 400 rows, solved and unsolved together: most theorems are solved early, so these are far
+# below budget / probe rate); they scale with the budget
+SYNTH_SECONDS = {'blind': 0.13, 'uniform': 0.5, 'sample': 3.2, 'greedy': 0.9, 'ida': 1.5, 'mcts': 8.0, 'mw': 3.0}
+PRE_EPOCHS_TYPICAL = 0.7                    # with early stopping (pre_patience) a pre-training run uses about this share of its epoch limit (a guess until the logs of real runs replace it)
 MEAN_SYNTH_STEPS = 5.3                      # steps (actions) per synthetic theorem: the mean of the pilot's 6 024 theorems (5.26)
 GEN_ATTEMPTS_PER_S = 12.0                   # generator attempts per second per core, world builds included: the pilot's 30 000 attempts took 2 473 core-seconds
 
@@ -85,7 +89,7 @@ def estimate(runs, P, counts, rates, train_rate=None, probe_rate=None, synth_mea
             else: add('data', 60.0)
         elif st == 'pre':
             if t.get('method') == 'init': add('pre', 60.0)                                                  # (a network with random weights: the world is built and the file written)
-            else: add('pre', P['pre_epochs'] * t['n_synth'] * synth_mean / (tr * train_ratio(rates, t)))
+            else: add('pre', P['pre_epochs'] * (PRE_EPOCHS_TYPICAL if P.get('pre_patience') else 1.0) * t['n_synth'] * synth_mean / (tr * train_ratio(rates, t)))
         elif st == 'ft':
             epochs = P['ft_epochs'] if '--init' in r.argv else P['scratch_epochs']
             secs = epochs * steps_ft / (tr * train_ratio(rates, t))
@@ -101,6 +105,10 @@ def estimate(runs, P, counts, rates, train_rate=None, probe_rate=None, synth_mea
                 iters = t.get('iters') or P['rl_iters']; actor = t.get('actor') or 'sample'
                 per_iter = P['rl_episodes'] * P['rl_probes'] / pr(actor) / W + P['ei_updates'] * 64 / trr
                 add('rl', iters * per_iter + (iters // max(1, P['rl_eval_every'])) * n_dev * P['rl_eval_probes'] / pr('sample') / W, W)
+        elif st == 'eval' and t.get('synth_n'):                                                         # held-out synthetic theorems
+            slower = lambda base: (RATES['probes_per_s'].get(base) or RATES['probes_per_s']['sample']) / pr(base)                # (the rates of this machine against the reference's: a measured --bench or --probe-rate scales the seconds below)
+            secs = sum(t['synth_n'] * SYNTH_SECONDS.get(s.split(':')[0], 3.0) * slower(s.split(':')[0]) * (t.get('probes') or P['synth_eval_probes']) / 200.0 * max(1, len(t.get('seeds') or [0])) / W for s in (t.get('solvers') or ['sample']))
+            add('eval', secs, W)
         elif st == 'eval':
             solvers = t.get('solvers') or ['sample']; secs = 0.0
             for s in solvers:
@@ -156,7 +164,7 @@ def main(argv=None):
     print('%-8s %6s %12.1f %12.1f %16.1f' % ('total', '', tr_h, tc_h, tw))
     parts = estimate_by_study(runs, P, counts, rates, a.train_rate or None, a.probe_rate or None)
     if len(parts) > 1:
-        print('\n%-8s %6s %12s %12s %16s   (the same, by part of the experiments: --set archs=() widths=() scratch=() drop a part)' % ('part', 'runs', 'run-hours', 'core-hours', 'wall-clock, %d cores' % a.cores))
+        print('\n%-8s %6s %12s %12s %16s   (the same, by part of the experiments: --set "archs=()" --set "widths=()" --set "scratch=()" drop a part (quote them: the shell reads the brackets))' % ('part', 'runs', 'run-hours', 'core-hours', 'wall-clock, %d cores' % a.cores))
         for st, e in parts.items():
             n = sum(v[0] for v in e.values()); rh = sum(v[1] for v in e.values()) / 3600.0; ch = sum(v[2] for v in e.values()) / 3600.0
             print('%-8s %6d %12.1f %12.1f %16.1f' % (st, n, rh, ch, ch / a.cores))

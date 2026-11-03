@@ -29,7 +29,19 @@ def mem_gb():
         for ln in open('/proc/meminfo'):
             if ln.startswith('MemTotal:'): return int(ln.split()[1]) / 1048576.0
     except OSError: pass
+    try:                                                                  # macOS
+        b = subprocess.run(['sysctl', '-n', 'hw.memsize'], capture_output=True, text=True, timeout=10).stdout.strip()
+        if b.isdigit(): return int(b) / 2**30
+    except Exception: pass
     return None
+
+
+def perf_cores():
+    """the performance cores of an Apple-silicon Mac (None elsewhere)"""
+    try:
+        b = subprocess.run(['sysctl', '-n', 'hw.perflevel0.logicalcpu'], capture_output=True, text=True, timeout=10).stdout.strip()
+        return int(b) if b.isdigit() and int(b) > 0 else None
+    except Exception: return None
 
 
 def main():
@@ -50,7 +62,7 @@ def main():
     line(bool(so), 'build/itp_env_lnl*.so', os.path.basename(so[0]) if so else 'not built: make kernel  (needs g++ 13 or recent clang and nanobind)')
     if not so: bad.append('kernel')
     print('Machine')
-    n = os.cpu_count() or 1; line(True, 'cores', str(n))
+    n = os.cpu_count() or 1; pc = perf_cores(); line(True, 'cores', str(n) + ('  (%d performance cores: the runner counts only those)' % pc if pc else ''))
     m = mem_gb(); line(None if m is None else True, 'memory', '%.1f GB' % m if m else 'unknown')
     free = shutil.disk_usage(ROOT if not os.path.exists(runs) else runs).free / 2**30
     line(free > 20, 'free disk', '%.0f GB  (the full profile writes several tens of GB of checkpoints, caches and logs)' % free)

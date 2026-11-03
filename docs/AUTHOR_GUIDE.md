@@ -18,7 +18,7 @@ is a claim you can explain. Every section ends with *Read* (where to look) and *
 | **kernel** | a typed lambda calculus with inductive families: it checks that a term has a type, admits definitions and inductive types, computes with a work meter | **yes** (the only trusted code, with its Python bindings) | `src/c++/hybrid/itp_kernel.hpp` (7.5 k lines), `itp_bindings.cpp` (0.8 k) | the four kinds of evidence of section 3 |
 | **independent checker** | a second implementation of the typing rules, in Python, on terms with named variables; it shares nothing with the kernel | no: it is an alarm, not a judge (a disagreement is a bug in one of the two) | `src/python/checker/` (0.85 k lines) | it agrees with the kernel on every library definition, on tactic proofs and on thousands of mutated proofs |
 | **tactics, libraries** | `intro`, `apply`, `rewrite`, `cases`, `induct`, `ring`, `linarith`, ...; Peano arithmetic to elementary number theory | **no**: a tactic only builds a term, and the kernel checks the term | `src/python/authoring/`, `src/python/library/` | whatever they build is re-checked, so a wrong tactic wastes time and cannot make a false statement provable |
-| **environment** | the learner's world: goals as data, menus of legal actions, actions that *say* their term arguments, probes that try an action and rewind | no (but "proved" only ever comes from the kernel) | `src/python/environment/` (`gym_env`, `gym_acts`, `gym_build`), `src/python/learner/bank_env.py` (`ITPBank-v0`) | gates S40 and friends, 1704 mutants, fuzzing |
+| **environment** | the learner's world: goals as data, menus of legal actions, actions that *say* their term arguments, probes that try an action and rewind | no (but "proved" only ever comes from the kernel) | `src/python/environment/` (`gym_env`, `gym_acts`, `gym_build`), `src/python/learner/bank_env.py` (`ITPBank-v0`) | gates S40 and friends, 1707 mutants, fuzzing |
 | **data** | the problem bank (268 formal problems), the synthetic theorem generator, the splits | no, but a statement is the one thing a kernel cannot check: it checks proofs OF a statement, not that the statement says what the contest said | `src/python/problems/`, `src/python/synth/`, `data/dataset_v2/` | the statement audit (`make audit`), second readers (none yet) |
 | **learner** | networks and provers: behaviour cloning, expert iteration with hindsight, PPO, search | no | `src/python/learner/ml_*.py` | gates S44, S47, S51; the kernel checks every proof |
 | **experiments and evidence tools** | the pipeline that makes the numbers, and the tools that count them | no, but a wrong number is a wrong claim | `src/python/experiments/`, `tools/check_numbers.py`, `scripts/` | S51 and S45 gates; faults injected into the tools (`make tool-mutants`, finding F88) |
@@ -56,14 +56,14 @@ recursion, no real numbers, no Mathlib; `Nat` is unary, so concrete large number
 2. **The independent checker** (`indep_checker.py`, `recheck.py`): every library definition, tactic proofs, thousands of mutated proofs, in both modes (S8), and the bank's reference proofs (S50 judges every
    eighth by default, all of them with `S50_E=all`, which takes more than an hour). *Limit:* independent in
    code, not in authorship: the same person wrote both, so a misunderstanding of a typing rule could be shared.
-3. **Mutation testing** (`mutants/`): 1704 single-line faults, each re-breaking one rule in an isolated copy of the tree; the gates must fail; 22 are documented as equivalent (no input can tell them from the
+3. **Mutation testing** (`mutants/`): 1707 single-line faults, each re-breaking one rule in an isolated copy of the tree; the gates must fail; 22 are documented as equivalent (no input can tell them from the
    original). *Limit:* the catalogue is hand-written, so it measures the gates against the faults somebody thought of; and the kernel, tactic and environment series were run to completion while they were
    written, the newest series only partly; `make soundness` (hours) produces the run for the tree you submit. There are no kernel-style mutants for the bank, the learner, the generator or the pipeline; the
    tools that make the paper's evidence have their own catalogue (252 faults, finding F88).
 4. **Falsification through the environment** (`tests/fuzz/gym_fuzz.py`): statements that are FALSE at some point are searched for proofs. A proof of one would be a kernel bug (UNSOUND); a proof the kernel
    refuses is a tactic bug (REJECTED). *Limit:* finite search; the campaigns are listed with their seeds in the soundness folder.
 
-Behind these there are 54 gates and a 90-row findings log (`docs/FINDINGS.md`): the log is itself evidence, because it shows that the process finds bugs (F51, F86, F87, F88 and F90 are good ones to read).
+Behind these there are 54 gates and a 91-row findings log (`docs/FINDINGS.md`): the log is itself evidence, because it shows that the process finds bugs (F51, F86, F87, F88 and F90 are good ones to read).
 
 **What the paper may say:** "tested", "no unsoundness known", "the trusted base is 7.5 k lines of C++ plus 0.8 k of bindings", "the independent checker agrees on N proofs", "every seeded fault is caught
 except 22 documented equivalents". **What it must not say:** "proved sound" or "verified". Nothing here is a mechanised proof; the statement "a proof accepted by the kernel proves its statement" rests on the
@@ -208,7 +208,7 @@ work is yours to write; `paper/main.bib` holds the references of the skeleton, t
 14. *What did the AI assistant do?* Say it plainly in the acknowledgments; and be ready to explain any part of the code or text yourself.
 15. *Which claims are in the abstract and which table carries each?* PAPER_PLAN section 2.
 16. *What would falsify your main claim?* Section 7, last column.
-17. *What did you find wrong in your own system?* The findings log: 90 findings with the tests that pin them (F51, F86, F87, F88, F89, F90 are the instructive ones; F90 was found by the first pilot of a trained policy).
+17. *What did you find wrong in your own system?* The findings log: 91 findings with the tests that pin them (F51, F86, F87, F88, F89, F90 are the instructive ones; F90 was found by the first pilot of a trained policy).
 18. *What does the benchmark cost to run?* `exp_estimate.py`; the full profile is about 1 100 core-hours for the core experiment (estimate), the studies extra.
 19. *Is the benchmark saturated or too hard?* Look at the per-level solved fractions of the baselines and of the best learner: a benchmark is useful when they spread out.
 20. *Why should anyone use it?* Because training a policy from scratch on a proof assistant needs a fast, deterministic, auditable environment and a graded task set; give the one-paragraph answer in your own words.

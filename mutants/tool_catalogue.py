@@ -1,6 +1,6 @@
 """tool_catalogue.py -- faults injected into the TOOLS that produce the evidence of the paper (the kernel's own catalogue is catalogue.py).
 
-The tools (the soundness folder, the statement audit, the number checker, the identity of the code) are what a reader trusts when the paper says "0 survivors of 1704 mutants" or "268 statements checked".
+The tools (the soundness folder, the statement audit, the number checker, the identity of the code) are what a reader trusts when the paper says "0 survivors of 1707 mutants" or "268 statements checked".
 They have tests, and a test that was written together with the code it checks tends to check what the code does, not what it must do.  So each tool has a list of single-line faults,
 (name, file, old text, new text), and the tests written for the tool must FAIL for every one of them: `python3 mutants/check_tools.py` injects them one at a time into a copy of the tree and runs the tool's
 gate (a section of S45 or S51).  A fault that no check notices is a gap in the tests (or a line the tool does not need: then remove the line).

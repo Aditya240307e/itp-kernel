@@ -9,6 +9,10 @@ test failure with a name instead of a dead gate:
           kernel must stay usable afterwards (a small term still checks) and a rejected deep term must not have changed what is accepted.
   big   : the same operations on the main thread (stack limit raised by the module) on a term that is deep but legitimate -- they must FINISH, and give the right answers.
 
+  bounds: the stack-bounds lookup of the guard, for the platform that is NOT this one: the header is compiled with ITP_STACK_BOUNDS_APPLE=1 (the macOS calls pthread_get_stackaddr_np /
+          pthread_get_stacksize_np, emulated here with glibc's) and without it, and on threads of several stack sizes the guard must fire exactly at the same floor in both -- lowest address
+          plus min(size/8, 1 MiB) -- with the stack still intact (a wrong 'top minus size' would make it fire at once or never, i.e. a crash on a Mac).
+
 Never a crash, never a hang, never a wrong answer."""
 import os as _os, sys as _sys; _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', '..', 'src', 'python')); import itp_paths  # noqa: E402,F401
 import sys, os, subprocess, threading, time
@@ -135,6 +139,67 @@ def child(shape, mode):
     bad = [r for r in results if r[1] == 'error' and not ('ill-typed' in r[2] or 'mismatch' in r[2].lower() or 'type' in r[2].lower() or 'not a function' in r[2].lower() or 'scope' in r[2].lower() or 'ITPError' in r[2] or 'loose' in r[2].lower() or 'unbound' in r[2].lower())]
     print("DONE %d %d" % (sum(1 for r in results if r[1] == 'ok'), sum(1 for r in results if r[1] == 'stack')), flush=True)
 
+BOUNDS_PROBE = r"""
+#include <pthread.h>
+#include <cstdio>
+#include <cstdint>
+#include <cstddef>
+// What macOS answers: the HIGH end of the stack (it grows down) and its size. Emulated with glibc's call; the header only looks at them if ITP_STACK_BOUNDS_APPLE is 1.
+static void stack_of(pthread_t t, char*& lo, size_t& sz) { pthread_attr_t a; void* p = nullptr; pthread_getattr_np(t, &a); pthread_attr_getstack(&a, &p, &sz); pthread_attr_destroy(&a); lo = static_cast<char*>(p); }
+extern "C" void* pthread_get_stackaddr_np(pthread_t t) { char* lo; size_t sz; stack_of(t, lo, sz); return lo + sz; }
+extern "C" size_t pthread_get_stacksize_np(pthread_t t) { char* lo; size_t sz; stack_of(t, lo, sz); return sz; }
+#include "itp_kernel.hpp"
+struct Probe { char* first = nullptr; char* last = nullptr; char* lowest = nullptr; size_t size = 0; long depth = 0; bool threw = false; };
+[[gnu::noinline]] static long rec(Probe& p, long d) {
+    ITP_STACK_CHECK();
+    char pad[128]; pad[0] = static_cast<char>(d); asm volatile("" : : "r"(pad) : "memory");
+    char* fa = static_cast<char*>(__builtin_frame_address(0)); if (!p.first) p.first = fa; p.last = fa; p.depth = d;
+    return rec(p, d + 1) + pad[0];
+}
+static void* run(void* arg) {
+    Probe& p = *static_cast<Probe*>(arg); stack_of(pthread_self(), p.lowest, p.size);
+    try { rec(p, 0); } catch (const itp::StackExhausted&) { p.threw = true; }
+    return nullptr;
+}
+int main() {
+    for (size_t want : {size_t(256) << 10, size_t(1) << 20, size_t(4) << 20, size_t(16) << 20}) {
+        pthread_attr_t at; pthread_attr_init(&at); pthread_attr_setstacksize(&at, want);
+        Probe p; pthread_t th; pthread_create(&th, &at, run, &p); pthread_join(th, nullptr);
+        const size_t margin = p.size / 8 < (size_t(1) << 20) ? p.size / 8 : (size_t(1) << 20);
+        std::printf("%zu %d %zu %zu %ld\n", p.size, p.threw ? 1 : 0, margin, static_cast<size_t>(p.last - p.lowest), p.depth);
+    }
+}
+"""
+
+def bounds_check():
+    """the guard's floor on threads of several stack sizes, with the macOS stack-bounds calls (emulated) and with the platform's own: both must put it at lowest + min(size/8, 1 MiB).  [failure]"""
+    import tempfile, shutil
+    hdr = os.path.join(HERE, '..', '..', 'src', 'c++', 'hybrid'); fails = []
+    cxx = os.environ.get('CXX') or next((c for c in ('c++', 'g++', 'clang++') if shutil.which(c)), None)
+    if not cxx: return ['bounds: no C++ compiler']
+    import build_kernel as BK; std = BK.pick_std_flag(cxx)
+    if not sys.platform.startswith('linux'): return []                       # (the emulation needs glibc's pthread_getattr_np; on a Mac the real calls are what every other test here exercises)
+    with tempfile.TemporaryDirectory(prefix='itp_s18_') as td:
+        src = os.path.join(td, 'probe.cpp'); open(src, 'w').write(BOUNDS_PROBE); procs = {}
+        for apple in (0, 1):
+            exe = os.path.join(td, 'probe%d' % apple)
+            procs[apple] = (exe, subprocess.Popen([cxx, std, '-O1', '-pthread', '-DITP_STACK_BOUNDS_APPLE=%d' % apple, '-I' + hdr, src, '-o', exe], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True))
+        out = {}
+        for apple, (exe, pr) in procs.items():
+            _, err = pr.communicate(timeout=600)
+            if pr.returncode != 0:
+                fails.append('bounds/apple=%d: the probe did not compile: %s' % (apple, err.strip()[-300:])); continue
+            r = subprocess.run([exe], capture_output=True, text=True, timeout=120)
+            if r.returncode != 0: fails.append('bounds/apple=%d: the probe died (exit %s): the guard did not fire in time' % (apple, r.returncode)); continue
+            out[apple] = [tuple(int(x) for x in l.split()) for l in r.stdout.strip().split('\n')]
+        for apple, rows in out.items():
+            for size, threw, margin, above, depth in rows:
+                tag = 'bounds/apple=%d/%dKiB' % (apple, size >> 10)
+                if not threw: fails.append(tag + ': the guard never fired')
+                elif not (margin <= above < margin + 1024): fails.append(tag + ': the guard fired %d bytes above the stack\'s lowest address, expected %d..%d' % (above, margin, margin + 1023))
+        if out: print("   bounds   thread stacks %s KiB: the guard fires %s bytes above the lowest address (macOS calls emulated / this platform's)" % ([r[0] >> 10 for r in out.get(1, out.get(0))], [r[3] - r[2] for r in out.get(1, out.get(0))]), flush=True)
+    return fails
+
 def main():
     fails = []; t0 = time.time()
     for mode in ('small', 'big'):
@@ -152,6 +217,7 @@ def main():
             for e in errs:
                 if mode == 'big' and shape in ('numeral', 'neutral', 'match', 'beta', 'let') and e.split()[0] in ('infer', 'normalize', 'conv', 'check', 'declare_checked', 'check_refl', 'tactic_refl', 'unify'):
                     fails.append("%s/%s: %s failed with an ordinary error on a well-typed term" % (mode, shape, e))
+    fails.extend(bounds_check())
     print("   (%.0f s)" % (time.time() - t0))
     for f in fails: print("   FAIL " + f)
     print("S18 DEEP-TERM GATE: " + ("PASS" if not fails else "FAIL"))

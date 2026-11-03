@@ -8,9 +8,9 @@
 #   SEEDS     "0-4" (five seeds), "0-6" (seven), "0,1,2"   the training seeds = the replicates                              default: 0-1 smoke, 0-2 small, 0-4 full
 #   RUNS      the runs directory: every checkpoint, log, evaluation row and the report live below it                        default: runs/$PROFILE
 #   RESULTS   the results folder: a copy of the report (tables, figures, numbers, per-problem outcomes, statistics, provenance) kept apart from the paper   default: results/$PROFILE
-#   JOBS      how many commands may run at once; the scheduler also keeps within CORES and MEM_GB                          default: the number of cores
-#   CORES     cores the scheduler may use                                                                                   default: all
-#   MEM_GB    memory (GB) the scheduler may use                                                                             default: 85% of the machine's
+#   JOBS      how many commands may run at once; the scheduler also keeps within CORES and MEM_GB                          default: the number of cores (a Mac: its performance cores)
+#   CORES     cores the scheduler may use                                                                                   default: all (a Mac: its performance cores)
+#   MEM_GB    memory (GB) the scheduler may use                                                                             default: 85% of the machine's (a Mac: all but 6 GB)
 #   DEVICE    cpu | cuda | cuda:1   where the networks are TRAINED (proof search and evaluation always run on the CPU)      default: cpu
 #   WORKERS   forked worker processes inside one training / evaluation command (they share the world of the bank)           default: the profile's (full: 4)
 #   SET       profile fields to change, whitespace separated, no spaces inside a value:  "rl_iters=20 synth_sizes=(0,500,2000)"
@@ -73,10 +73,12 @@ if [ -z "${SEEDS:-}" ]; then case "$PROFILE" in smoke) SEEDS=0-1;; small) SEEDS=
 : "${TARGET:=}"
 : "${CORES:=}"
 : "${MEM_GB:=}"
-if [ -z "${JOBS:-}" ]; then JOBS="$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1)"; fi
+if [ -z "${JOBS:-}" ]; then JOBS="$(sysctl -n hw.perflevel0.logicalcpu 2>/dev/null || nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1)"; fi    # (an Apple-silicon Mac has fast and slow cores: count the fast ones)
 export PROFILE SEEDS RUNS RESULTS PY DEVICE WORKERS SET TARGET CORES MEM_GB JOBS            # (the scripts run each other: what an option set is what the next script reads from its environment)
 export PYTHONUNBUFFERED=1
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}" MKL_NUM_THREADS="${MKL_NUM_THREADS:-1}"
+# macOS aborts a forked child that touches Objective-C classes the parent had not initialised yet (the worker processes of one training or evaluation command are forks): turn that check off
+if [ "$(uname -s)" = Darwin ]; then export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES; fi
 
 banner() { printf '\n==== %s   [%s]\n' "$*" "$(date '+%Y-%m-%d %H:%M:%S')"; }
 
@@ -105,5 +107,5 @@ stage_script() {
 }
 
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
-  echo "PROFILE=$PROFILE SEEDS=$SEEDS RUNS=$RUNS RESULTS=$RESULTS JOBS=$JOBS CORES=${CORES:-all} MEM_GB=${MEM_GB:-85%} DEVICE=$DEVICE WORKERS=${WORKERS:-profile} SET='$SET' TARGET='$TARGET' PY=$PY"
+  echo "PROFILE=$PROFILE SEEDS=$SEEDS RUNS=$RUNS RESULTS=$RESULTS JOBS=$JOBS CORES=${CORES:-all} MEM_GB=${MEM_GB:-auto} DEVICE=$DEVICE WORKERS=${WORKERS:-profile} SET='$SET' TARGET='$TARGET' PY=$PY"
 fi

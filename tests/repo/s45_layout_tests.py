@@ -50,11 +50,12 @@ def python_files(*patterns):
 
 
 SKIP_DIRS = {'.git', 'build', '__pycache__', 'artifacts', '.venv'}
+OUTPUT_DIRS = ('runs', 'dist', 'results')                       # (the top-level folders the scripts write to, ignored by git: they hold the paths of the machine that made them, the pre-flight's and every run's; results/README.md is a file of the repository and is still read)
 
 
 def walk(top=ROOT):
     for d, dirs, files in os.walk(top):
-        dirs[:] = sorted(x for x in dirs if x not in SKIP_DIRS)
+        dirs[:] = sorted(x for x in dirs if x not in SKIP_DIRS and not (os.path.abspath(d) == os.path.abspath(ROOT) and x in OUTPUT_DIRS))
         for f in sorted(files): yield os.path.join(d, f)
 
 
@@ -178,6 +179,14 @@ def sec_F():
         m = MACHINE.search(text)
         if m: expect(False, 'F  %s mentions a machine-specific path (%r)' % (rel(p), text[max(0, m.start() - 20):m.end() + 30].replace('\n', ' ')))
     expect(seen >= 150, 'F  %d text files were scanned' % seen)
+    out_ = os.path.join(ROOT, 'runs', '_s45_probe'); made_ = not os.path.isdir(os.path.join(ROOT, 'runs'))              # (what a run or the pre-flight writes has the paths of its machine in it; the scan must not trip over it)
+    os.makedirs(out_, exist_ok=True)
+    try:
+        open(os.path.join(out_, 'x.json'), 'w').write('{"argv": ["' + '/' + 'home' + '/someone/itp"]}')
+        expect(not [p for p in walk() if os.sep + '_s45_probe' + os.sep in p], 'F  the folders the runs write to (runs, dist, results/<profile>) are not scanned')
+    finally:
+        shutil.rmtree(out_, ignore_errors=True)
+        if made_: shutil.rmtree(os.path.join(ROOT, 'runs'), ignore_errors=True)
 
 
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ G. requirements

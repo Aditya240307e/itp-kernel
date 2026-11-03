@@ -8,7 +8,7 @@ interval over replicates (training seeds); with ONE replicate (the model-free ba
 replicates on a handful of problems) is clipped to it and written in parentheses too.  Differences between methods are paired by seed; the p-values of one family of comparisons carry Holm's correction.
 """
 import os as _os, sys as _sys; _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..')); import itp_paths  # noqa: E402,F401
-import os, sys, math, collections
+import os, sys, re, math, collections
 import numpy as np
 import exp_stats as ST, exp_collect as EC, exp_spec as SP
 
@@ -16,7 +16,7 @@ NAN = float('nan')
 
 LABELS = collections.OrderedDict([
     ('uniform', 'Uniform random actions'), ('blind', 'Blind search (IDA*, engine costs)'),
-    ('pre', 'Pre-trained on synthetic theorems only'), ('bc_scratch', 'BC on olympiad data only'), ('bc', 'BC: pre-trained + olympiad'), ('bc_mw', 'BC (manager-worker labels)'),
+    ('pre', 'Pre-trained on synthetic theorems only'), ('init', 'Untrained network (random weights; the control)'), ('bc_scratch', 'BC on olympiad data only'), ('bc', 'BC: pre-trained + olympiad'), ('bc_mw', 'BC (manager-worker labels)'),
     ('ppo', 'PPO'), ('ppo_nosub', 'PPO without sub-theorem goals'),
     ('ei', 'Expert iteration'), ('ei_her', 'Expert iteration + hindsight'), ('ei_her_boot', 'Expert iteration + hindsight + bootstrapped library'),
     ('ei_mw', 'Expert iteration, manager-worker actor'), ('ei_mcts', 'Expert iteration, MCTS actor'), ('ei_ida', 'Expert iteration, IDA* actor')])
@@ -210,6 +210,124 @@ def scaling_table(C, P):
         dev, k = _cell(C, 'main', 'pre', 'sample', 'dev', B, 'all'); test, _ = _cell(C, 'main', 'pre', 'sample', 'test', B, 'all'); tp, _ = _cell(C, 'main', 'pre', 'sample', 'test', B, 'proved')
         rows.append([smax, 'pre-trained only (zero-shot, no olympiad data)', k, dev, test, tp])
     return Table('scaling', 'Olympiad performance (%% solved within %s probes) against the number of synthetic theorems used for pre-training.' % B, ['synthetic theorems', 'model', 'seeds', 'dev', 'test', 'test, proved'], rows, align='rlrrrr')
+
+
+SYNTH_SPLITS = ('dev', 'test_iid', 'test_comp')            # (a pilot evaluates `dev`, the run that counts test_iid and test_comp: the sealed ones)
+
+
+def synth_label(v):
+    """pre_n1500 -> 'pre-trained on 1500 synthetic theorems'; the others as in LABELS"""
+    m = re.fullmatch(r'pre_n(\d+)', v)
+    return 'pre-trained on %s synthetic theorems (no olympiad data)' % m.group(1) if m else LABELS.get(v, v)  # (`init`: the control, see LABELS)
+
+
+def synth_order(variants):
+    """the untrained control, the olympiad-only network, then the pre-trained sizes in increasing order, then the fine-tuned and the reinforcement learners"""
+    first = [v for v in ('init', 'bc_scratch') if v in variants]
+    pre_ = sorted((v for v in variants if re.fullmatch(r'pre_n\d+', v)), key=lambda v: int(v[5:]))
+    rest = [v for v in ('bc', 'ppo', 'ei_her') if v in variants]
+    return first + pre_ + rest + sorted(set(variants) - set(first) - set(pre_) - set(rest))
+
+
+def synth_table(C, P):
+    """Held-out SYNTHETIC theorems (ml_eval_synth, group `synth`, regime `library`): solved (%) within the largest budget, per network and search, on test_iid and test_comp, and the gain over blind search with a bootstrap
+    interval over the theorems (the same theorems in both; every training seed of the network against the one deterministic blind search).  This is the place where a learned policy can be told from a blind one: the
+    olympiad test split has a few dozen problems, these splits hundreds."""
+    V = C.view('library')
+    if 'synth' not in {r['group'] for r in V.rows}: return None
+    B = min(int(P.get('headline') or 10 ** 9), int(P.get('synth_eval_probes') or 10 ** 9)); B = None if B >= 10 ** 9 else B
+    splits = [sp for sp in SYNTH_SPLITS if V.names(sp, 'all', 'synth')]
+    if not splits: return None
+    Bb = blind_budget(P)                                                                                   # (the probes of the equal-compute row of blind search)
+    def gain(v, s, sp, Ba=B):
+        names = V.names(sp, 'all', 'synth')
+        if 'blind' not in V.variants('synth'): return '--'
+        A = V.success('synth', v, s, sp, Ba, names=names).data; Bl = V.success('synth', 'blind', 'blind', sp, B, names=names).data
+        if not A.size or not Bl.size: return '--'
+        Brep = np.repeat(Bl[:1], A.shape[0], axis=0); ok = ~(np.isnan(A).any(axis=0) | np.isnan(Brep).any(axis=0))
+        return pp(ST.paired_problem_bootstrap(A[:, ok], Brep[:, ok])) if ok.any() else '--'
+    def secs(v, s):
+        xs = [V.seconds_per_problem('synth', v, s, sp) for sp in splits]; xs = [x for x in xs if not math.isnan(x)]
+        return num(sum(xs) / len(xs), 2) if xs else '--'
+    rows = []
+    if 'blind' in V.variants('synth'):
+        rows.append([LABELS['blind'], 'blind', 1] + [_cell(V, 'synth', 'blind', 'blind', sp, B, 'all')[0] for sp in splits] + ['(reference)' for _ in splits] + ['--'])
+        if Bb and (B is None or Bb > B):
+            rows.append(['%s, with %d probes (equal compute)' % (LABELS['blind'], Bb), 'blind', 1] + [_cell(V, 'synth', 'blind', 'blind', sp, Bb, 'all')[0] for sp in splits] + [gain('blind', 'blind', sp, Bb) for sp in splits] + [secs('blind', 'blind')])
+    for v in synth_order([x for x in V.variants('synth') if x not in ('blind', 'baselines')]):
+        for s in V.solvers('synth', v):
+            cells = [_cell(V, 'synth', v, s, sp, B, 'all') for sp in splits]
+            rows.append([synth_label(v), s, max(c[1] for c in cells)] + [c[0] for c in cells] + [gain(v, s, sp) for sp in splits] + [secs(v, s)])
+    n_th = {sp: len(V.names(sp, 'all', 'synth')) for sp in splits}
+    return Table('synth', 'Held-out synthetic theorems (%s): solved (%%) within %s probes, and the gain over blind search in percentage points with a 95%% interval over the theorems.' % (', '.join('%s: %d' % kv for kv in n_th.items()), B or 'the largest budget'),
+                 ['network', 'search', 'seeds'] + ['%s' % sp for sp in splits] + ['Δ vs blind, %s (pp)' % sp for sp in splits] + ['seconds / theorem'], rows, align='llr' + 'r' * (2 * len(splits) + 1),
+                 notes=['dev (a pilot: it also chose the checkpoint, by its loss) and test_iid are drawn like the training theorems, test_comp composes lemmas the training theorems do not; no network was trained on any of them.  Blind search is deterministic, so its row is one run.  The last column is the mean wall-clock per theorem, for the run that made the row (blind search\'s is that of its larger budget).  A probe of the network\'s search costs several times the wall-clock of a probe of blind search, so blind search is also given `synth_eval_blind_mult` times the probes (the row marked equal compute; its gain is over blind search at the networks\' probes): compare the probes and the seconds.'])
+
+
+
+H7_SEARCH = 'ida'                       # (the search H7 is about: IDA* with the network's costs; blind search is the same IDA* with the engine's costs)
+
+
+def blind_budget(P):
+    """the probes of blind search on the synthetic theorems: the networks' budget times `synth_eval_blind_mult` (a probe of the network's search costs about that much more wall-clock); None if it is not larger than theirs"""
+    cap = int(P.get('synth_eval_probes') or 0); mult = int(P.get('synth_eval_blind_mult') or 1)
+    return cap * mult if cap and mult > 1 else None
+
+
+def verdict_word(diff, prob, p_holm):
+    """the words of PAPER_PLAN 3.5 for a difference that was predicted to be positive: `supported` (the interval over seeds excludes 0 after Holm's correction AND the bootstrap over theorems excludes 0), `suggestive` (exactly one of them, or the
+    seed interval only before the correction), `not distinguishable` (neither); a difference that is clearly negative is `reversed`"""
+    def excludes(d): return not (math.isnan(d.get('low', NAN)) or math.isnan(d.get('high', NAN))) and (d['low'] > 0 or d['high'] < 0)
+    s_raw, b_ok = excludes(diff), excludes(prob)
+    s_ok = s_raw and not math.isnan(p_holm) and p_holm < 0.05
+    if not (s_ok or b_ok or s_raw): return 'not distinguishable'
+    if diff['mean'] < 0 and prob.get('mean', diff['mean']) < 0: return 'reversed'
+    return 'supported' if (s_ok and b_ok) else 'suggestive'
+
+
+def h7_table(C, P):
+    """H7 (confirmatory, PAPER_PLAN 3.4) on the held-out synthetic theorems: the search that follows the policy pre-trained on the most synthetic theorems, against (a) blind search and (b) the same search with an untrained network of the same
+    seed, on each split; paired by seed (t-interval and paired t over the training seeds; blind search is one deterministic run and counts for every seed), a bootstrap over the theorems, Holm over the four contrasts; H8 (exploratory): the same
+    network against the one pre-trained on the fewest."""
+    V = C.view('library')
+    if 'synth' not in {r['group'] for r in V.rows}: return None
+    smax = _smax(P); sizes = sorted(set(P.get('synth_sizes', ())) - {0})
+    if smax is None or 'pre_n%d' % smax not in V.variants('synth'): return None
+    net = 'pre_n%d' % smax; small = 'pre_n%d' % sizes[0] if len(sizes) > 1 and 'pre_n%d' % sizes[0] in V.variants('synth') else None
+    B = min(int(P.get('headline') or 10 ** 9), int(P.get('synth_eval_probes') or 10 ** 9)); B = None if B >= 10 ** 9 else B
+    splits = [sp for sp in SYNTH_SPLITS if V.names(sp, 'all', 'synth')]
+    Bb = blind_budget(P)
+    def contrast(sp, a, b, solver_b, Bside=B):
+        names = V.names(sp, 'all', 'synth'); Ma = V.success('synth', a, H7_SEARCH, sp, B, names=names); Mb = V.success('synth', b, solver_b, sp, Bside, names=names)
+        if not Ma.data.size or not Mb.data.size: return None
+        if Mb.data.shape[0] == 1 and Ma.data.shape[0] > 1: Mb = EC.Matrix(Ma.seeds, Mb.names, np.repeat(Mb.data, Ma.data.shape[0], axis=0))      # (blind search: one deterministic run for every seed)
+        common = sorted(set(Ma.seeds) & set(Mb.seeds))
+        if not common: return None
+        A = Ma.data[[Ma.seeds.index(x) for x in common]]; Bm = Mb.data[[Mb.seeds.index(x) for x in common]]
+        ok = ~(np.isnan(A).any(axis=0) | np.isnan(Bm).any(axis=0))
+        if not ok.any(): return None
+        diff = ST.paired_seed_diff(A[:, ok].mean(axis=1), Bm[:, ok].mean(axis=1)); prob = ST.paired_problem_bootstrap(A[:, ok], Bm[:, ok])
+        return len(common), int(ok.sum()), diff, prob
+    items = []                                                                                                    # (label, split, result, in the confirmatory family)
+    for sp in splits:
+        plan = [('%s + %s minus blind search' % (net, H7_SEARCH), 'blind', 'blind', True, B), ('%s + %s minus untrained network + %s' % (net, H7_SEARCH, H7_SEARCH), 'init', H7_SEARCH, True, B),
+                ('%s + %s minus %s + %s (H8, exploratory)' % (net, H7_SEARCH, small, H7_SEARCH), small, H7_SEARCH, False, B)]
+        if Bb: plan.append(('%s + %s minus blind search with %d probes (equal compute, exploratory)' % (net, H7_SEARCH, Bb), 'blind', 'blind', False, Bb))
+        for lab, b, sb, conf, Bs in plan:
+            if b is None or (b not in V.variants('synth') and b != 'blind'): continue
+            r = contrast(sp, net, b, sb, Bs)
+            if r: items.append((lab, sp, r, conf))
+    if not items: return None
+    fam = [i for i, it in enumerate(items) if it[3]]; adj = dict(zip(fam, ST.holm([items[i][2][2]['p'] for i in fam])))
+    rows = []
+    for i, (lab, sp, (k, n, diff, prob), conf) in enumerate(items):
+        ph = adj.get(i, float('nan'))
+        rows.append([lab, sp, k, n, pp(diff), pval(diff['p']), pval(ph) if conf else '--', pp(prob), verdict_word(diff, prob, ph) if conf else 'exploratory'])
+    return Table('h7', 'H7 on the held-out synthetic theorems, within %s probes: difference in the share solved (percentage points), first minus second.' % (B or 'the largest budget'),
+                 ['Comparison', 'split', 'seeds', 'theorems', 'Δ over seeds [95% CI]', 'p (paired t)', 'p (Holm)', 'Δ over theorems [95% CI]', 'word (PAPER_PLAN 3.5)'], rows,
+                 notes=['The first interval is the t-interval of the per-seed differences (it carries the training noise), the second a bootstrap over the theorems (it carries the sampling of the theorems); blind search is one deterministic run.  '
+                        'Holm covers the four contrasts against blind search and against the untrained network; the rows marked exploratory are not in the family: H8 (more data against less) and the network at its probes against blind search at `synth_eval_blind_mult` times as many (about the same wall-clock on a CPU: how much of the gain is probe efficiency and how much is compute).  The untrained network has the architecture and the seed of the trained one: '
+                        'if it did as well, the gain would be the search, not what was learned.'], align='llrrrrrrl')
 
 
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ the studies of the network and of the start
@@ -432,10 +550,11 @@ def system_table(C):
 
 HYPER = [      # (profile key, description)
     ('seeds', 'training seeds (replicates)'), ('synth_target', 'synthetic train theorems (the largest pre-training pool)'), ('synth_attempts', 'generator attempts'), ('synth_sizes', 'synthetic theorems used for pre-training (scaling study)'),
-    ('pre_epochs', 'pre-training epochs'), ('pre_batch', 'batch size (decisions)'), ('ft_epochs', 'fine-tuning epochs (after pre-training)'), ('ft_lr', 'fine-tuning peak learning rate'), ('scratch_epochs', 'epochs from scratch (no pre-training)'),
+    ('pre_epochs', 'pre-training epochs (at most)'), ('pre_patience', 'pre-training stops after this many epochs without a better dev loss (0: never)'), ('pre_batch', 'batch size (decisions)'), ('ft_epochs', 'fine-tuning epochs (after pre-training)'), ('ft_lr', 'fine-tuning peak learning rate'), ('scratch_epochs', 'epochs from scratch (no pre-training)'),
     ('rl_iters', 'expert-iteration iterations'), ('rl_episodes', 'tasks per iteration'), ('rl_probes', 'probe budget per task during training'), ('ei_updates', 'gradient steps per iteration'), ('boot_per_iter', 'library lemmas admitted per iteration at most'),
     ('ppo_iters', 'PPO iterations'), ('ppo_episodes', 'PPO episodes per iteration'),
     ('eval_probes', 'largest probe budget at evaluation'), ('headline', 'budget of the tables'), ('eval_budgets', 'budgets of the curves'), ('eval_time_limit', 'time limit per problem (s)'), ('eval_splits', 'evaluated splits'),
+    ('synth_eval_n', 'held-out synthetic theorems per split at evaluation'), ('synth_eval_probes', 'largest probe budget of a network on the synthetic theorems'), ('synth_eval_blind_mult', 'blind search runs with this many times as many probes (equal-compute reference)'), ('synth_eval_splits', 'synthetic splits evaluated'),
     ('device', 'device of the training runs'), ('workers', 'worker processes per run'), ('threads', 'torch threads per process')]
 
 
@@ -665,7 +784,7 @@ def all_tables(C):
     for key, t in (('system', system_table(C)), ('bank', bank_table(C)), ('main', main_table(C, P)), ('strict', strict_table(C, P)), ('ablations', ablation_table(C, P)),
                    ('solvers', solver_table(C, P, 'solvers', 'solvers', 'The same networks under different provers: problems solved (%%) within %s probes.')),
                    ('mw', solver_table(C, P, 'mw', 'mw', 'The manager-worker agent and its ablations: problems solved (%%) within %s probes.')),
-                   ('scaling', scaling_table(C, P)), ('arch', arch_table(C, P)), ('size', size_table(C, P)), ('laws', laws_table(C, P)), ('scratch', scratch_table(C, P)), ('levels', level_table(C, P)), ('generator', generator_table(C)), ('library', library_table(C, P)), ('cost', cost_table(C, P)), ('soundness', soundness_table(C)), ('hyper', hyper_table(C))):
+                   ('scaling', scaling_table(C, P)), ('synth', synth_table(C, P)), ('h7', h7_table(C, P)), ('arch', arch_table(C, P)), ('size', size_table(C, P)), ('laws', laws_table(C, P)), ('scratch', scratch_table(C, P)), ('levels', level_table(C, P)), ('generator', generator_table(C)), ('library', library_table(C, P)), ('cost', cost_table(C, P)), ('soundness', soundness_table(C)), ('hyper', hyper_table(C))):
         if t is not None: T[key] = t
     for k, t in throughput_tables(C).items(): T[k] = t
     return T

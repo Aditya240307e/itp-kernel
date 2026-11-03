@@ -43,6 +43,13 @@ def gate_record(cmd, ok, dt, text):
     return rec
 
 
+def needs_rlimit_as(cmd):
+    """True if the gate limits the address space (RLIMIT_AS): Linux enforces that limit, macOS does not, so there such a gate would fail without a defect behind it"""
+    try:
+        with open(os.path.join(itp_paths.TESTS, cmd[0])) as f: return 'resource.RLIMIT_AS' in f.read()                  # (a gate that sets the limit through the resource module)
+    except OSError: return False
+
+
 def run_one(cmd, timeout):
     t0 = time.time()
     path = os.path.join(itp_paths.TESTS, cmd[0])
@@ -74,6 +81,10 @@ def main(argv):
         print('unknown gate(s): %s' % ', '.join(sorted(unknown))); return 2
     if names: cmds = [c for c in everything if os.path.basename(c[0]) in names]          # named gates: exactly these, wherever they are registered
     else: cmds = list(REG.GATE_CMDS) + list(REG.BANK_GATE_CMDS) + [c for c in extra if c not in REG.GATE_CMDS]
+    skipped = []
+    if sys.platform != 'linux':                                                                    # (a Mac: the gates that need RLIMIT_AS are skipped and said so; the rest is a real run, but not the full one)
+        skipped = [c for c in cmds if needs_rlimit_as(c)]; cmds = [c for c in cmds if c not in skipped]
+        if skipped: print('SKIP  %d gate(s) that limit the address space (RLIMIT_AS, which only Linux enforces): %s -- this is NOT the full set' % (len(skipped), ', '.join(os.path.basename(c[0]) for c in skipped)), flush=True)
     t0, failed = time.time(), []
     pending, running = list(cmds), {}
     heavy = lambda c: os.path.basename(c[0]) in REG.HEAVY_GATES
@@ -93,7 +104,7 @@ def main(argv):
                 print('%-5s %-34s %6.1fs  %s' % ('PASS' if ok else 'FAIL', label(cmd), dt, last[:90]), flush=True)
                 if not ok:
                     failed.append(os.path.basename(cmd[0])); print('      ---- tail of output ----\n      ' + '\n      '.join(text.strip().split('\n')[-12:]), flush=True)
-    print('%d/%d gates passed in %.0fs%s' % (len(cmds) - len(failed), len(cmds), time.time() - t0, ('   FAILED: ' + ', '.join(failed)) if failed else ''))
+    print('%d/%d gates passed in %.0fs%s%s' % (len(cmds) - len(failed), len(cmds), time.time() - t0, ('   FAILED: ' + ', '.join(failed)) if failed else '', ('   (%d skipped on this platform)' % len(skipped)) if skipped else ''))
     return 1 if failed else 0
 
 
