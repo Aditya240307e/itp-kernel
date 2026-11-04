@@ -4,6 +4,7 @@ A **gate** is a script that exits 0 and prints no `GATE: FAIL` iff the property 
 runs them, `mutants/mutate.py` runs the kernel ones against every mutant of the code. Gates are scripts, not pytest tests: each is a self-contained program with its own fixtures, run from its own directory.
 
 ```
+make gates-quick                                  six fast kernel gates and example 01: a smoke test of a fresh build (under 10 seconds)
 python3 tests/run_gates.py                        the 49 default gates (the 47 kernel, tactic, environment and bank gates, and the contest gates S49 and S50), two at a time (about 45 minutes on two cores)
 python3 tests/run_gates.py -j 1                   serially (use this when timing matters)
 python3 tests/run_gates.py --ml                   + the learner's gates S44 and S51 (need torch and gymnasium)
@@ -22,7 +23,7 @@ A gate can also be run by hand, from anywhere: `python3 tests/library/s23_ring_t
 |---|---|
 | `kernel/` | the kernel against the frozen reference (lockstep), its soundness, boundaries and performance guards, the independent checker, quotients, proof irrelevance, the work budget |
 | `library/` | the libraries and the decision procedures built on them: `ring`, binary naturals, the integers, `linarith`, number theory |
-| `environment/` | the learner's engine: observation, menus, probes, the action language, the typed term builder, the recorder |
+| `environment/` | the proof environment: engine, observation, menus, probes, the action language, the typed term builder, the recorder, hindsight |
 | `problems/` | the problem bank: faithfulness of statements, reference proofs, dataset |
 | `learner/` | features, policy network, search, Gymnasium environment, RL bookkeeping |
 | `synth/` | the synthetic theorem generator (`src/python/synth`) and the datasets it writes: determinism, records replayed from their data, tamper tests, merge and splits, the command line |
@@ -86,14 +87,14 @@ Times are seconds on the 2-core box with two gates at a time (the last full run,
 | `s34_nt_tests.py` | 111 s | Elementary number theory over the integers (nt_lib.py) and the first olympiad problems (imo_lib.py), `linear_combination` (lincomb.py). |
 | `s37_atoms_tests.py` | 7 s | Atoms up to the arithmetic in their arguments (ring.py: Ring.canon / canon_arg, shared by `ring`, `linarith`, `linear_combination`). |
 
-### The learner's environment (`tests/environment`)
+### The proof environment (`tests/environment`)
 
 | gate | time | what it protects |
 |---|---|---|
 | `s40_actions_tests.py` | 74 s | The second action language: the typed term builder (gym_build.py), the actions that say their arguments (gym_acts.py), their portable form, and the recorder (recorder.py) that turns authored proofs into action sequences. |
 | `s42_pins_tests.py` | 4 s | Pins: small direct tests of the corner cases of the typed term builder (gym_build.py) and of the action language (gym_acts.py) that the larger gates (S36, S38, S40) only cross. |
 | `s47_hindsight_tests.py` | 330 s | Hindsight: the proof tree of an episode (gym_tree.py) and the theorems it proved -- exact, replayed in a fresh engine, kernel-checked and judged by the independent checker; tamper tests; the restricted second opinion (recheck.py). |
-| `s36_gym_tests.py` | 18 s | The learner's environment on the hybrid kernel (gym_env.py, gym_search.py), the `clear` tactic and the observation of goals. |
+| `s36_gym_tests.py` | 18 s | The proof environment on the hybrid kernel (gym_env.py, gym_search.py), the `clear` tactic and the observation of goals. |
 | `s38_terms_tests.py` | 13 s | The actions that carry terms (INSTANTIATE, USE), the term pool they draw from, probes with a chosen work budget, goal identity up to irrelevant order, and the search on cost. |
 
 ### The problem bank (`tests/problems`)

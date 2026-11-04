@@ -1,6 +1,6 @@
 """03 -- a problem of the bank: what it says, whether the formalisation says that, and its recorded proof.
 
-    python3 examples/03_bank_problem.py [problem_name]        (about 40 s: the bank's world of ~580 globals is built from scripts; default problem: imo1959_p1)
+    python3 examples/03_bank_problem.py [problem_name]        (about 90 s: the bank's world of ~740 globals is built from scripts; default problem: imo1959_p1)
 
 The bank (src/python/problems/) holds formal olympiad problems.  Each one is a theorem statement in a library world, together with
 

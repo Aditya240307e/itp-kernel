@@ -1,6 +1,6 @@
 """06 -- the problem bank as a Gymnasium environment, at the level of the policy's DECISIONS.
 
-    python3 examples/06_gymnasium_env.py [problem_name]       (about a minute; needs gymnasium, numpy; default problem: imo1959_p1)
+    python3 examples/06_gymnasium_env.py [problem_name]       (about 85 s; needs gymnasium, numpy; default problem: imo1959_p1)
 
 `BankEnv` (src/python/learner/bank_env.py) wraps the engine of example 04 in the Gymnasium interface.  There is no text: the observation is the goal as arrays of token ids plus integer rows that
 describe the OPTIONS of the question currently asked, and the action is the index of one option.  An agent does not pick "an action" at once; it answers a short sequence of questions that assemble

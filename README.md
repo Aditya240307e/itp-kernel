@@ -1,114 +1,218 @@
-# ITP -- a trustworthy interactive theorem prover, and a gym for learning olympiad mathematics
+# ITP
 
-A small, heavily tested **trusted kernel** in C++23, an **untrusted** Python layer on top of it that does all the convenient things (tactics, decision procedures, libraries from Peano arithmetic to elementary
-number theory, a problem bank of formal olympiad problems), and a **gym environment** with no text interface in which a learner proves them. The point of the split is that nothing above the kernel has to be
-believed: a tactic, a decision procedure, a search or a neural network can be wrong in any way it likes, and a finished proof is still checked by the kernel (and, independently, by a second checker written from the
-typing rules in Python), so a wrong tool wastes time and cannot make a false statement provable.
+**An interactive theorem prover with a small trusted kernel.**
 
-Targets: IMO-level algebra and number theory first (the problem bank is the beginning of that dataset), then undergraduate mathematics. **Status, honestly:** the kernel, the libraries, the environment, the data
-and the experiment pipeline are built and heavily tested; the learners are a baseline. No large training run has been made and nothing has been measured on the current dataset: the paper's experiments are for
-`scripts/` to run (`docs/EXPERIMENTS.md`), and `docs/TRAINING.md` says what the first, small measurements were and how little they show.
+ITP is a dependently typed proof assistant in which a 7,500-line C++23 kernel decides what counts as a proof. Everything above it -- tactics, decision procedures, libraries, a bank of olympiad problems -- is untrusted Python that can only *propose* terms. A second type checker, written separately from the typing rules, re-checks whole libraries and single proofs. The code base is tested adversarially: 54 gates (test programs), a catalogue of 1707 mutants (deliberate one-rule breakages of the source that the gates must catch) and a tracker of every defect found so far.
 
-| | |
-|---|---|
-| Kernel | `src/c++/hybrid`: dependent types, inductive families (parameters, indices), structural recursion, a Prop/Type world with definitional proof irrelevance, quotients, a deterministic work budget; 7.5 k lines of C++23 plus 0.8 k of Python bindings |
-| Reference kernel | `src/c++/reference`: the frozen previous generation, byte-identical (checksums), kept as the oracle of the lockstep gates |
-| Checkers | the kernel; `indep_checker.py`, a second implementation of the typing rules written separately, and `recheck.py`, which re-checks a whole world (and the dependencies of a proof) with it; both must accept a proof |
-| Libraries | unary and binary naturals, the integers as a quotient of `N x N`, ordered ring laws, number theory (divisibility, Bezout, gcd, primes); built by tactic scripts, no axioms (four classical axioms are an optional layer) |
-| Decision procedures | `ring` (naturals, binary naturals, integers), `linarith`, `nlinarith`, `linear_combination`, `interval_cases` -- each produces a certificate the kernel checks |
-| Problem bank | **268 formal problems** (levels 1-5): 41 IMO, 18 ISL and 1 APMO problems (only 12 of them with proofs), 31 AIME, 72 AMC-style problems written for the bank, 105 graded problems, classical results and exercises; **187 have a kernel-checked reference proof** (a sequence of actions), 81 are statement-only. Every problem says where its text comes from (`origin`) and whether it was compared with a source (`verified`) -- the contest texts are paraphrases, some written from memory (`docs/BANK.md`). Dataset v2 in `data/dataset_v2`: the problems and proofs, 453 library lemmas with proofs, a label for every action (direction, depth, size of the subtree), and the theorems that the reference proofs contain, each with its own proof; splits by problem family |
-| Environment | `gym_env` / `gym_acts`: goals as data, menus of legal actions, actions that *say* their term arguments, atomic probes; `gym_tree`: the proof tree of an episode and the theorems it proved (hindsight); `learner/bank_env.py` is a Gymnasium environment (`ITPBank-v0`) that starts on any goal given as data, has a step budget and reports what each action achieved |
-| Learner | features, a policy network over *options* with a swappable encoder of the goal (transformer, bidirectional GRU, dilated CNN, bag of tokens: one class each behind `PolicyNet.encode`; `ml_init.py` makes an untrained one of any kind); behaviour cloning (also as pre-training on synthetic theorems); provers: sampling, policy-guided IDA\*, MCTS, a manager-worker design, with blind and random baselines; expert iteration and PPO with **hindsight** (every goal an attempt closes on the way is a theorem with a proof) and a **bootstrapped library** (kernel-checked hindsight theorems become premises); all measured by one protocol (kernel-checked proofs within a budget of probes). A baseline, not a result: see `docs/TRAINING.md` |
-| Synthetic data | `src/python/synth`: a generator of kernel-checked theorems (proof trees grown backwards from the library's lemmas, labelled by depth, lemmas and hypotheses; reproducible from a seed and an index; verified from the data alone), shards, splits, a dataset card and saturation statistics; no statement of the bank enters it (excluded by digest and by shape); see `docs/GENERATOR.md` |
-| Experiments | `scripts/` + `src/python/experiments`: one resumable pipeline that generates the data, pre-trains, fine-tunes, runs the RL variants and the ablations over several seeds, evaluates every model with the same provers on the same problems, measures throughput and memory, runs the studies of other encoders, other sizes and learning from random weights, and writes the tables, figures and numbers of the paper into a results folder kept apart from it (`results/`; `paper/` is a TMLR skeleton); see `docs/EXPERIMENTS.md` |
-| Tests | 54 gates: 47 kernel / tactic / environment / bank gates, the problem-set gates S49-S50, the learner's gates S44 and S51, the repository gates S45-S46, the generator's gate S48; 1707 mutants of the kernel, libraries, checker and environment (none yet for the problem sets, the learner, `synth` and the experiment pipeline) to show the gates bite |
+```python
+# from examples/01_prove_with_tactics.py -- `ring` assembles a proof term; the kernel checks it
+w.prove('ex_binomial', forall([Nat, Nat], lambda a, b: Eq((a + b) ** 2, a ** 2 + 2 * a * b + b ** 2)),
+        lambda p: (p.intro('a', 'b'), p.ring()))
+```
+
+* **Kernel** ([`src/c++/hybrid`](src/c++/hybrid/README.md)) -- dependent types; inductive families with parameters and indices; structural recursion; a `Prop`/`Type` world with definitional proof irrelevance; quotients; a deterministic, fail-closed work budget. Called from Python through [nanobind](https://github.com/wjakob/nanobind).
+* **Tactics and decision procedures** ([`authoring`](src/python/authoring/README.md)) -- `intro`, `apply`, `rw`, `cases`, `induct`, `have`, `obtain`, `calc`, `by_contra`, `interval_cases`, and `ring` (unary and binary naturals, integers), `linarith`, `nlinarith`, `linear_combination`. Each one ends in an ordinary proof term that the kernel type-checks.
+* **Independent checker** ([`checker`](src/python/checker/README.md)) -- a second implementation of the typing rules (named terms, capture-avoiding substitution, weak-head normalisation) that shares no code with the kernel, and `audit`, which lists the axioms a theorem rests on.
+* **Libraries** ([`library`](src/python/library/README.md)) -- Peano arithmetic, binary naturals, the integers as a quotient of pairs of naturals, ring laws, divisibility, division with remainder, Bezout, gcd, primes, Euclid's lemma; all proved by tactic scripts. The naturals, binary naturals and integers use no axiom; the number-theory library adds one, excluded middle.
+* **Problem bank** ([`problems`](src/python/problems/README.md)) -- **268 formal problems** (levels 1-5: IMO, ISL, AIME, AMC-style and classical results). Every statement is checked against an independent description of what the problem says. **187 have a kernel-checked reference proof**; the other 81 are statement-only.
+* **Proof environment** ([`environment`](src/python/environment/README.md)) -- goals as data, menus of legal actions, actions that *say* their term arguments through a typed term builder, atomic probes with rollback, a recorder that turns authored proofs into action sequences, and a Gymnasium wrapper (`ITPBank-v0`).
+
+ITP is used as a Python library: definitions and tactic proofs are written in Python; there is no separate surface language and no command-line prover. The mathematics it covers is elementary algebra and number theory over the naturals and the integers (see [Limitations](#limitations)).
+
+[Quick start](#quick-start) · [Proving something](#proving-something) · [How it is built](#how-it-is-built) · [Why believe it](#why-believe-it) · [The Python environment](#the-python-environment) · [Limitations](#limitations) · [Repository layout](#repository-layout)
 
 ## Quick start
 
-Requirements: a C++23 compiler (g++ 13 or recent clang), Python 3.13 with `pip install -r requirements.txt` (numpy, scipy, nanobind; torch, gymnasium and matplotlib for the learner and the experiments). Developed and
-tested on Linux. For a Mac (Apple silicon) read section 10 of `docs/EXPERIMENTS.md` and run `python3 tools/preflight.py` first: it builds the kernel, checks the compiler (Xcode 16 or newer), and measures the speed; the gates that limit memory (S19, S25, S30, S31, S34, S37, S40, S50) and the soundness evidence need Linux.
+You need Linux with **g++ 13 or newer** (the kernel uses C++23 `std::expected`), `make`, and **Python 3.13** (the version it is developed and tested with). From the root of the repository:
 
-```
-make kernel                              # builds build/itp_env_lnl*.so (the kernel) and build/itp_env_ref*.so (the oracle)   [python3 src/python/build_kernel.py]
-python3 examples/01_prove_with_tactics.py
-python3 tests/run_gates.py -j 2          # the 49 default gates, about 45 minutes on two cores;  make gates-all runs all 54 (about an hour)
-make dataset-verify                      # replay every recorded proof and sub-theorem of data/dataset_v2 in a fresh engine (about 25 minutes)
-make soundness                           # the soundness evidence in one stamped folder (results/soundness): every gate, every mutant, fuzzing, the independent checker; hours, use J=8 on a big machine
-make audit                               # the statement audit in one stamped folder (results/audit): every statement of the bank against its intended meaning, the cautions, who has read it; minutes
-make tool-mutants J=8                    # fault injection into the tools that make that evidence (soundness folder, audit, number checker, record of the code): their tests must fail for every fault (252 faults of six tools; 47 minutes on two cores)
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install "numpy>=2.5" "scipy>=1.18" "nanobind>=3.1"     # all that the prover, the libraries and the gates need
+make kernel                                                 # compiles build/itp_env_lnl*.so and the frozen oracle kernel: about 75 s
+python3 examples/01_prove_with_tactics.py                   # a few seconds; ends with EXAMPLE OK
+make gates-quick                                            # six kernel gates and the example again: under 10 s
 ```
 
-The experiments (they need torch; a GPU is optional and makes the networks faster):
+`pip install -r requirements.txt` also installs PyTorch, Gymnasium and Matplotlib, which only the optional learner and experiment code uses ([below](#optional-components)). The Python scripts find the repository from their own location, so they run from any directory. macOS on Apple silicon has not been run yet: it needs Xcode 16 or newer, and `python3 tools/preflight.py --quick` checks the toolchain of a new machine.
+
+## Proving something
+
+Start Python in the repository root with `PYTHONPATH=src/python python3`. A **world** is a kernel plus a name table, and the libraries build worlds from scratch each time (the natural-number library takes a fraction of a second). A **proof** is a list of goals that tactics refine; `print(p)` shows them.
+
+```python
+import itp_paths, nat_lib              # itp_paths makes every module importable by its plain name
+from tactics import Proof
+
+w = nat_lib.build_nat()                # 129 globals: Nat, Eq, And, Or, Ex, Le, add, mul, pow ... and their lemmas
+Nat, Zero, Succ, Eq, forall = w['Nat'], w['Zero'], w['Succ'], w.Eq, w.forall_
+
+# a function by structural recursion; the kernel checks that the recursion is structural
+w.recursive('twice', w.arrow(Nat, Nat),
+            lambda f: w.fun([Nat], lambda n: w.match(n, lambda _: Nat, [Zero, lambda k: Succ(Succ(f(k)))])))
+twice = w['twice']
+
+# a theorem about it, one tactic at a time
+p = Proof(w, forall([Nat], lambda n: Eq(twice(n), n + n)), 'twice_eq_add_self')
+p.intro('n')
+p.induct('n', names=['k', 'ih'])
+print(p)
+#   goal 0:
+#   n : Nat
+#   |- Zero = Zero
+#
+#   goal 1:
+#   n : Nat
+#   k : Nat
+#   ih : twice k = k + k
+#   |- Succ (Succ (twice k)) = Succ (k + Succ k)
+p.refl()                               # the base case holds by computation
+p.rw('ih')                             # rewrite with the induction hypothesis
+print(p)
+#   n : Nat
+#   k : Nat
+#   ih : twice k = k + k
+#   |- Succ (Succ (k + k)) = Succ (k + Succ k)
+p.rw('add_succ')                       # n + Succ m = Succ (n + m) turns the goal into x = x, which rw closes
+print(p.done)                          # True
+```
+
+`w.prove(name, statement, script)` runs a whole script, extracts the finished term and hands it to the kernel's checked entry point; only then does the theorem exist in the world.
+
+```python
+def by_induction(p):
+    p.intro('n')
+    p.induct('n', names=['k', 'ih'])
+    p.refl()
+    p.rw('ih')
+    p.rw('add_succ')
+
+w.prove('twice_eq_add_self', forall([Nat], lambda n: Eq(twice(n), n + n)), by_induction)
+```
+
+A tactic that cannot do its job says why, and nothing is admitted. Here a false identity is refused, with both normal forms:
+
+```python
+w.prove('bad', forall([Nat, Nat], lambda a, b: Eq((a + b) ** 2, a ** 2 + b ** 2)),
+        lambda q: (q.intro('a', 'b'), q.ring()))
+# author.AuthorError: ring failed: the two sides have different normal forms
+#   left:  a^2 + 2*a*b + b^2
+#   right: a^2 + b^2
+#   (and the goal that was being proved)
+```
+
+Finally, the second checker and the auditor:
+
+```python
+import recheck, audit
+recheck.recheck_world(w)                                         # every global, re-checked by the independent checker
+# (131, [])                                                      # 131 globals checked, no problems
+audit.dependencies_of_global(w.k, w.gid['twice_eq_add_self'])    # what the theorem rests on: (axioms, quotient primitives)
+# (set(), set())
+```
+
+[`examples/`](examples/README.md) has eight programs that continue from here: integer arithmetic with `ring`, `linarith` and `nlinarith`; an IMO problem of the bank with its proof replayed and re-checked; the proof environment. [`src/python/authoring`](src/python/authoring/README.md) lists every tactic.
+
+## How it is built
 
 ```
-make check-env                           # is this machine ready? python, torch, CUDA, memory, disk
-make smoke                               # the whole pipeline on a tiny world: do this before a real run (about 70 minutes of run time on two cores)
-PROFILE=small SEEDS=0-2 make experiments        # the shape of every result: the whole bank, 5 000 synthetic train theorems, 3 seeds
-DEVICE=cuda PROFILE=full SEEDS=0-6 make experiments      # the paper: 60 000 synthetic train theorems, 7 seeds (default 5); resumable, `make status` says where it is
-./scripts/run_all.sh --profile full --seeds 0-6 --device cuda      # the same, as options of the script (every setting is one: `--help`)
-make report ; make paper                 # tables, figures, numbers (paper/generated/); paper/main.pdf (needs latexmk and the Latin Modern fonts, which tmlr.sty loads)
+  untrusted     library scripts (Nat, N, Z, number theory)      problem bank      proof environment
+  Python        tactics: intro apply rw cases induct have ...   ring  linarith  nlinarith
+                authoring layer: World, Term, Proof
+                                      |
+                                      |  terms, through the nanobind module itp_env_lnl
+                                      v
+  trusted       C++23 kernel -- src/c++/hybrid/itp_kernel.hpp (7,500 lines) + itp_bindings.cpp (788 lines)
+                type checker . admission of inductives, recursion, quotients . conversion by NbE . work budget
+                                      |
+                                      |  exported terms and declarations (Kernel.dump_raw, Kernel.global_info)
+                                      v
+  cross-check   independent checker -- src/python/checker/indep_checker.py (673 lines)
+                named terms . weak-head normalisation . its own universe, guard and match rules
 ```
 
-Every script finds the repository through its own location (`src/python/itp_paths.py`), so it works from any directory; `ITP_BUILD_DIR` selects another build directory.
+**The kernel** is one header. Terms have eleven node kinds: variable, application, lambda, Pi, universe `Type k`, constant, `match`, metavariable, `let`, a local fixpoint, and a placeholder for a universe parameter. Bound variables are de Bruijn *indices* and the hypotheses of the context are *levels*, so a closed term has one canonical form and a hypothesis keeps its identity while the context grows. Terms are hash-consed into a DAG, so syntactic equality is an integer comparison and sharing is never lost. Evaluation is normalisation by evaluation with closures over persistent environments; conversion tries a quick syntactic check first and keeps sharing tables (`ITP_VERIFY_MEMO=1` makes the kernel re-decide every answer it took from a table). Inductive families (parameters and indices) are admitted after a strict-positivity and a universe check; recursion is `Fix` with a structural-decrease guard; the `Prop`/`Type` world (kernel option `prop_elim`) makes `Type 0` impredicative with definitional proof irrelevance, decided by the type checker itself; a quotient is five ordinary constants, whose types the kernel builds, and one reduction rule; `funext` is then a theorem. The tactics the Python layer calls (`intro`, `apply`, `cases`, `induct`, `rewrite`, `exact`, `change`) work on metavariables with Miller-pattern unification and roll back on any failure; the terms they produce are re-checked when the theorem is declared. Every guarded function spends one unit of a deterministic **work budget** and checks the stack: a pathological input ends in `FuelExhausted` or `StackExhausted` -- a failed check, never an accepted one. [More](src/c++/hybrid/README.md).
 
-## Examples (`examples/`, each ends with `EXAMPLE OK`; the gate S46 runs them)
+**The authoring layer** (untrusted) builds terms with higher-order abstract syntax -- `w.pi(A, lambda x: ...)`, Python operators on `Term`s that mean whatever the world's notation says -- and drives the kernel's checked entry points, so a bug there can make a library fail to build and cannot make a false theorem appear. `ring` normalises both sides to a canonical sum of monomials and emits the chain of `ring_*` lemma applications that justifies every step; `linarith` finds non-negative multipliers with an exact-arithmetic simplex and emits the certificate as a proof term; `nlinarith` first adds the squares and pairwise products of the hypotheses. [More](src/python/authoring/README.md).
+
+**The libraries** are Python scripts that declare types and prove lemmas through the authoring layer, in one chain: `lnl_base` (logic, equality, `Nat`), `nat_lib`, `bin_lib` (binary `Pos` and `N`, with a bridge to `Nat`), `int_lib` (`Z` as a quotient of `N x N`), `nt_lib` (number theory), `ext_lib` and `imo_lib`. Every lemma is proved and re-checked each time a world is built; nothing is stored. [More](src/python/library/README.md).
+
+**The independent checker** re-implements the typing rules on named terms with capture-avoiding substitution and weak-head normalisation. It reads the kernel's exported terms and declarations and checks that every global's value has its type, that the structural-recursion guard holds, that each `match` respects its motive and branch types, and that the five quotient constants have exactly the types they should. It is an alarm rather than a judge: independent in code, not in authorship, and it implements the same specification as the kernel. [More](src/python/checker/README.md).
+
+## Why believe it
+
+ITP does not claim to be proved correct; it claims to be hard to fool, and ships the evidence.
+
+* **A small trusted base.** What must be believed for "this proof is correct": the C++ kernel (about 8,300 lines with its bindings), the compiler and the machine. Tactics, decision procedures, libraries, the problem bank and the environment sit outside the boundary by construction; their mistakes cost time, not soundness.
+* **Differential testing.** The previous generation of the kernel is kept byte-identical (`src/c++/reference`, checksums in `SHA256SUMS`). The gates run the same random scripts through both kernels in lockstep and demand the same verdicts, except where a documented finding says the new kernel is deliberately stricter.
+* **Oracles and canaries.** A self-consistency oracle runs random tactic scripts and re-checks every state and every finished proof; its strict fragment must be perfectly clean. Canaries make random attempts at false statements (`False`, `0 = 1`, `forall P, P`, ...) and demand that none is verified.
+* **Mutation testing.** `mutants/` holds 1707 mutants -- each re-breaks one rule of the kernel, a tactic, the checker or the environment in an isolated copy of the tree -- and the gates must fail on each. A mutant that no gate catches is a gap in the tests unless it is listed as an equivalent mutant (22 are); [`mutants/README.md`](mutants/README.md) says what has been run and what survives.
+* **Second checker, sanitizers, fuzzing.** Several gates re-check whole libraries with the independent checker; `make sanitize` runs the kernel and bank gates under AddressSanitizer and UBSan; a fuzzer drives the proof environment with random and malformed actions.
+* **A findings log.** [`docs/FINDINGS.md`](docs/FINDINGS.md) records F1-F91, each with its status and the test that fails without the fix.
+* **Fail-closed behaviour.** A spent work budget, an exhausted stack, a nesting bound and an unknown option are all errors, and a spent budget is never read as "no".
+
+What this is not: a verification of the kernel. Soundness is *tested*, not proved, and the documents say "tested" wherever they mean it. The two checkers implement the same rules, so a flaw in the rules themselves would not show up by comparing them. The statement audit (`make audit`) compares formal statements with their intended meaning on a box of small values -- evidence of faithfulness, not a proof of it.
+
+```bash
+make gates-quick       # six kernel gates and an example: under 10 s
+make gates             # the 49 default gates: kernel, tactics, libraries, environment, bank, contest proofs (about 45 minutes on two cores)
+make gates-all         # all 54 (about an hour); J=8 make gates runs eight at a time
+make mutants-check     # every mutant of the catalogue still applies to the code (seconds)
+python3 mutants/mutate.py M83 W1     # run the mutants whose names start with these prefixes (no prefix: all of them, many hours)
+make dataset-verify    # replay every recorded proof of data/dataset_v2 in a fresh engine (about 25 minutes, 3 GB)
+make soundness         # the soundness evidence in one stamped folder, results/soundness (hours)
+make audit             # the statement audit of the whole bank, results/audit (minutes)
+make sanitize          # kernel and bank gates under ASan + UBSan (long)
+```
+
+[`tests/README.md`](tests/README.md) lists every gate with its measured time and what it protects.
+
+## The Python environment
 
 | | |
 |---|---|
-| `01_prove_with_tactics.py` | a recursive function, induction, `ring`; a false identity refused with both normal forms; a forged proof refused by the kernel; the independent re-check and the axiom audit |
-| `02_ring_linarith.py` | the integers: `ring`, `linarith`, `nlinarith` (with a hint), a refused claim |
-| `03_bank_problem.py` | an IMO problem of the bank: statement, faithfulness check, recorded proof replayed, second opinion |
-| `04_environment_episode.py` | one proof attempt as a game: observation, menu, atomic steps, a refused action |
-| `05_blind_search.py` | the blind search baseline and what it cannot do |
-| `06_gymnasium_env.py` | the Gymnasium environment: a recorded proof played decision by decision |
-| `07_read_dataset.py` | the dataset on disk: shape, splits, digests |
-| `08_hindsight.py` | an attempt that stops half-way: what each action achieved, the theorems it proved, one of them proved again from its data and judged by the independent checker |
+| Python | 3.13 is the tested version. Modules are imported by plain name (`import gym_env`); the names are unique across the tree, which gate S45 checks |
+| Core packages | `numpy`, `scipy`, `nanobind`: the kernel build, tactics, libraries, problem bank, environment and the gates |
+| Optional packages | `torch`, `gymnasium`, `matplotlib`: only the Gymnasium wrapper, the learner and the experiment pipeline |
+| Import path | every script starts with one line that puts `src/python` on `sys.path` and imports `itp_paths`; a session does the same with `PYTHONPATH=src/python` and `import itp_paths`. The root of the repository is derived from the location of that file, never from the working directory |
+| Build directory | `build/`; set `ITP_BUILD_DIR` to use another. The two kernels (`itp_env_lnl`, `itp_env_ref`) are separate extension modules that can be imported into one process |
+| Compiler | `CXX=g++-13 make kernel` picks a compiler; `python3 src/python/build_kernel.py --help` lists the build options |
+| Memory | the libraries are cheap; building the whole problem bank takes about 80 seconds and 1.3 GB; the bank gate S50 peaks near 4.6 GB, and S19, S25, S30, S31, S34, S37, S40 and S50 limit the address space, so they need Linux |
+| Make | `make help` lists the targets; `PY=python3.13` and `J=n` (gates run at once) are the variables |
 
-## Layout
+[`src/python/README.md`](src/python/README.md) explains the layout of the Python code and the import mechanism.
 
-```
-src/c++/hybrid/            the kernel (itp_kernel.hpp, nanobind bindings itp_bindings.cpp)
-src/c++/reference/         the frozen reference kernel (SHA256SUMS)
-src/python/itp_paths.py    where everything lives; every script's first line imports it
-src/python/build_kernel.py builds either kernel
-src/python/authoring/      the untrusted authoring layer: World, tactics, ring, linarith, linear_combination, injectivity lemmas
-src/python/checker/        the independent checker, recheck (a second opinion on a whole world), audit (what a theorem rests on)
-src/python/library/        the libraries, built by tactic scripts: naturals, binary naturals, integers, number theory, IMO statements
-src/python/environment/    the gym: engine, action language, typed term builder, policy assembler, search, recorder, proof trees (hindsight)
-src/python/problems/       the problem bank (bank_*.py), faithfulness checks, duplicate screen, splits, the dataset builder, sub-theorems
-src/python/learner/        features, network, training (ml_bc, ml_ei, ml_ppo), provers (ml_agents, ml_search, ml_mcts, ml_hier), hindsight and library (ml_her, ml_lemmas), evaluation, the Gymnasium environment
-src/python/synth/          the synthetic theorem generator: lemma pool, proof trees grown backwards, records, shards, merge and splits, verification from the data alone (docs/GENERATOR.md)
-src/python/experiments/    the experiment graph, scheduler, collector, statistics, tables, figures, throughput benchmarks, report (docs/EXPERIMENTS.md)
-scripts/                   the shell scripts that run the experiments (00_check_env ... 09_audit, run_all, smoke_test, status; env.sh and local.env.example hold the settings)
-paper/                     the TMLR paper skeleton (main.tex, bibliography, style) and generated/ (tables and figures from `make report`); a release archive also holds `main.pdf`, a **preview**: compiled from a `make smoke` run, so the tables and figures that depend on runs show the numbers of a tiny test world (19 problems, 2 seeds) and every page says so; the facts about the repository and the benchmark (Tables 1 and 2) are real
-tests/                     the gates by role (kernel, library, environment, problems, learner, synth, repo), shared modules (support), fuzzers, benchmarks, golden files
-mutants/                   the mutation catalogue (1707 mutants) and its driver
-examples/                  runnable examples; examples/repros holds scripts that reproduce fixed defects
-data/dataset_v2/           the dataset (JSON + card + manifest);  data/results/v1/ the result files of the first runs on the earlier dataset (historical)
-docs/                      FINDINGS (the tracker), ROADMAP, KERNEL_DESIGN, ACTIONS, BANK, GENERATOR, ARCHITECTURE_RL, TRAINING, EXPERIMENTS, PAPER_PLAN, AUTHOR_GUIDE, PRIOR_WORK, SECOND_READER
-legacy/                    the previous generation's modules, tests and notes (some gates import curriculum / hypergraph from here)
-tools/                     sanitizer run, environment check, release archive (make_dist.py), the check of a LaTeX source against the results folders (check_numbers.py), the packs for second readers (review_packs.py)
-```
+## Limitations
 
-Modules are imported by their plain names (`import gym_env`); the names are unique across the tree (S45 checks it).
+* The type theory has no universe polymorphism or cumulativity, no structures with eta, no mutual or nested inductive types (a nested occurrence is rejected) and no well-founded recursion. Conversion nesting is bounded (256) and fails closed.
+* `Nat` is unary (a numeral is a chain of `Succ`); binary `N` and the integers `Z` are libraries. There are no rationals or real numbers, no `omega`, `norm_num` or `simp` set, and no Mathlib. [`docs/ROADMAP.md`](docs/ROADMAP.md) lists what is missing.
+* The independent checker rejects terms that contain `let` or metavariables (finished proofs contain neither).
+* The proof language is Python: there is no parser for a standalone syntax, no editor integration and no command-line prover.
+* Of the 60 IMO, ISL and APMO statements in the bank, 12 have proofs. A statement-only problem is a formal statement with brute-force evidence that it is true, not a theorem.
+* Tested on Linux with g++ 13. The macOS port has been syntax-checked against libc++ headers but not built or run on a Mac.
 
-## Where to read next
+## Repository layout
 
-* `docs/KERNEL_DESIGN.md` -- the kernel: terms, evaluation, conversion, inductive types, the options and their reasons.
-* `docs/FINDINGS.md` -- every defect and design decision found so far, with the test that pins it.
-* `docs/BANK.md`, `docs/ACTIONS.md` -- the problem bank (what makes a formal statement *the* problem; where each text comes from; how duplicates and splits are handled) and the action language.
-* `docs/GENERATOR.md` -- the synthetic theorem generator: how a theorem and its proof are grown, what is rejected and why, how many theorems there can be, how the data are reproduced and verified, what they do not show.
-* `docs/ARCHITECTURE_RL.md` -- how a learner should be structured to climb from imitation to a manager/worker design; `docs/TRAINING.md` -- what exists and what it achieves (little, honestly).
-* `docs/EXPERIMENTS.md` -- the experiments of the paper: questions, protocol, statistics, the run graph, the scripts, what the results can and cannot show.
-* `docs/AUTHOR_GUIDE.md` -- what the person who signs the paper must be able to explain: the system on one page, why the kernel is believable and where that evidence ends, what the numbers of the bank mean (the test split holds 40 provable problems, 35 of them of levels 1-3), what each experiment may claim, the limitations as a reviewer will list them, the prior work to read before claiming novelty, twenty questions an editor may ask and a self-test.
-* `docs/SECOND_READER.md` -- a handout for a colleague who reads formal statements against their problems (notation, a checklist, the four verdicts, worked examples), with `tools/review_packs.py`, which splits the audit's review sheet into packs (for example the 58 test statements, two readers each); the verdicts go back through `exp_audit.py import-reviews`. Do it before the freeze.
-* `docs/PRIOR_WORK.md` -- what the literature says about the closest systems (Peano, Minimo, INT, LeanDojo, Pantograph, Kimina Lean Server, PVSGym), checked on 2026-11-02 and tagged read / not found / memory, a feature matrix with `?` where it could not be verified, what that changes in the claims (hindsight is not new), and the options for a Lean comparison.
-* `docs/PAPER_PLAN.md` -- the plan of the paper: each claim, the evidence for it and the table, figure or number that carries it; the hypotheses and the words for results, fixed before the runs; the run order on the big machine with a go/no-go criterion at each step; the paper section by section; the submission checklist. `tools/check_numbers.py` checks a hand-typed LaTeX source against the results folders.
-* `docs/ROADMAP.md` -- what is missing for IMO-level and undergraduate mathematics, and a calibrated plan.
-* `tests/README.md` (the gates), `mutants/README.md` (mutation testing), `legacy/README.md`.
+| | |
+|---|---|
+| [`src/c++/hybrid/`](src/c++/hybrid/README.md) | the kernel: `itp_kernel.hpp`, `itp_bindings.cpp` |
+| [`src/c++/reference/`](src/c++/reference/README.md) | the frozen previous-generation kernel, the oracle of the lockstep gates |
+| [`src/python/`](src/python/README.md) | `itp_paths.py` (where everything lives), `build_kernel.py`, and the modules by role: |
+| [`  authoring/`](src/python/authoring/README.md) | `World`, `Term`, `Proof`, tactics, `ring`, `linarith`, `linear_combination` |
+| [`  checker/`](src/python/checker/README.md) | independent checker, `recheck`, `audit` |
+| [`  library/`](src/python/library/README.md) | naturals, binary naturals, integers, ring laws, number theory, olympiad lemmas |
+| [`  environment/`](src/python/environment/README.md) | proof environment: engine, action language, term builder, recorder |
+| [`  problems/`](src/python/problems/README.md) | the problem bank, faithfulness checks, duplicate screen, splits, dataset builder |
+| [`tests/`](tests/README.md) | the gates by role, shared modules, fuzzers, benchmarks, golden files |
+| [`mutants/`](mutants/README.md) | the mutation catalogue and its driver |
+| [`examples/`](examples/README.md) | eight runnable programs and small reproductions of fixed defects |
+| [`docs/`](docs/README.md) | design notes, the findings log, bank and action-language references |
+| [`data/`](data/README.md) | the problem bank exported as JSON, with checksums |
+| [`tools/`](tools/README.md), [`scripts/`](scripts/README.md) | environment check, release archive, sanitizer run; shell drivers |
 
-## Trust
+## Optional components
 
-What must be believed for "this proof is correct": the C++ kernel (`src/c++/hybrid`, about 8 k lines with its bindings), the C++ compiler and the machine -- and, as a cross-check that does not share code with the kernel, the independent
-checker (`src/python/checker/indep_checker.py`). `audit.dependencies` lists the axioms a theorem uses (the libraries use none; the integers use the kernel's five quotient constants). Everything else -- tactics,
-libraries' scripts, the bank, the search, the networks, the experiment pipeline -- is outside the trust boundary by construction, and the gates and mutants exist to make that boundary real rather than hoped for.
+Not needed to use the prover, and listed so that nothing in the tree is a surprise: `src/python/learner` (PyTorch code on top of the environment: policy networks, guided search, and the Gymnasium wrapper `ITPBank-v0` in `bank_env.py`), `src/python/synth` (a generator of synthetic theorems with kernel-checked proofs, [`docs/GENERATOR.md`](docs/GENERATOR.md)), `src/python/experiments` with `scripts/` (a resumable pipeline of runs and reports), `paper/` (a manuscript skeleton) and `legacy/` (the previous generation's modules, which a few differential gates still import).
+
+## Documentation
+
+[`docs/README.md`](docs/README.md) is the index. Start with [`docs/ACTIONS.md`](docs/ACTIONS.md) (the action language), [`docs/BANK.md`](docs/BANK.md) (what makes a formal statement *the* problem, where each text comes from, how duplicates and splits are handled), [`docs/KERNEL_DESIGN.md`](docs/KERNEL_DESIGN.md) (the kernel's design log) and [`docs/FINDINGS.md`](docs/FINDINGS.md).

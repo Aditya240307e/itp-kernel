@@ -411,9 +411,9 @@ whose names start with a prefix (each is built in isolation and must make some g
 | `s29_apply_pi_goal_tests.py` | `apply` on implication / negation / universal goals (arity rule) |
 | `oracle_gate.py` | the self-consistency oracle (random scripts, zero tolerance) |
 
-Two passes of the whole suite are expected to be green. The ordinary one (`python3 tests/run_gates.py -j 2`, about 150 s on two cores) and the self-checking one (`ITP_VERIFY_MEMO=1 python3 tests/run_gates.py -j 2`): with that
+Two passes of the whole suite are expected to be green. The ordinary one (`python3 tests/run_gates.py -j 2`, about 45 minutes on two cores) and the self-checking one (`ITP_VERIFY_MEMO=1 python3 tests/run_gates.py -j 2`): with that
 option the kernel re-decides every sharing-table hit and every quick-conversion yes with all tables bypassed (at most 20,000 steps per re-decision and, in all, 20,000 plus twice the steps the call itself has spent, uncharged to the proof) and throws on any disagreement. It replaces the
 earlier compile-time shadow build. `memo_verify_stats()` reports (verified, skipped); entries whose original decision cost more than 1,000 steps are skipped, not trusted blindly: they are covered by the ordinary gates.
 
 Libraries: `lnl_base.py` (logic, equality, Nat), `nat_lib.py`, `bin_lib.py` (Pos / N), `quot_lib.py` (quotients, `funext`, Prod, `Quot.lift2`), `int_lib.py` (Z), `ring.py` + `ring_lib.py` (the `ring` tactic and its lemma
-template), `tactics.py` and `author.py` (the authoring layer). `repros/` holds small scripts that reproduce findings F28-F30.
+template), `tactics.py` and `author.py` (the authoring layer). `examples/repros/` holds small scripts that reproduce findings F28-F30.

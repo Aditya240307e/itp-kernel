@@ -4,33 +4,40 @@
 PY ?= python3
 J  ?= 2
 
-.PHONY: help kernel gates gates-ml gates-repo gates-synth gates-all dataset-verify examples mutants-check tool-mutants soundness audit sanitize dist clean check-env smoke experiments status report paper
+.PHONY: help kernel gates-quick gates gates-ml gates-repo gates-synth gates-all dataset-verify examples mutants-check tool-mutants soundness audit sanitize dist clean check-env smoke experiments status report paper
 
 help:
 	@echo "make kernel          build the hybrid kernel and the frozen reference kernel into build/"
+	@echo "make gates-quick     a smoke test of the build: six fast kernel gates and example 01 (under 10 seconds)"
 	@echo "make gates           the 49 default gates: kernel, tactic, environment, bank and contest proofs (about 45 minutes on two cores)"
-	@echo "make gates-ml        the learner's gates S44 (machinery) and S51 (training suite, experiment runner); they need torch and gymnasium"
 	@echo "make gates-repo      the repository gates: S45 layout, S46 examples"
-	@echo "make gates-synth     the synthetic theorem generator's gate S48"
 	@echo "make gates-all       every gate (54; about an hour on two cores)"
-	@echo "make dataset-verify  replay every recorded proof and sub-theorem of data/dataset_v2 in a fresh engine (about 25 minutes, 3 GB)"
 	@echo "make examples        run the examples"
+	@echo "make dataset-verify  replay every recorded proof and sub-theorem of data/dataset_v2 in a fresh engine (about 25 minutes, 3 GB)"
 	@echo "make mutants-check   check that every mutant of the catalogues (the kernel's, and the faults of the tools below) still applies to the code (seconds); the mutation run itself: python3 mutants/mutate.py PREFIX"
 	@echo "make tool-mutants    inject faults into the tools that make the evidence (soundness folder, statement audit, number checker, identity of the code) and check that their tests fail for each one; 252 faults, 47 minutes on two cores (J=8: a few)"
-	@echo "make soundness      the soundness evidence in one stamped folder (results/soundness): every gate, every mutant, the fuzz campaigns, kernel against the independent checker, the findings; hours (J=8 for the big machine)"
-	@echo "make audit          the statement audit in one stamped folder (results/audit): every statement of the bank against its intended meaning, the cautions, the ledger of second readers, a review sheet; minutes"
+	@echo "make soundness       the soundness evidence in one stamped folder (results/soundness): every gate, every mutant, the fuzz campaigns, kernel against the independent checker, the findings; hours (J=8 for the big machine)"
+	@echo "make audit           the statement audit in one stamped folder (results/audit): every statement of the bank against its intended meaning, the cautions, the ledger of second readers, a review sheet; minutes"
 	@echo "make sanitize        build the kernel with ASan + UBSan and run the kernel and bank gates that can run under them (long; it lists the ones it leaves out, and why)"
 	@echo "make dist            pack the repository into dist/*.tar.gz and dist/*.zip   (GIT=1 adds the history as a .git directory; ADD='paper/main.pdf' adds files git does not hold; ARTIFACTS=dir adds trained models under artifacts/)"
-	@echo "make check-env       is this machine ready for the experiments? (python, torch, CUDA, memory, disk)"
-	@echo "make smoke           the whole experiment pipeline on a tiny world (about 70 minutes of run time on two cores): do this before a real run"
-	@echo "make experiments     the experiments of the paper, resumable   (PROFILE=small|full  SEEDS=0-4  DEVICE=cuda  JOBS=n ...: scripts/env.sh)"
-	@echo "make status          what is done, running, failed"
-	@echo "make report          the results folder (results/$$PROFILE) from the runs so far: tables, figures, per-problem outcomes, statistics, provenance, manifest (PUBLISH=1: also paper/generated/)"
-	@echo "make paper           build paper/main.pdf (needs latexmk)"
 	@echo "make clean           remove build/, dist/ and the Python caches"
+	@echo ""
+	@echo "optional (the learning experiments; they need torch and gymnasium, the prover does not):"
+	@echo "make gates-ml        the learner's gates S44 (machinery) and S51 (training suite, experiment runner); they need torch and gymnasium"
+	@echo "make gates-synth     the synthetic theorem generator's gate S48"
+	@echo "make check-env       is this machine ready for the learning experiments? (python, torch, CUDA, memory, disk)"
+	@echo "make smoke           the whole experiment pipeline on a tiny world (about 70 minutes of run time on two cores): do this before a real run"
+	@echo "make experiments     the learning experiments, resumable   (PROFILE=small|full  SEEDS=0-4  DEVICE=cuda  JOBS=n ...: scripts/env.sh)"
+	@echo "make status          what is done, running, failed"
+	@echo "make report          the results folder (results/PROFILE) from the runs so far: tables, figures, per-problem outcomes, statistics, provenance, manifest (PUBLISH=1: also paper/generated/)"
+	@echo "make paper           build paper/main.pdf from the LaTeX source (needs latexmk)"
 
 kernel:
 	$(PY) src/python/build_kernel.py all
+
+gates-quick: kernel
+	$(PY) tests/run_gates.py -j $(J) s2_tests.py s16_quot_tests.py s17_irrelevance_tests.py s20_reservation_tests.py s21_view_tests.py s26_memo_tests.py
+	$(PY) examples/01_prove_with_tactics.py
 
 gates: kernel
 	$(PY) tests/run_gates.py -j $(J)

@@ -1,6 +1,6 @@
 """04 -- one proof attempt as a game: the environment's goals, menus and atomic steps, with no text anywhere.
 
-    python3 examples/04_environment_episode.py [problem_name]        (about 40 s; default problem: two_pow_gt_n, "n < 2^n")
+    python3 examples/04_environment_episode.py [problem_name]        (about 80 s; default problem: two_pow_gt_n, "n < 2^n")
 
 The engine (src/python/environment/gym_env.py) turns proving into a sequential decision problem.  The state is a proof; the agent acts on its first open goal.  For that goal the engine offers
 

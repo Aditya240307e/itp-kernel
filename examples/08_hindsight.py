@@ -1,6 +1,6 @@
 """08 -- hindsight: what an attempt proved, even when it did not finish.
 
-    python3 examples/08_hindsight.py [problem_name [n_actions]]       (about 40 s; default: quad_form_zero, stopped after 7 of its 13 actions)
+    python3 examples/08_hindsight.py [problem_name [n_actions]]       (about 80 s; default: quad_form_zero, stopped after 7 of its 13 actions)
 
 A proof attempt that fails is full of things that WERE proved: a case that closed, a fact that a lemma derived.  With `Episode(..., track=True)` the engine keeps a record of the attempt (src/python/environment/
 gym_tree.py): one node per goal an action was applied to.  From it come
