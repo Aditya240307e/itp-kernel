@@ -51,6 +51,8 @@ def python_files(*patterns):
 
 SKIP_DIRS = {'.git', 'build', '__pycache__', 'artifacts', '.venv'}
 OUTPUT_DIRS = ('runs', 'dist', 'results')                       # (the top-level folders the scripts write to, ignored by git: they hold the paths of the machine that made them, the pre-flight's and every run's; results/README.md is a file of the repository and is still read)
+OPTIONAL_PACKAGES = ('torch', 'gymnasium', 'matplotlib')           # (requirements.txt: only the learner, the experiment report and example 06 use them)
+OPTIONAL_DIRS = ('learner', 'experiments', 'synth')              # (the parts of src/python that may need them)
 
 
 def walk(top=ROOT):
@@ -92,20 +94,27 @@ def sec_B():
     code = ("import sys, importlib, traceback\n"
             "sys.path.insert(0, %r)\n"
             "import itp_paths\n"
-            "bad = []\n"
+            "bad = []; skipped = []\n"
             "for m in %r:\n"
             "    try: importlib.import_module(m)\n"
+            "    except ModuleNotFoundError as e:\n"
+            "        (skipped if (e.name or '').split('.')[0] in %r else bad).append((m, '%%s: %%s' %% (type(e).__name__, str(e)[:150])))\n"
             "    except BaseException as e: bad.append((m, '%%s: %%s' %% (type(e).__name__, str(e)[:150])))\n"
-            "import json; print(json.dumps(bad))\n") % (itp_paths.SRC_PY, mods)
+            "import json; print(json.dumps([bad, skipped]))\n") % (itp_paths.SRC_PY, mods, OPTIONAL_PACKAGES)
     scratch = tempfile.mkdtemp(prefix='s45_')
     try:
         env = {k: v for k, v in os.environ.items() if k not in ('PYTHONPATH', 'ITP_BUILD_DIR')}
         r = subprocess.run([sys.executable, '-c', code], cwd=scratch, env=env, capture_output=True, text=True, timeout=300)
     finally: shutil.rmtree(scratch, ignore_errors=True)
-    try: bad = json.loads(r.stdout.strip().split('\n')[-1])
-    except Exception: bad = [('<interpreter>', (r.stdout + r.stderr)[-300:])]
+    try: bad, skipped = json.loads(r.stdout.strip().split('\n')[-1])
+    except Exception: bad, skipped = [('<interpreter>', (r.stdout + r.stderr)[-300:])], []
+    # a module may be left out for want of torch, gymnasium or matplotlib only if it belongs to the optional parts of the tree (requirements.txt): a core module that needs them is a defect
+    where = {os.path.basename(p)[:-3]: rel(p).replace(os.sep, '/') for p in python_files('src/python/*.py', 'src/python/*/*.py', 'tests/support/*.py')}
+    bad += [x for x in skipped if not where[x[0]].startswith(tuple('src/python/%s/' % d for d in OPTIONAL_DIRS))]
+    skipped = [x[0] for x in skipped if where[x[0]].startswith(tuple('src/python/%s/' % d for d in OPTIONAL_DIRS))]
     expect(not bad, 'B  modules that do not import in a fresh interpreter started elsewhere: %s' % bad[:5])
-    expect(len(mods) >= 50, 'B  the import test covered %d modules' % len(mods))
+    expect(len(mods) - len(skipped) >= 50, 'B  the import test covered %d modules' % (len(mods) - len(skipped)))
+    if skipped: print('   S45 B: %d modules of the optional parts (learner, experiments, synth) need torch, gymnasium or matplotlib, which are not installed here, and were not imported' % len(skipped))
 
 
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ C. bootstrap line

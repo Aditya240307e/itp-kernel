@@ -33,7 +33,7 @@ python3 examples/01_prove_with_tactics.py                   # a few seconds; end
 make gates-quick                                            # six kernel gates and the example again: under 10 s
 ```
 
-`pip install -r requirements.txt` also installs PyTorch, Gymnasium and Matplotlib, which only the optional learner and experiment code uses ([below](#optional-components)). The Python scripts find the repository from their own location, so they run from any directory. macOS on Apple silicon has not been run yet: it needs Xcode 16 or newer, and `python3 tools/preflight.py --quick` checks the toolchain of a new machine.
+`pip install -r requirements.txt` also installs PyTorch, Gymnasium and Matplotlib, which only the optional learner and experiment code uses ([below](#optional-components)); example 06 needs just `gymnasium` and says so when it is missing. The Python scripts find the repository from their own location, so they run from any directory. macOS on Apple silicon has not been run yet: it needs Xcode 16 or newer, and `python3 tools/preflight.py --quick` checks the toolchain of a new machine.
 
 ## Proving something
 

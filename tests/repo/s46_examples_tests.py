@@ -8,7 +8,9 @@ that rots is documentation that lies; this gate is what keeps the README honest.
 """
 import os as _os, sys as _sys; _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', '..', 'src', 'python')); import itp_paths  # noqa: E402,F401
 import concurrent.futures as cf
-import glob, os, shutil, subprocess, sys, tempfile, time
+import glob, importlib.util, os, shutil, subprocess, sys, tempfile, time
+
+OPTIONAL = {'06': 'gymnasium'}                       # (example -> the package outside the core requirements that it needs: without it the example says SKIPPED instead of EXAMPLE OK)
 
 FAIL = []; CHECKS = [0]
 
@@ -45,6 +47,10 @@ def main():
             lines = [l for l in out.strip().split('\n') if l.strip()]
             expect(rc == 0, '%s exits with status %d: %s' % (name, rc, (err or out)[-300:].replace('\n', ' | ')))
             expect('Traceback' not in err and 'Traceback' not in out, '%s printed a traceback' % name)
+            pkg = OPTIONAL.get(name[:2])
+            if pkg and importlib.util.find_spec(pkg) is None:
+                expect(lines and lines[-1].startswith('SKIPPED') and pkg in lines[-1], '%s needs %s, which is not installed here: it must say SKIPPED and name the package (last line: %r)' % (name, pkg, lines[-1][:80] if lines else ''))
+                print('   S46: %s skipped (the optional package %s is not installed here)' % (name, pkg)); continue
             expect(lines and lines[-1].strip() == 'EXAMPLE OK', '%s does not end with EXAMPLE OK (last line: %r)' % (name, lines[-1][:80] if lines else ''))
             expect(len(lines) >= 5, '%s printed only %d lines' % (name, len(lines)))
             if os.environ.get('S46_TRACE'): print('   [%s: %.1f s, rc %d, %d lines]' % (name, dt, rc, len(lines)), flush=True)

@@ -12,7 +12,8 @@ Below, the recorded proof of a problem is played through the environment decisio
 import os as _os, sys as _sys; _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'src', 'python')); import itp_paths  # noqa: E402,F401
 import json, os, sys, warnings
 import numpy as np
-import gymnasium
+try: import gymnasium
+except ImportError: print('SKIPPED: this example needs the optional package gymnasium (pip install gymnasium)'); sys.exit(0)
 warnings.filterwarnings('ignore', message='.*Casting input x to numpy array.*')          # (Space.contains on an observation of mixed dtypes)
 import bank_all, bank_env as BE
 import gym_acts as ACTS, gym_policy as P

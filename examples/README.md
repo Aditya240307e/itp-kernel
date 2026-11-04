@@ -1,6 +1,6 @@
 # examples -- eight programs, in the order to read them
 
-Each example is a self-contained script with a docstring that says what it shows and what it needs. They run from any directory (`python3 examples/01_prove_with_tactics.py`), print what they do, and **end with `EXAMPLE OK`**; gate S46 runs all of them and checks that. The kernel must be built first (`make kernel`). `make examples` runs them in order.
+Each example is a self-contained script with a docstring that says what it shows and what it needs. They run from any directory (`python3 examples/01_prove_with_tactics.py`), print what they do, and **end with `EXAMPLE OK`**; gate S46 runs all of them and checks that. The kernel must be built first (`make kernel`). `make examples` runs them in order. Example 06 needs the optional package `gymnasium` (`pip install gymnasium`); without it, it says `SKIPPED` and stops.
 
 | | example | what it shows | needs | time (two cores) |
 |---|---|---|---|---|

@@ -129,8 +129,8 @@ Times are seconds on the 2-core box with two gates at a time (the last full run,
 
 | gate | time | what it protects |
 |---|---|---|
-| `s45_layout_tests.py` | 9 s | The repository's layout is the layout the documentation describes, and stays so; the release archive is sound; the copies of the tree in which mutants and sanitizers run are complete. |
-| `s46_examples_tests.py` | 432 s | The examples run. |
+| `s45_layout_tests.py` | 9 s | The repository's layout is the layout the documentation describes, and stays so; the release archive is sound; the copies of the tree in which mutants and sanitizers run are complete. Modules of the optional parts (learner, experiments, synth) that need `torch`, `gymnasium` or `matplotlib` are not imported when those are not installed. |
+| `s46_examples_tests.py` | 432 s | The examples run (example 06 is expected to say `SKIPPED` when `gymnasium` is not installed). |
 
 ## Adding a gate
 
