@@ -18,7 +18,7 @@ python3 tools/preflight.py --quick      # seconds: the machine and the toolchain
 python3 tools/preflight.py              # 5-10 minutes: also builds the kernel and measures speeds
 ```
 
-Every line is `[ok]`, `[!!]` (will stop or ruin a run: fix it first) or `[..]` (worth knowing). The checks are the ones that matter when the code runs on a new kind of machine: the C++ compiler and library (the kernel needs C++23 `std::expected` with its monadic operations: g++ 13 or later, Xcode 16 or later, or a recent LLVM), the size of the main thread's stack (macOS gives at most 64 MB, Linux 1 GiB; the kernel's guard turns an overflow into an error, and the checks show that it does), forked worker processes, the performance and efficiency cores of Apple silicon, battery, Low Power Mode and swap. Exit status 0 means ready (warnings may remain), 1 means something must be fixed.
+Every line is `[ok]`, `[!!]` (will stop or ruin a run: fix it first) or `[..]` (worth knowing). The checks are the ones that matter when the code runs on a new kind of machine: the C++ compiler and library (the kernel needs C++23 `std::expected` with its monadic operations: g++ 13 or later, Xcode 16 or later, or a recent LLVM), the size of the main thread's stack (macOS caps it at 64 MB; the kernel's guard turns an overflow into an error, and the checks show that it does), forked worker processes, the performance and efficiency cores of Apple silicon, battery, Low Power Mode and swap. Exit status 0 means ready (warnings may remain), 1 means something must be fixed.
 
 Eight gates (S19, S25, S30, S31, S34, S37, S40, S50) limit the address space with `RLIMIT_AS`, which macOS does not enforce, so they need Linux.
 
