@@ -1,7 +1,7 @@
 """S45 gate: the repository's layout is the layout the documentation describes, and stays so.
 
 The project is organised by ROLE (src/c++ and src/python/{authoring,checker,library,environment,problems,learner,synth,experiments}; tests/{kernel,library,environment,problems,learner,synth,repo,support};
-mutants; examples; docs; data; legacy; scripts (the experiments, as shell scripts); paper (the TMLR manuscript); tools), while every module is imported by its plain name -- `import gym_env` -- because src/python/itp_paths.py puts each directory on sys.path.  That is convenient
+mutants; examples; docs; data; legacy; scripts (the experiments, as shell scripts); paper (the TMLR manuscript); preprint (the technical report and the scripts behind its numbers); tools), while every module is imported by its plain name -- `import gym_env` -- because src/python/itp_paths.py puts each directory on sys.path.  That is convenient
 and fragile in exactly the ways this gate watches:
 
   A. the gate registry (tests/gate_registry.py): every registered script exists, none is registered twice, and every gate script on disk is registered (a gate that nobody runs checks nothing);
@@ -228,7 +228,7 @@ REQUIRED_FILES = ['README.md', 'Makefile', 'requirements.txt', '.gitignore',
                   'data/dataset_v2/bank.json', 'data/dataset_v2/splits.json', 'data/dataset_v2/library.json', 'data/dataset_v2/manifest.json', 'data/dataset_v2/DATASET_CARD.md']
 REQUIRED_DIRS = ['src/python/authoring', 'src/python/checker', 'src/python/library', 'src/python/environment', 'src/python/problems', 'src/python/learner', 'src/python/synth', 'src/python/experiments', 'scripts', 'paper',
                  'tests/kernel', 'tests/library', 'tests/environment', 'tests/problems', 'tests/learner', 'tests/synth', 'tests/repo', 'tests/support', 'tests/golden', 'examples', 'data/results']
-TOP_LEVEL = {'README.md', 'Makefile', 'requirements.txt', '.gitignore', '.git', 'build', 'dist', 'artifacts', 'runs', 'results', 'src', 'tests', 'mutants', 'examples', 'docs', 'data', 'legacy', 'tools', 'scripts', 'paper', '.venv',
+TOP_LEVEL = {'README.md', 'Makefile', 'requirements.txt', '.gitignore', '.git', 'build', 'dist', 'artifacts', 'runs', 'results', 'src', 'tests', 'mutants', 'examples', 'docs', 'data', 'legacy', 'tools', 'scripts', 'paper', 'preprint', '.venv',
              'MANIFEST.sha256', 'RELEASE.txt'}                      # (runs: where the experiments write, untracked; the last two: what tools/make_dist.py adds to a release archive, hence present in an extracted one)
 
 
