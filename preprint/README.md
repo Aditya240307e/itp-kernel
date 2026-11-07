@@ -4,7 +4,7 @@
 
 The report is built from the files in this directory. Every number it quotes is either *measured* (read from `measurements/` by `make_numbers.py`) or *counted* in the repository at the commit that the report names (lines of code, mutants, findings, problems, proofs, digests). Nothing is typed in by hand, so the text cannot drift from the evidence, and the build refuses to mix measurements made at different commits.
 
-The numbers describe commit `f840710`. The commits after it add this directory, list it in the main `README.md`, and let the layout gate S45 (`tests/repo/s45_layout_tests.py`) accept it at the top level. The last of them adds to Appendix A the proof of `False` that the second deviation allows once excluded middle and propositional extensionality are added (`listings/dev_exploit.py`) and its cross-check in Lean (`listings/dev_lean_decl.lean`, `listings/dev_lean_false.lean`); the kernel is not changed by any of them (the digest of its sources is that of the measurements), and neither deviation is repaired.
+The numbers describe commit `f840710`. The commits after it add this directory, list it in the main `README.md`, let the layout gate S45 (`tests/repo/s45_layout_tests.py`) accept it at the top level, add to Appendix A the proof of `False` that the second deviation allows once excluded middle and propositional extensionality are added (`listings/dev_exploit.py`) and its cross-check in Lean (`listings/dev_lean_decl.lean`, `listings/dev_lean_false.lean`), and make `build.py` run pdflatex until the cross-references settle; the kernel is not changed by any of them (the digest of its sources is that of the measurements), and neither deviation is repaired.
 
 | path | what it is |
 |---|---|
@@ -24,7 +24,7 @@ The numbers describe commit `f840710`. The commits after it add this directory, 
 
 ## Building the report
 
-    python3 -I preprint/build.py                 numbers, flattened .tex, PDF (pdflatex, bibtex, pdflatex twice), all in preprint/
+    python3 -I preprint/build.py                 numbers, flattened .tex, PDF (pdflatex, bibtex, then pdflatex until the cross-references and the contents stop changing), all in preprint/
     python3 -I preprint/build.py --no-pdf        only the flattened .tex
     python3 -I preprint/build.py --draft         a layout check: numbers of measurements that do not exist yet are printed as ??
 

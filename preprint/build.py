@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """build.py -- flatten preprint/src/*.tex into the single file preprint/itp_preprint.tex, and compile it.
 
-    python3 preprint/build.py                 numbers -> flatten -> pdflatex, bibtex, pdflatex x2 -> preprint/itp_preprint.pdf
+    python3 preprint/build.py                 numbers -> flatten -> pdflatex, bibtex, pdflatex until the references settle -> preprint/itp_preprint.pdf
     python3 preprint/build.py --no-pdf        only write preprint/itp_preprint.tex
     python3 preprint/build.py --fast          one pdflatex run (while writing)
     python3 preprint/build.py --draft         the numbers of measurements that do not exist yet are printed as ?? (a layout check; the final build refuses)
@@ -31,6 +31,11 @@ def run(cmd, cwd):
     return r.returncode, r.stdout + r.stderr
 
 
+def settled():
+    """what another run of pdflatex reads back: the auxiliary files (labels, citations, the contents, the outline)"""
+    return [open(os.path.join(BUILD, 'itp_preprint.' + e), 'rb').read() if os.path.exists(os.path.join(BUILD, 'itp_preprint.' + e)) else b'' for e in ('aux', 'toc', 'out')]
+
+
 def compile_pdf(fast):
     os.makedirs(BUILD, exist_ok=True)
     shutil.copy(TEX, os.path.join(BUILD, 'itp_preprint.tex')); shutil.copy(os.path.join(HERE, 'references.bib'), os.path.join(BUILD, 'references.bib'))
@@ -44,10 +49,13 @@ def compile_pdf(fast):
         bl = open(os.path.join(BUILD, 'itp_preprint.blg')).read()
         warn = [l for l in bl.splitlines() if l.startswith('Warning') or 'error' in l.lower()]
         if warn: print('\n'.join(warn[:30]))
-        for _ in range(2):
+        for _ in range(6):                                       # until the cross-references and the contents have settled, whatever the files of an earlier build were
+            before = settled()
             code, out = run(tex, BUILD)
             if code != 0:
                 print(out[-3500:]); sys.exit('pdflatex failed')
+            if settled() == before: break
+        else: sys.exit('the cross-references did not settle in six runs of pdflatex')
     log = open(os.path.join(BUILD, 'itp_preprint.log')).read()
     for pat, label in ((r'LaTeX Warning: (Citation|Reference)[^\n]*undefined[^\n]*', 'undefined'), (r'Overfull \\[hv]box[^\n]*', 'overfull'), (r'LaTeX Warning: Label[^\n]*multiply[^\n]*', 'multiply defined'), (r'Package pgfplots Warning[^\n]*', 'pgfplots')):
         hits = re.findall(pat, log)
