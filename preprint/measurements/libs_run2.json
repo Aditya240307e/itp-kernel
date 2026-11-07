@@ -1,0 +1,666 @@
+{
+ "machine": {
+  "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+  "cores": 2,
+  "cores_usable": 2,
+  "memory_gb": 7.84,
+  "os": "Linux-6.18.44-fc-v233-x86_64-with-glibc2.39",
+  "python": "3.13.16",
+  "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+  "commit": "f840710dd0b2a28482638ea351d528235f3e8411",
+  "tree_clean_outside_preprint": true,
+  "loadavg_start": [
+   0.35,
+   0.33,
+   0.14
+  ],
+  "loadavg_end": [
+   0.84,
+   0.5,
+   0.22
+  ],
+  "peak_rss_mb_total": 711.37109375
+ },
+ "build": {
+  "seconds": 3.8276400969998576,
+  "globals": 555,
+  "peak_rss_mb": 69.33984375,
+  "rss_mb": 69.4609375,
+  "stages": [
+   {
+    "module": "lnl_base",
+    "stage": "declare_types",
+    "depth": 0,
+    "seconds": 0.0007190950000222074,
+    "added": 20,
+    "total": 20,
+    "rss_mb": 17.828125
+   },
+   {
+    "module": "lnl_base",
+    "stage": "declare_add",
+    "depth": 0,
+    "seconds": 0.00016930600008890906,
+    "added": 1,
+    "total": 21,
+    "rss_mb": 17.85546875
+   },
+   {
+    "module": "lnl_base",
+    "stage": "equality_lemmas",
+    "depth": 0,
+    "seconds": 0.00284214799989968,
+    "added": 5,
+    "total": 26,
+    "rss_mb": 18.05078125
+   },
+   {
+    "module": "lnl_base",
+    "stage": "logic_lemmas",
+    "depth": 0,
+    "seconds": 0.003024081999910777,
+    "added": 14,
+    "total": 40,
+    "rss_mb": 18.25
+   },
+   {
+    "module": "nat_lib",
+    "stage": "declare_arith",
+    "depth": 0,
+    "seconds": 0.0003148840000903874,
+    "added": 4,
+    "total": 44,
+    "rss_mb": 18.25
+   },
+   {
+    "module": "nat_lib",
+    "stage": "succ_lemmas",
+    "depth": 0,
+    "seconds": 0.000585601000011593,
+    "added": 7,
+    "total": 51,
+    "rss_mb": 18.25
+   },
+   {
+    "module": "nat_lib",
+    "stage": "add_lemmas",
+    "depth": 0,
+    "seconds": 0.006313363999879584,
+    "added": 11,
+    "total": 62,
+    "rss_mb": 18.4375
+   },
+   {
+    "module": "nat_lib",
+    "stage": "mul_lemmas",
+    "depth": 0,
+    "seconds": 0.00958072399998855,
+    "added": 12,
+    "total": 74,
+    "rss_mb": 18.75390625
+   },
+   {
+    "module": "nat_lib",
+    "stage": "pow_lemmas",
+    "depth": 0,
+    "seconds": 0.006271180999874559,
+    "added": 8,
+    "total": 82,
+    "rss_mb": 18.80078125
+   },
+   {
+    "module": "nat_lib",
+    "stage": "arith_lemmas",
+    "depth": 0,
+    "seconds": 0.011210877999928925,
+    "added": 4,
+    "total": 86,
+    "rss_mb": 19.4609375
+   },
+   {
+    "module": "nat_lib",
+    "stage": "order_lemmas",
+    "depth": 0,
+    "seconds": 0.018309086000044772,
+    "added": 22,
+    "total": 108,
+    "rss_mb": 19.85546875
+   },
+   {
+    "module": "ring_lib",
+    "stage": "ring_lemma_set (N)",
+    "depth": 1,
+    "seconds": 0.011309051000125692,
+    "added": 21,
+    "total": 129,
+    "rss_mb": 20.17578125
+   },
+   {
+    "module": "nat_lib",
+    "stage": "ring_lemmas",
+    "depth": 0,
+    "seconds": 0.011403130999951827,
+    "added": 21,
+    "total": 129,
+    "rss_mb": 20.17578125
+   },
+   {
+    "module": "bin_lib",
+    "stage": "declare_binary",
+    "depth": 0,
+    "seconds": 0.0008216740000079881,
+    "added": 20,
+    "total": 149,
+    "rss_mb": 20.17578125
+   },
+   {
+    "module": "bin_lib",
+    "stage": "pos_lemmas",
+    "depth": 0,
+    "seconds": 0.020196196999904714,
+    "added": 6,
+    "total": 155,
+    "rss_mb": 20.7109375
+   },
+   {
+    "module": "bin_lib",
+    "stage": "n_lemmas",
+    "depth": 0,
+    "seconds": 0.00586352799996348,
+    "added": 11,
+    "total": 166,
+    "rss_mb": 20.859375
+   },
+   {
+    "module": "bin_lib",
+    "stage": "n_library",
+    "depth": 0,
+    "seconds": 0.12009608999983357,
+    "added": 43,
+    "total": 209,
+    "rss_mb": 21.87890625
+   },
+   {
+    "module": "bin_lib",
+    "stage": "n_order",
+    "depth": 0,
+    "seconds": 0.03459453499999654,
+    "added": 22,
+    "total": 231,
+    "rss_mb": 22.54296875
+   },
+   {
+    "module": "ring_lib",
+    "stage": "ring_lemma_set (N)",
+    "depth": 0,
+    "seconds": 0.010887430999900971,
+    "added": 21,
+    "total": 252,
+    "rss_mb": 22.87109375
+   },
+   {
+    "module": "quot_lib",
+    "stage": "declare_quotients",
+    "depth": 0,
+    "seconds": 0.0005894579999221605,
+    "added": 6,
+    "total": 258,
+    "rss_mb": 22.9140625
+   },
+   {
+    "module": "quot_lib",
+    "stage": "declare_prod",
+    "depth": 0,
+    "seconds": 0.00032018100000641425,
+    "added": 4,
+    "total": 262,
+    "rss_mb": 22.9140625
+   },
+   {
+    "module": "quot_lib",
+    "stage": "quot_lift2",
+    "depth": 0,
+    "seconds": 0.0011195790000328998,
+    "added": 2,
+    "total": 264,
+    "rss_mb": 22.9296875
+   },
+   {
+    "module": "int_lib",
+    "stage": "bool_lib",
+    "depth": 0,
+    "seconds": 0.00688366200006385,
+    "added": 13,
+    "total": 277,
+    "rss_mb": 23.30078125
+   },
+   {
+    "module": "int_lib",
+    "stage": "int_core",
+    "depth": 0,
+    "seconds": 0.007807285000126285,
+    "added": 9,
+    "total": 286,
+    "rss_mb": 23.40234375
+   },
+   {
+    "module": "int_lib",
+    "stage": "int_ops",
+    "depth": 0,
+    "seconds": 0.1585076180001579,
+    "added": 38,
+    "total": 324,
+    "rss_mb": 27.19921875
+   },
+   {
+    "module": "int_lib",
+    "stage": "int_pow",
+    "depth": 0,
+    "seconds": 0.004462321999881169,
+    "added": 10,
+    "total": 334,
+    "rss_mb": 27.2421875
+   },
+   {
+    "module": "int_lib",
+    "stage": "int_nat",
+    "depth": 0,
+    "seconds": 0.007796543999802452,
+    "added": 11,
+    "total": 345,
+    "rss_mb": 27.296875
+   },
+   {
+    "module": "ring_lib",
+    "stage": "ring_lemma_set (N)",
+    "depth": 1,
+    "seconds": 0.012690419000136899,
+    "added": 23,
+    "total": 368,
+    "rss_mb": 27.49609375
+   },
+   {
+    "module": "int_lib",
+    "stage": "int_ring",
+    "depth": 0,
+    "seconds": 0.012776294000104826,
+    "added": 23,
+    "total": 368,
+    "rss_mb": 27.49609375
+   },
+   {
+    "module": "int_lib",
+    "stage": "int_order",
+    "depth": 0,
+    "seconds": 0.02757773400003316,
+    "added": 14,
+    "total": 382,
+    "rss_mb": 28.6015625
+   },
+   {
+    "module": "int_lib",
+    "stage": "int_order2",
+    "depth": 0,
+    "seconds": 0.015419972000017879,
+    "added": 15,
+    "total": 397,
+    "rss_mb": 28.73046875
+   },
+   {
+    "module": "int_lib",
+    "stage": "int_order3",
+    "depth": 0,
+    "seconds": 0.012287381000078312,
+    "added": 11,
+    "total": 408,
+    "rss_mb": 28.88671875
+   },
+   {
+    "module": "int_lib",
+    "stage": "int_order4",
+    "depth": 0,
+    "seconds": 0.06620147299986456,
+    "added": 26,
+    "total": 434,
+    "rss_mb": 30.375
+   },
+   {
+    "module": "nt_lib",
+    "stage": "nt_induction",
+    "depth": 0,
+    "seconds": 0.0569629490000807,
+    "added": 3,
+    "total": 437,
+    "rss_mb": 31.703125
+   },
+   {
+    "module": "nt_lib",
+    "stage": "nt_dvd",
+    "depth": 0,
+    "seconds": 0.11941086499996345,
+    "added": 23,
+    "total": 460,
+    "rss_mb": 32.78125
+   },
+   {
+    "module": "nt_lib",
+    "stage": "nt_divmod",
+    "depth": 0,
+    "seconds": 0.09962870699996529,
+    "added": 2,
+    "total": 462,
+    "rss_mb": 35.9609375
+   },
+   {
+    "module": "nt_lib",
+    "stage": "nt_classical",
+    "depth": 0,
+    "seconds": 0.0022573399999146204,
+    "added": 6,
+    "total": 468,
+    "rss_mb": 35.9921875
+   },
+   {
+    "module": "nt_lib",
+    "stage": "nt_gcd",
+    "depth": 0,
+    "seconds": 0.12743026299995108,
+    "added": 11,
+    "total": 479,
+    "rss_mb": 39.11328125
+   },
+   {
+    "module": "nt_lib",
+    "stage": "nt_prime",
+    "depth": 0,
+    "seconds": 0.06311650599991481,
+    "added": 6,
+    "total": 485,
+    "rss_mb": 39.7265625
+   },
+   {
+    "module": "ext_lib",
+    "stage": "nt_facts",
+    "depth": 0,
+    "seconds": 1.2761519840000801,
+    "added": 11,
+    "total": 496,
+    "rss_mb": 54.859375
+   },
+   {
+    "module": "ext_lib",
+    "stage": "sums",
+    "depth": 0,
+    "seconds": 0.10092637100001411,
+    "added": 20,
+    "total": 516,
+    "rss_mb": 55.16015625
+   },
+   {
+    "module": "ext_lib",
+    "stage": "prods",
+    "depth": 0,
+    "seconds": 0.025855753000087134,
+    "added": 15,
+    "total": 531,
+    "rss_mb": 55.26171875
+   },
+   {
+    "module": "ext_lib",
+    "stage": "pows",
+    "depth": 0,
+    "seconds": 0.07844892899993283,
+    "added": 9,
+    "total": 540,
+    "rss_mb": 55.47265625
+   },
+   {
+    "module": "ext_lib",
+    "stage": "squares",
+    "depth": 0,
+    "seconds": 0.11722307800005183,
+    "added": 3,
+    "total": 543,
+    "rss_mb": 56.00390625
+   },
+   {
+    "module": "ext_lib",
+    "stage": "primes",
+    "depth": 0,
+    "seconds": 0.643502122999962,
+    "added": 6,
+    "total": 549,
+    "rss_mb": 60.92578125
+   },
+   {
+    "module": "imo_lib",
+    "stage": "imo_1959_p1",
+    "depth": 0,
+    "seconds": 0.003990172999920105,
+    "added": 1,
+    "total": 550,
+    "rss_mb": 60.9375
+   },
+   {
+    "module": "imo_lib",
+    "stage": "sqrt2",
+    "depth": 0,
+    "seconds": 0.0741444389998378,
+    "added": 2,
+    "total": 552,
+    "rss_mb": 61.14453125
+   },
+   {
+    "module": "imo_lib",
+    "stage": "imo_2019_p1",
+    "depth": 0,
+    "seconds": 0.44917279299988877,
+    "added": 3,
+    "total": 555,
+    "rss_mb": 69.4609375
+   }
+  ],
+  "groups": [
+   {
+    "group": "logic and equality (lnl_base)",
+    "module": "lnl_base",
+    "seconds": 0.006754630999921574,
+    "added": 40,
+    "total_after": 40
+   },
+   {
+    "group": "unary naturals (nat_lib)",
+    "module": "nat_lib",
+    "seconds": 0.0639888489997702,
+    "added": 89,
+    "total_after": 129
+   },
+   {
+    "group": "binary naturals (bin_lib)",
+    "module": "bin_lib",
+    "seconds": 0.1815720239997063,
+    "added": 102,
+    "total_after": 231
+   },
+   {
+    "group": "ring lemmas over N (ring_lib)",
+    "module": "ring_lib",
+    "seconds": 0.010887430999900971,
+    "added": 21,
+    "total_after": 252
+   },
+   {
+    "group": "quotients (quot_lib)",
+    "module": "quot_lib",
+    "seconds": 0.0020292179999614746,
+    "added": 12,
+    "total_after": 264
+   },
+   {
+    "group": "integers (int_lib)",
+    "module": "int_lib",
+    "seconds": 0.3197202850001304,
+    "added": 170,
+    "total_after": 434
+   },
+   {
+    "group": "number theory (nt_lib)",
+    "module": "nt_lib",
+    "seconds": 0.46880662999978995,
+    "added": 51,
+    "total_after": 485
+   },
+   {
+    "group": "library extension (ext_lib)",
+    "module": "ext_lib",
+    "seconds": 2.242108238000128,
+    "added": 64,
+    "total_after": 549
+   },
+   {
+    "group": "olympiad problems (imo_lib)",
+    "module": "imo_lib",
+    "seconds": 0.5273074049996467,
+    "added": 6,
+    "total_after": 555
+   }
+  ]
+ },
+ "census": {
+  "by_kind": {
+   "inductive type": 14,
+   "constructor": 19,
+   "definition": 31,
+   "recursive function": 24,
+   "theorem": 461,
+   "quotient constant": 5,
+   "axiom": 1
+  },
+  "axioms": [
+   "em"
+  ]
+ },
+ "sharing": {
+  "values": 516,
+  "tree_size_of_values": 2747565,
+  "distinct_nodes_of_types_and_values": 132822,
+  "ratio_tree_to_distinct": 20.68606857297737,
+  "values_with_saturated_size": 0,
+  "largest_value": {
+   "nodes_as_tree": 341553,
+   "name": "imo2019_p1_fwd"
+  },
+  "pools": [
+   222,
+   560627,
+   165045,
+   0,
+   74893,
+   3,
+   555,
+   2991,
+   8844,
+   0,
+   118
+  ]
+ },
+ "determinism": {
+  "world_digest": "cc4eb4af3abcc541ad623a995600c7dab1a59965285dbda566e88d538149849e",
+  "globals": 555
+ },
+ "kernel_stats": {
+  "typing_memo (hits, misses, ?)": [
+   89691,
+   106411,
+   41183
+  ],
+  "quick_conversion (tried, settled)": [
+   17972,
+   6723
+  ],
+  "extraction (fast, slow)": [
+   256,
+   203
+  ],
+  "conv_memo_hits": 0,
+  "unify_memo_hits": 35
+ },
+ "kernel": {
+  "declarations": 516,
+  "seconds": 0.45360171399852334,
+  "rejected": [],
+  "slowest": [
+   {
+    "name": "three_dvd_sum_squares",
+    "seconds": 0.0611
+   },
+   {
+    "name": "five_dvd_fifth_power",
+    "seconds": 0.038
+   },
+   {
+    "name": "imo2019_p1_fwd",
+    "seconds": 0.036
+   },
+   {
+    "name": "cube_minus_n_div6",
+    "seconds": 0.0299
+   },
+   {
+    "name": "imo2019_p1_bwd",
+    "seconds": 0.0172
+   },
+   {
+    "name": "cube_mod_nine",
+    "seconds": 0.0147
+   },
+   {
+    "name": "Z.even_or_odd",
+    "seconds": 0.0133
+   },
+   {
+    "name": "Z.sqrt2_aux",
+    "seconds": 0.0123
+   }
+  ],
+  "median_ms": 0.05889499993827485
+ },
+ "independent": {
+  "globals": 555,
+  "load_seconds": 5.100925493999966,
+  "check_seconds": 75.8480727000001,
+  "rejected": []
+ },
+ "micro": {
+  "ffi_call_baseline": {
+   "median_us": 0.03816738500063366,
+   "min_us": 0.03781877499932307,
+   "max_us": 0.04098477999946226
+  },
+  "checkpoint_rewind_empty": {
+   "median_us": 0.1465265349997935,
+   "min_us": 0.14368220000051224,
+   "max_us": 0.18702718999975332
+  },
+  "rewind_after_allocating": {
+   "nodes_built_about": 6000,
+   "build_us_per_node_median": 0.613077833349962,
+   "rewind_us_median": 15.407000091727241,
+   "rewind_ns_per_node_median": 2.567833348621207
+  },
+  "binary_product_by_reduction": [
+   {
+    "bits_a": 317,
+    "bits_b": 337,
+    "product_decided_equal": true,
+    "seconds_median": 0.044330418000072314
+   },
+   {
+    "bits_a": 793,
+    "bits_b": 843,
+    "product_decided_equal": true,
+    "seconds_median": 0.27634366400002364
+   }
+  ]
+ }
+}

@@ -1,0 +1,54 @@
+{"args": ["1500"], "gate": "s2_tests.py", "group": "kernel", "ok": true, "seconds": 0.7, "time": "2026-11-04T16:09:11+0530", "verdict": "S2 GATE: PASS"}
+{"args": [], "gate": "s16_quot_tests.py", "group": "kernel", "ok": true, "seconds": 0.9, "time": "2026-11-04T16:09:12+0530", "verdict": "S16 QUOT GATE: PASS"}
+{"args": [], "gate": "s17_irrelevance_tests.py", "group": "kernel", "ok": true, "seconds": 4.0, "time": "2026-11-04T16:09:16+0530", "verdict": "S17 IRRELEVANCE GATE: PASS"}
+{"args": [], "gate": "s26_memo_tests.py", "group": "kernel", "ok": true, "seconds": 6.5, "time": "2026-11-04T16:09:17+0530", "verdict": "S26 MEMO GATE: PASS"}
+{"args": [], "gate": "s19_boundary_tests.py", "group": "kernel", "ok": true, "seconds": 3.1, "time": "2026-11-04T16:09:20+0530", "verdict": "S19 BOUNDARY GATE: PASS"}
+{"args": [], "gate": "s20_reservation_tests.py", "group": "kernel", "ok": true, "seconds": 0.3, "time": "2026-11-04T16:09:20+0530", "verdict": "S20 RESERVATION GATE: PASS"}
+{"args": [], "gate": "s21_view_tests.py", "group": "kernel", "ok": true, "seconds": 0.5, "time": "2026-11-04T16:09:21+0530", "verdict": "S21 VIEW GATE: PASS"}
+{"args": [], "gate": "s22_simp_tests.py", "group": "library", "ok": true, "seconds": 0.2, "time": "2026-11-04T16:09:21+0530", "verdict": "S22 SIMP GATE: PASS"}
+{"args": [], "gate": "s23_ring_tests.py", "group": "library", "ok": true, "seconds": 15.1, "time": "2026-11-04T16:09:36+0530", "verdict": "S23 RING GATE: PASS"}
+{"args": [], "gate": "s18_deep_tests.py", "group": "kernel", "ok": true, "seconds": 28.5, "time": "2026-11-04T16:09:44+0530", "verdict": "S18 DEEP-TERM GATE: PASS"}
+{"args": [], "gate": "s24_bin_tests.py", "group": "library", "ok": true, "seconds": 19.5, "time": "2026-11-04T16:09:56+0530", "verdict": "S24 BINARY GATE: PASS"}
+{"args": [], "gate": "s25_nring_tests.py", "group": "library", "ok": true, "seconds": 18.5, "time": "2026-11-04T16:10:03+0530", "verdict": "S25 N-RING GATE: PASS"}
+{"args": [], "gate": "s30_zlib_tests.py", "group": "library", "ok": true, "seconds": 15.2, "time": "2026-11-04T16:10:11+0530", "verdict": "S30 INTEGER GATE: PASS"}
+{"args": [], "gate": "s31_linarith_tests.py", "group": "library", "ok": true, "seconds": 37.8, "time": "2026-11-04T16:10:41+0530", "verdict": "S31 LINARITH GATE: PASS"}
+{"args": [], "gate": "s32_synconv_tests.py", "group": "kernel", "ok": true, "seconds": 1.7, "time": "2026-11-04T16:10:42+0530", "verdict": "S32 SYNCONV GATE: PASS"}
+{"args": [], "gate": "s33_convmemo_tests.py", "group": "kernel", "ok": true, "seconds": 3.4, "time": "2026-11-04T16:10:46+0530", "verdict": "S33 CONVMEMO GATE: PASS"}
+{"args": [], "gate": "s35_matchcheck_tests.py", "group": "kernel", "ok": true, "seconds": 0.8, "time": "2026-11-04T16:10:47+0530", "verdict": "S35 MATCH-CHECK GATE: PASS"}
+{"args": [], "gate": "s34_nt_tests.py", "group": "library", "ok": true, "seconds": 98.7, "time": "2026-11-04T16:11:50+0530", "verdict": "S34 NT GATE: PASS"}
+{"args": [], "gate": "s42_pins_tests.py", "group": "environment", "ok": true, "seconds": 3.6, "time": "2026-11-04T16:11:53+0530", "verdict": "S42 PINS GATE: PASS (3.5 s)"}
+{"args": [], "gate": "s40_actions_tests.py", "group": "environment", "ok": true, "seconds": 78.2, "time": "2026-11-04T16:12:05+0530", "verdict": "S40 ACTIONS GATE: PASS"}
+{"args": [], "gate": "s36_gym_tests.py", "group": "environment", "ok": true, "seconds": 16.2, "time": "2026-11-04T16:12:21+0530", "verdict": "S36 GYM GATE: PASS"}
+{"args": [], "gate": "s37_atoms_tests.py", "group": "library", "ok": true, "seconds": 6.6, "time": "2026-11-04T16:12:28+0530", "verdict": "S37 ATOMS GATE: PASS"}
+{"args": [], "gate": "s38_terms_tests.py", "group": "environment", "ok": true, "seconds": 9.1, "time": "2026-11-04T16:12:37+0530", "verdict": "S38 TERMS GATE: PASS"}
+{"args": [], "gate": "s39_failfast_tests.py", "group": "kernel", "ok": true, "seconds": 1.0, "time": "2026-11-04T16:12:38+0530", "verdict": "S39 FAILFAST GATE: PASS"}
+{"args": [], "gate": "s27_fuel_tests.py", "group": "kernel", "ok": true, "seconds": 26.4, "time": "2026-11-04T16:13:04+0530", "verdict": "S27 FUEL GATE: PASS"}
+{"args": [], "gate": "s28_headunfold_tests.py", "group": "kernel", "ok": true, "seconds": 0.0, "time": "2026-11-04T16:13:04+0530", "verdict": "S28 HEAD UNFOLDING GATE: PASS"}
+{"args": [], "gate": "s29_apply_pi_goal_tests.py", "group": "kernel", "ok": true, "seconds": 0.0, "time": "2026-11-04T16:13:04+0530", "verdict": "S29 APPLY ON PI GOALS GATE: PASS"}
+{"args": ["1500", "3"], "gate": "harness.py", "group": "support", "ok": true, "seconds": 0.9, "time": "2026-11-04T16:13:05+0530", "verdict": "timing  normalise: ref 6 ms vs hybrid 4 ms (ratio 0.65x) | typing: ref check 24 ms vs hybrid infer 13 ms (ratio 0.53x)"}
+{"args": ["600"], "gate": "s3_tests.py", "group": "kernel", "ok": true, "seconds": 1.9, "time": "2026-11-04T16:13:07+0530", "verdict": "S3 GATE: PASS"}
+{"args": ["800"], "gate": "s4_tests.py", "group": "kernel", "ok": true, "seconds": 2.1, "time": "2026-11-04T16:13:09+0530", "verdict": "S4 GATE: PASS"}
+{"args": ["1200", "3"], "gate": "s5_tests.py", "group": "kernel", "ok": true, "seconds": 3.1, "time": "2026-11-04T16:13:12+0530", "verdict": "S5 GATE: PASS"}
+{"args": ["500", "7"], "gate": "s5_probe_tests.py", "group": "kernel", "ok": true, "seconds": 3.5, "time": "2026-11-04T16:13:16+0530", "verdict": "S5 PROBE GATE: PASS"}
+{"args": [], "gate": "s6_logic_tests.py", "group": "kernel", "ok": true, "seconds": 0.3, "time": "2026-11-04T16:13:16+0530", "verdict": "S6 LOGIC GATE: PASS"}
+{"args": [], "gate": "s6_f6_tests.py", "group": "kernel", "ok": true, "seconds": 0.1, "time": "2026-11-04T16:13:16+0530", "verdict": "S6 F6 GATE: PASS"}
+{"args": ["150", "600"], "gate": "s7_param_tests.py", "group": "kernel", "ok": true, "seconds": 1.4, "time": "2026-11-04T16:13:17+0530", "verdict": "S7 PARAM GATE: PASS"}
+{"args": ["100"], "gate": "s8_indep_tests.py", "group": "kernel", "ok": true, "seconds": 1.1, "time": "2026-11-04T16:13:18+0530", "verdict": "S8 INDEP GATE: PASS"}
+{"args": [], "gate": "s9_strong_tests.py", "group": "kernel", "ok": true, "seconds": 0.1, "time": "2026-11-04T16:13:19+0530", "verdict": "S9 STRONG GATE: PASS"}
+{"args": [], "gate": "s10_noconf_tests.py", "group": "kernel", "ok": true, "seconds": 0.2, "time": "2026-11-04T16:13:19+0530", "verdict": "S10 NOCONF GATE: PASS"}
+{"args": [], "gate": "s11_eqgen_tests.py", "group": "kernel", "ok": true, "seconds": 0.9, "time": "2026-11-04T16:13:20+0530", "verdict": "S11 EQGEN GATE: PASS"}
+{"args": [], "gate": "s41_bank_tests.py", "group": "problems", "ok": true, "seconds": 90.2, "time": "2026-11-04T16:13:23+0530", "verdict": "S41 BANK GATE: PASS"}
+{"args": ["150"], "gate": "s12_probe_eq_tests.py", "group": "kernel", "ok": true, "seconds": 4.4, "time": "2026-11-04T16:13:24+0530", "verdict": "S12 PROBE-EQ GATE: PASS"}
+{"args": [], "gate": "s13_prop_tests.py", "group": "kernel", "ok": true, "seconds": 0.1, "time": "2026-11-04T16:13:24+0530", "verdict": "S13 PROP-ELIM GATE: PASS"}
+{"args": ["600"], "gate": "s14_prop_world_tests.py", "group": "kernel", "ok": true, "seconds": 2.2, "time": "2026-11-04T16:13:26+0530", "verdict": "S14 PROP-WORLD GATE: PASS"}
+{"args": ["300"], "gate": "s15_classical_tests.py", "group": "kernel", "ok": true, "seconds": 0.2, "time": "2026-11-04T16:13:27+0530", "verdict": "S15 CLASSICAL GATE: PASS"}
+{"args": [], "gate": "oracle_gate.py", "group": "kernel", "ok": true, "seconds": 18.0, "time": "2026-11-04T16:13:45+0530", "verdict": "ORACLE GATE: PASS"}
+{"args": [], "gate": "s45_layout_tests.py", "group": "repo", "ok": false, "seconds": 25.6, "tail": ["449 checks", "S45 LAYOUT GATE: FAIL (3)", "    F  preprint/measurements/check.json mentions a machine-specific path (': 120.0,   \"data\": \"<repo>/data/dataset_v')", "    H  files or directories at the top level that belong somewhere else: ['preprint']", "    K  top-level entries of the archive that the repository does not have: ['preprint']"], "time": "2026-11-04T16:14:10+0530", "verdict": "S45 LAYOUT GATE: FAIL (3)"}
+{"args": [], "gate": "s48_synth_tests.py", "group": "synth", "ok": true, "seconds": 158.2, "time": "2026-11-04T16:16:48+0530", "verdict": "S48 SYNTHETIC GENERATOR GATE: PASS"}
+{"args": [], "gate": "s43_bank2_tests.py", "group": "problems", "ok": true, "seconds": 477.2, "time": "2026-11-04T16:21:21+0530", "verdict": "S43 BANK GATE: PASS"}
+{"args": [], "gate": "s47_hindsight_tests.py", "group": "environment", "ok": true, "seconds": 277.7, "time": "2026-11-04T16:25:58+0530", "verdict": "S47 HINDSIGHT GATE: PASS"}
+{"args": [], "gate": "s49_contest_tests.py", "group": "problems", "ok": true, "seconds": 209.3, "time": "2026-11-04T16:29:27+0530", "verdict": "S49 CONTEST GATE: PASS"}
+{"args": [], "gate": "s50_proofs_tests.py", "group": "problems", "ok": true, "seconds": 1107.4, "time": "2026-11-04T16:47:55+0530", "verdict": "S50 PROOFS GATE: PASS"}
+{"args": [], "gate": "s44_ml_tests.py", "group": "learner", "ok": true, "seconds": 188.9, "time": "2026-11-04T16:51:04+0530", "verdict": "S44 ML GATE: PASS"}
+{"args": [], "gate": "s51_suite_tests.py", "group": "learner", "ok": true, "seconds": 690.1, "time": "2026-11-04T17:02:34+0530", "verdict": "S51 TRAINING SUITE GATE: PASS"}
+{"args": [], "gate": "s46_examples_tests.py", "group": "repo", "ok": true, "seconds": 376.7, "time": "2026-11-04T17:08:51+0530", "verdict": "S46 EXAMPLES GATE: PASS (8 examples, 377 s)"}

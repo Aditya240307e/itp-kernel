@@ -1,0 +1,3 @@
+linarith refuses: linarith failed: no combination of the 2 facts read from the hypotheses refutes the negated goal
+independent checker: 437 globals, problems: []
+axioms: [] | quotient constants: ['Quot', 'Quot.ind', 'Quot.lift', 'Quot.mk', 'Quot.sound']

@@ -207,6 +207,7 @@ make sanitize          # kernel and bank gates under ASan + UBSan (long)
 | [`examples/`](examples/README.md) | eight runnable programs and small reproductions of fixed defects |
 | [`docs/`](docs/README.md) | design notes, the findings log, bank and action-language references |
 | [`data/`](data/README.md) | the problem bank exported as JSON, with checksums |
+| [`preprint/`](preprint/README.md) | the technical report (`itp_preprint.pdf`), its LaTeX sources, and the scripts and raw measurements behind every number in it |
 | [`tools/`](tools/README.md), [`scripts/`](scripts/README.md) | environment check, release archive, sanitizer run; shell drivers |
 
 ## Optional components

@@ -1,0 +1,174 @@
+\subsection{Inductive families and case analysis}\label{sec:ind}
+
+An inductive family is declared by its type and the types of its constructors,
+\[
+I : \Pit{\vs y}{\vs\Xi}{\Type_l}
+\qquad
+C_c : \Pi(\vs x{:}\vs\Theta_c).\; I\;\vs q_c
+\qquad (1\le c\le n),
+\]
+where $\vs y{:}\vs\Xi$ is the telescope of the arguments of $I$ (parameters and indices alike), $\vs x{:}\vs\Theta_c$ are the \emph{fields} of $C_c$ (each type may depend on the earlier fields), and the \emph{result indices} $\vs q_c$ are terms over the fields, one for each argument of $I$.
+A constructor takes its parameters as ordinary fields; for the list family, $\ctor{cons} : \Pi(A{:}\Type_1)(a{:}A)(\ell{:}\Fam{List}\,A).\,\Fam{List}\,A$, whose result index is the bare field $A$.
+
+\paragraph{Admission.}
+A family is admitted by the checked entry point \texttt{finish\_inductive} only if all of the following hold, for every constructor.
+\begin{description}[style=nextline,leftmargin=1.2em,itemsep=0.3em]
+\item[A1] The declared type of $I$ is a type of the form $\Pit{\vs y}{\vs\Xi}{\Type_l}$.
+\item[A2] Every field type is a type in the context of the earlier fields: $\Gamma_c, x_1{:}T_1,\dots,x_{j-1}{:}T_{j-1} \vdash T_j : \Type_{s_j}$.
+\item[A3] The application $I\,\vs q_c$ is well typed and fully applied: $\Gamma_c \vdash I\,\vs q_c : \Type_l$.
+\item[A4] (\emph{Universe rule.}) For every field $x_j$, one of the following holds:
+  $s_j \le l$;
+  $x_j$ occurs as a bare variable among $\vs q_c$ (the field is \emph{parameter-like}: this is how the kernel encodes a parameter, and a parameter is not a constructor argument in Lean or Rocq);
+  or, in the Prop configuration, $l=0$.
+\item[A5] (\emph{Strict positivity.}) Every field type $T$ satisfies $\sy{pos}_I(T)$, defined by
+  $\sy{pos}_I(\Pit{z}{Z}{T'}) = (I\notin Z)\wedge\sy{pos}_I(T')$, and, for $T$ not a product,
+  $\sy{pos}_I(T) = (I\notin T)\vee(\text{the head of the application } T \text{ is } I)$.
+\item[A6] The declaration is of a single family: mutual families are not available.
+\end{description}
+\textbf{A4} is the condition that keeps the impredicative bottom universe consistent in the Set-like configuration: a constructor field of a larger universe in a family of $\Type_0$ lets $\Type_0$ be embedded in one of its own members (Girard's paradox \citep{coquand86girard,hurkens95}); in the Prop configuration the same large fields are permitted, and the price is paid at elimination (below).
+\textbf{A5} accepts ordinary recursive fields ($\ctor{Succ}:\Fam{Nat}\to\Fam{Nat}$) and infinitely branching ones ($\Nat\to\Fam{Tree}$), and rejects $(\Fam{Bad}\to\sy{False})\to\Fam{Bad}$; it rejects, too, an occurrence of $I$ nested inside another family's argument (such as \texttt{List Bad}), because that would require the variance of the other family.
+We state the condition exactly as it is implemented because it is weaker than the textbook one in one respect: occurrences of $I$ \emph{inside the arguments of the head $I$}, that is, in the indices of a recursive field, and occurrences in the result indices $\vs q_c$, are not examined (\cref{app:deviations}, D2).
+
+\paragraph{Parameters.}
+With the option \code{parameters}, the kernel computes a prefix of the arguments of $I$ that are \emph{parameters}: slot $i$ is a parameter if, in every constructor, the $i$-th result index is a bare field variable different from the variables of earlier parameter slots, and every occurrence of $I$ in any field type is fully applied and passes that same variable at slot $i$.
+A field that a parameter slot determines is treated as known in the branches of a case analysis (below); that is what makes the branch of $\ctor{cons}$ in a match on a scrutinee of type $\Fam{List}\,\Nat$ mention $\Nat$ and not a fresh type variable.
+The independent checker re-implements this analysis from the stated rule.
+
+\paragraph{Elimination into larger universes.}
+In the Prop configuration a family in $\Type_0$ is \emph{eliminable only into $\Prop$} (the family belongs to the set $\mathcal E$) unless it is a syntactic subsingleton: it has no constructor, or exactly one constructor each of whose fields is a proof (its type lives in $\Type_0$) or occurs as a bare result index.
+This admits $\sy{False}$, $\sy{True}$, conjunction and equality with elimination into every universe, and restricts disjunction and the existential quantifier to eliminations whose motive ends in $\Prop$; that is the usual rule of Coq and Lean, here stated on syntax.
+Families above $\Type_0$ are data and are never restricted.
+\[
+\sy{Elim}(I,S) \;:=\; \bigl(I\in\mathcal E\bigr)\Rightarrow S \conv \Type_0 .
+\]
+
+\paragraph{Case analysis and the type of a branch.}
+The rule \textsc{Match} (\cref{fig:rules-data}) refers to the type of the branch for $C_c$, which we now define.
+Let $\vs a$ be the arguments of the family in the type of the scrutinee, $\vs x{:}\vs\Theta$ the fields of $C_c$ and $\vs q$ its result indices.
+The kernel first matches the result indices against the arguments, producing a partial substitution $\vartheta$ on the fields (the \emph{forcing}, below), and defines
+\[
+\sy{Br}(I,c,\vs a,M) \;=\; \Pi(\vs x{:}\vartheta(\vs\Theta)).\; M\;\vartheta_{\mathrm{lin}}(\vs q)\;\bigl(C_c\;\vartheta_{\mathrm{lin}}(\vs x)\bigr).
+\]
+Here $\vartheta(\vs\Theta)$ applies $\vartheta$ to \emph{every} field type, whereas $\vartheta_{\mathrm{lin}}$, used for the motive's arguments and for the constructor application, is $\vartheta$ restricted to the fields that occur at most once as a bare result index or that a parameter slot determined.
+The fields that occur twice (the field $a$ of $\ctor{refl} : \Pi(A{:}\Type_j)(a{:}A).\,\Eqf\,A\,a\,a$) keep their own identity in the motive, which is what the usual elimination principle of equality prescribes.
+With $\vartheta=\emptyset$ the type is $\Pi(\vs x{:}\vs\Theta).\,M\,\vs q\,(C_c\,\vs x)$, the textbook one.
+
+\begin{algorithm}[t]
+\caption{Index forcing: $\textsc{Force}_c(\vs q,\vs a)$ for constructor $C_c$ with result indices $\vs q$ over fields $\vs x$ and scrutinee arguments $\vs a$}
+\label{alg:force}
+\begin{algorithmic}[1]
+\Require patterns $q_1,\dots,q_r$ over the fields; concrete terms $a_1,\dots,a_r$ over the context
+\Ensure a partial map $\vartheta$ on the fields, or $\bot$ (the branch is \emph{refuted})
+\State $\vartheta \gets \emptyset$
+\For{$i = 1,\dots,r$}
+  \If{$\textsc{Match}(q_i,a_i)$ returns $\bot$} \Return $\bot$ \EndIf
+\EndFor
+\State \Return $\vartheta$
+\Statex
+\Function{Match}{$p,a$}
+  \If{$p$ is a field variable $x_j$}
+     \If{$x_j\notin\mathrm{dom}(\vartheta)$} \State $\vartheta(x_j) \gets a$; \Return ok
+     \Else\ \Return \textsc{Match}$(\vartheta(x_j),a)$ \Comment{compare the earlier value with the new one}
+     \EndIf
+  \ElsIf{$p$ and $a$ are applications with the same head constant and arity}
+     \State \Return the first failure of \textsc{Match}$(p_k,a_k)$ over the arguments, else ok
+  \ElsIf{$p$ and $a$ have as heads two different constructors of one family}
+     \State \Return $\bot$ \Comment{refutation: the scan stops}
+  \Else\ \Return ok \Comment{decline: nothing is forced, nothing is an error}
+  \EndIf
+\EndFunction
+\end{algorithmic}
+\end{algorithm}
+
+\paragraph{Index forcing.}
+\Cref{alg:force} is the first-order partial matching of the result indices of a constructor against the arguments of the scrutinee's family.
+A field that stands alone at an index position is forced to the corresponding argument; a field met again (as in $(A,a,a)$ for equality) has its earlier value compared with the new one by the same procedure; two applications of the same constructor are matched argument by argument; two different constructors of one family \emph{refute} the branch, since no constructor application can have both; and anything else is declined.
+Refutation is detected and not exploited: a refuted branch must still be present, and it is checked against the type obtained from the forcing computed up to the point of refutation.
+This is the point where the kernel departs from the elimination principles of Coq and Lean, where the branch type always has the generic indices and the equations between indices are left to the user: the aim is that a proof by cases on an indexed hypothesis can be written without an auxiliary equality in the common cases \citep{goguen06}.
+Because the calculus has uniqueness of identity proofs (\cref{sec:prop}), the forcing need not take the care that pattern matching without K requires \citep{cockx14}.
+The soundness argument is the one for the solution rule of dependent pattern matching: in any closed instance, the scrutinee is a constructor application whose fields satisfy the equations that the matching solved.
+The forcing is not itself a typing rule; its effect is only on the \emph{expected} type of the branch, and the branch is then checked against that type in the ordinary way.
+We have not formalised the argument, and this is the most delicate part of the kernel; it is the part for which the independent checker (a re-implementation of this rule from the specification) and the mutation testing of \cref{sec:testing} are the main evidence.
+
+\paragraph{Motive inference.}
+When a $\sy{match}$ is \emph{checked} against an expected type $T$ and its motive is a hole, the kernel builds the motive by abstracting the arguments and the scrutinee out of $T$:
+\[
+M \;:=\; \lambda(\vs y{:}\vs\Xi)(z{:}I\,\vs y).\;T[\vs a\!:=\!\vs y,\;s\!:=\!z],
+\]
+and checks that $M$ is well typed; if it is not, the user must give the motive.
+When the motive is given, the kernel checks that its type has the shape $\Pi(\vs y{:}\vs Y)(z{:}Z).\,S$ with $|\vs y|=|\vs a|$, and unifies $M\,\vs a\,s$ with the expected type.
+The motive's type is checked for its \emph{shape} only; \cref{app:deviations} (D1) states what is, and is not, compared.
+
+\subsection{Structural recursion}\label{sec:guard}
+
+Recursion is by structural recursion on one argument of one non-mutual family.
+A recursive function is declared with a body $t=\lambda(p_0{:}P_0)\cdots(p_k{:}P_k).\,b$ and a \emph{decreasing parameter} $p_d$ whose type is headed by the family $I$; the local form is $\fixx{d}{f}{A}{t}$.
+Let $\mathsf{rec}(C)$ be the set of \emph{recursive fields} of a constructor $C$ of $I$: the fields whose type is directly an application of $I$ (a field of type $\Nat\to\Fam{Tree}$ is accepted by \textbf{A5} but is not recursive in this sense, so no call on it is accepted).
+The judgement $\mathit{Sm}\vdash e\ \checkmark$, where $\mathit{Sm}$ is a set of variables known to be structurally smaller than $p_d$, is defined by the rules of \cref{fig:guard}, together with the congruence rule that $e$ is accepted when each immediate subterm is and $f$ is not the term itself.
+A function is accepted, $\sy{guard}_d(f,t,A)$, if $t$ has at least $d+1$ leading abstractions and $\emptyset\vdash b\ \checkmark$.
+
+\begin{figure}[t]
+\centering
+\begin{mathpar}
+\inferrule*[right=\pf{G-Call}]{n\ge d \\ a_d\in\mathit{Sm}\\ \mathit{Sm}\vdash a_i\ \checkmark\ (0\le i\le n)}{\mathit{Sm}\vdash f\,a_0\cdots a_n\ \checkmark}
+\and
+\inferrule*[right=\pf{G-Match}]{s\in\{p_d\}\cup\mathit{Sm}\\ \mathit{Sm}\vdash M\ \checkmark\\ \mathit{Sm}\cup\{x_j\mid j\in\mathsf{rec}(C_c)\}\vdash e_c\ \checkmark\ (1\le c\le n)}{\mathit{Sm}\vdash \matchx{s}{M}{\lambda\vs x.e_1,\dots,\lambda\vs x.e_n}\ \checkmark}
+\\
+\inferrule*[right=\pf{G-Case}]{s\notin\{p_d\}\cup\mathit{Sm}\\ \mathit{Sm}\vdash s,M\ \checkmark\\ \mathit{Sm}\vdash e_c\ \checkmark\ (1\le c\le n)}{\mathit{Sm}\vdash \matchx{s}{M}{\lambda\vs x.e_1,\dots,\lambda\vs x.e_n}\ \checkmark}
+\and
+\inferrule*[right=\pf{G-Let}]{y\ \text{fresh}\\ \mathit{Sm}\vdash A,v\ \checkmark\\ \mathit{Sm}'\vdash u\ \checkmark}{\mathit{Sm}\vdash \letin{y}{A}{v}{u}\ \checkmark}
+\end{mathpar}
+\caption{The structural guard.
+  $f$ is the function being defined and $p_d$ its decreasing parameter; the field variables $x_j$ of a branch are bound by its leading abstractions.
+  In \textsc{G-Let}, $\mathit{Sm}'=\mathit{Sm}\cup\{y\}$ if $v$ is a variable of $\mathit{Sm}$ and $\mathit{Sm}'=\mathit{Sm}$ otherwise.
+  A bare occurrence of $f$, or a call with fewer than $d+1$ arguments, is accepted by no rule.}
+\label{fig:guard}
+\end{figure}
+
+The guard is the standard one for structural recursion \citep{gimenez94} in its simplest form: the scrutinee must be a \emph{variable}, only the direct recursive fields of a match on a smaller variable become smaller, a call must pass a bare smaller variable at the decreasing position, and no information flows through definitions, applications or non-variable scrutinees.
+A recursive function may use any function that is already complete (a constant like any other), but it cannot refer to itself except through the guard, and mutual recursion is not available.
+The kernel enforces the guard where a function is declared (\texttt{finish\_recursive\_function\_checked}) and where a local fixpoint is typed (rule \textsc{Fix}); the independent checker re-implements it.
+
+\subsection{Propositions and definitional proof irrelevance}\label{sec:prop}
+
+In the Prop configuration $\Type_0=\Prop$ and proofs are irrelevant:
+\[
+\inferrule*[right=\pf{PI}]{\Gamma\vdash P : \Prop \\ \Gamma\vdash p : P \\ \Gamma\vdash q : P}{\Gamma\vdash p \conv q}
+\]
+No other universe is irrelevant: two terms of a type in $\Type_j$ with $j\ge1$ are equal only if they are convertible.
+The rule \textsc{PI} makes uniqueness of identity proofs, and the axiom K, provable by $\ctor{refl}$, and is also what lets a Boolean-valued statement be compared without comparing the proofs inside it (compare Gilbert et al. on definitional proof irrelevance without $K$ \citep{gilbert19}).
+
+The rule is decided in the unifier only, and \emph{after} the structural comparison has failed.
+A pair that the structural comparison did not equate is a \emph{candidate} only if both sides pass a one-sided syntactic prefilter, which can say only ``certainly not a proof''; this keeps failing comparisons of data, the common case in proof search, from paying for a type inference.
+The verdict then comes from the type checker itself: infer the type of each side, require that the type is a proposition (its sort is $\Type_0$), and unify the two types.
+There is no hand-written classification of proofs that could drift from the typing rules.
+Partial effects of the failed structural comparison (metavariables assigned on the way to the mismatch) are rolled back before the rule is tried, so an equality obtained by irrelevance carries no commitments from a comparison that did not hold.
+The recursion (the verdict calls inference, which calls checking, which calls the unifier) is bounded by a nesting depth of eight, beyond which the answer is ``not irrelevant'': it fails closed.
+The untyped conversion $\mathsf{conv}$ of \cref{sec:conv} does not apply \textsc{PI}: it never sees a type.
+Proofs inside the captured environment of a stuck case analysis are therefore compared structurally, which is incomplete and cannot be unsound.
+
+\subsection{Quotient types}\label{sec:quot}
+
+A quotient is not a term former.
+It is five ordinary constants, whose types the kernel itself builds so that nobody can supply different ones, and the one reduction rule $(\kappa)$.
+With $\Eqf : (A{:}\Type_j)\to A\to A\to\Prop$, where $j\ge1$,
+\begin{align*}
+\Quot &: (A{:}\Type_j)\to (A\to A\to\Prop)\to\Type_j\\
+\Quot.\sy{mk} &: (A{:}\Type_j)\to(r{:}A\to A\to\Prop)\to A\to \Quot\,A\,r\\
+\Quot.\sy{lift} &: (A{:}\Type_j)\to(r)\to(B{:}\Type_j)\to(f{:}A\to B)\\
+  &\qquad\to\bigl(\Pi(a\,b{:}A).\,r\,a\,b\to\Eqf\,B\,(f\,a)\,(f\,b)\bigr)\to\Quot\,A\,r\to B\\
+\Quot.\sy{ind} &: (A{:}\Type_j)\to(r)\to(P{:}\Quot\,A\,r\to\Prop)\\
+  &\qquad\to\bigl(\Pi(a{:}A).\,P\,(\Quot.\sy{mk}\,A\,r\,a)\bigr)\to\Pi(q{:}\Quot\,A\,r).\,P\,q\\
+\Quot.\sy{sound} &: (A{:}\Type_j)\to(r)\to(a\,b{:}A)\to r\,a\,b\\
+  &\qquad\to\Eqf\,(\Quot\,A\,r)\,(\Quot.\sy{mk}\,A\,r\,a)\,(\Quot.\sy{mk}\,A\,r\,b)
+\end{align*}
+and $(\kappa)$ as in \cref{sec:conv}.
+Making the primitives constants has a purpose: the hypothesis of $\Quot.\sy{lift}$, that $f$ respects $r$, is then checked by the ordinary rule \textsc{App} against the declared type, so there is no special typing rule that could forget to look at it.
+(In the displays above, $(r)$ abbreviates $(r{:}A\to A\to\Prop)$.)
+The standard soundness argument for Lean's quotients \citep{carneiro19} applies: the respect proof is what makes $(\kappa)$ agree with $\Quot.\sy{sound}$, and the motive of $\Quot.\sy{ind}$ is a proposition because a motive in $\Type$ would let a function that does not respect $r$ be defined by eliminating a quotient, after which $\Quot.\sy{sound}$ would equate its values on related arguments.
+Quotients as a type former go back to Hofmann \citep{hofmann95quot}.
+
+Declaring the quotient checks its preconditions: the Prop configuration; that the equality family is \emph{exactly} the inductive family $\Eqf : (A{:}\Type_j)\to A\to A\to\Prop$ with the single constructor $\ctor{refl} : (A{:}\Type_j)\to(a{:}A)\to\Eqf\,A\,a\,a$ (the constants' types mention it, and another family would give $\Quot.\sy{sound}$ and the hypothesis of $\Quot.\sy{lift}$ another meaning); that $j$, read off $\Eqf$, is at least one; and that no quotient has been declared before (a second would give the one reduction rule two meanings).
+The five types are built, type-checked, and only then declared; on any failure nothing remains declared.
+The independent checker does not trust the labels the kernel puts on these constants: it derives $j$ and $\Eqf$ from the declared type of $\Quot.\sy{sound}$ and demands that every labelled constant have exactly the type above, up to $\alpha$-equivalence.
+Function extensionality is not an axiom: it is a theorem of the library, derived from the quotient constants, and \texttt{audit} reports the quotient constants a proof depends on separately from axioms.

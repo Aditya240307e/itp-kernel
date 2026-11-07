@@ -1,0 +1,41 @@
+A. library re-declared through the CHECKED path (positivity, admission, guard, full typing of every definition):
+     family             Nat        OK
+     family             Bool       OK
+     family             Eq         OK
+     recursive_function add        OK
+     definition         cong       OK
+     family             Le         OK
+     definition         lt         OK
+     definition         transport  OK
+     definition         le_trans   OK
+   global types equal after conversion: yes (16 vs 16 globals)
+B. admission corpus (ref accepts/rejects == new == expected, rejection reason matches):
+     U_paradox: mk : Type0 -> U                     expect reject ref reject new reject OK   itp: constructor 'mk' of 'Ty': field 0 lives in universe 1, larger tha
+     field Nat -> Type0 in a Type0 inductive        expect reject ref reject new reject OK   itp: constructor 'mk' of 'Ty': field 0 lives in universe 1, larger tha
+     field whose type is a value                    expect reject ref reject new reject OK   itp: constructor 'mk' of 'Ty': field 0's declared type is not a type
+     unbound variable in a field type               expect reject ref reject new reject OK   ill-scoped term (constructor field type): it has an unbound bound vari
+     constructor omits a required index             expect reject ref reject new reject OK   itp: constructor 'mk' of 'Ty': its result indices are ill-typed, or do
+     too many indices                               expect reject ref reject new reject OK   itp: constructor 'mk' of 'Ty': its result indices are ill-typed, or do
+     index of the wrong type                        expect reject ref reject new reject OK   itp: constructor 'mk' of 'Ty': its result indices are ill-typed, or do
+     declared type is a value                       expect reject ref reject new reject OK   itp: inductive 'Ty': its declared type is ill-typed or is not a type
+     strict positivity violated                     expect reject ref reject new reject OK   itp: constructor 'mk' fails strict positivity -- the inductive being d
+     small impredicative field                      expect accept ref accept new accept OK   
+     large parameter-like field                     expect accept ref accept new accept OK   
+     Vec-style indexed family                       expect accept ref accept new accept OK   
+C. structural-recursion guard corpus:
+     double: S (S (f k))                            expect accept ref accept new accept OK   
+     successor-copy: S (f k)                        expect accept ref accept new accept OK   
+     loop: f n = f n                                expect reject ref reject new reject OK   function 'f' failed the structural recursion check
+     recurse on the scrutinee: f (S k) = f n        expect reject ref reject new reject OK   function 'f' failed the structural recursion check
+     growing: f n = f (S n)                         expect reject ref reject new reject OK   function 'f' failed the structural recursion check
+     nested self call as the argument: f (f k)      expect reject ref reject new reject OK   function 'f' failed the structural recursion check
+D. Match typing, 1500 random typed terms with Match: new accepts what the reference accepts: 1500 checked, 0 disagreements | ill-typed matches rejected by both: 750 checked, 0 disagreements
+F. dependent typing (refl a : Eq a b, with delta/iota/beta needed in the type): 1503 checked (1066 accepted by the reference) | disagreements 0
+   timing, Match typing: reference whole_term_check 15 ms vs hybrid check 10 ms (ratio 0.66x)
+E. proof corpus: 12 real Fix+Match proofs (31 Fix nodes): accepted at their statement: 12 | proofs of FALSE statements rejected: 12 | problems: 0
+     hand-built Fix, valid: f n = match n | Zero | S k -> S (f k)         expect accept got accept OK
+     hand-built Fix, invalid: f n = f n                                   expect reject got reject OK
+     hand-built Fix, invalid: f n = match n | Zero | S k -> f n           expect reject got reject OK
+     hand-built Fix, invalid: f n = f (S n)                               expect reject got reject OK
+elapsed 0.3s
+S2 GATE: PASS

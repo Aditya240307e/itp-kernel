@@ -1,0 +1,4 @@
+ring refuses: ring failed: the two sides have different normal forms
+kernel refuses: different constructors
+independent checker: 132 globals re-checked, problems: []
+axioms: [] | quotient constants: []

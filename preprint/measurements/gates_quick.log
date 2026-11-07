@@ -1,0 +1,27 @@
+python3 src/python/build_kernel.py all
+itp_env_lnl.cpython-313-x86_64-linux-gnu.so: up to date
+itp_env_ref.cpython-313-x86_64-linux-gnu.so: up to date
+python3 tests/run_gates.py -j 2 s2_tests.py s16_quot_tests.py s17_irrelevance_tests.py s20_reservation_tests.py s21_view_tests.py s26_memo_tests.py
+PASS  s2_tests.py 1500                      0.3s  S2 GATE: PASS
+PASS  s16_quot_tests.py                     0.7s  S16 QUOT GATE: PASS
+PASS  s26_memo_tests.py                     2.3s  S26 MEMO GATE: PASS
+PASS  s20_reservation_tests.py              0.3s  S20 RESERVATION GATE: PASS
+PASS  s21_view_tests.py                     0.4s  S21 VIEW GATE: PASS
+PASS  s17_irrelevance_tests.py              3.2s  S17 IRRELEVANCE GATE: PASS
+6/6 gates passed in 4s
+python3 examples/01_prove_with_tactics.py
+the natural-number world: 129 globals (types, functions, lemmas), all admitted by the kernel
+1. proved by induction:       forall (x0 : Nat), ex_double x0 = x0 + x0
+2. proved by ring:           (a + b)^2 = a^2 + 2*a*b + b^2   (numerals are Succ chains in this world: the statement is 147 characters long)
+3. ring refuses (a+b)^2 = a^2 + b^2:
+      ring failed: the two sides have different normal forms
+        left:  a^2 + 2*a*b + b^2
+        right: a^2 + b^2
+4. the kernel refuses a forged proof of 0 = 1: different constructors
+independent checker: 132 globals re-checked, 0 problems
+ex_binomial rests on: axioms none, quotient primitives none
+EXAMPLE OK
+
+real	0m4.482s
+user	0m6.689s
+sys	0m0.783s

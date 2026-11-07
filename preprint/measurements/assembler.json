@@ -1,0 +1,3743 @@
+{
+ "args": {
+  "data": "<repo>/data/dataset_v2",
+  "out": "preprint/measurements/assembler.json",
+  "quick": false
+ },
+ "failures": [
+  {
+   "error": "Missing",
+   "index": 0,
+   "kind": "USE",
+   "proof": "imo1984_p2",
+   "reason": "token (USE): the action says none of the 44 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 17,
+   "kind": "APPLY_WITH",
+   "proof": "imo1984_p2",
+   "reason": "token (APPLY_WITH): the action says none of the 45 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 21,
+   "kind": "USE",
+   "proof": "imo1984_p2",
+   "reason": "token (USE): the action says none of the 45 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 15,
+   "kind": "USE",
+   "proof": "fourth_power_odd_16",
+   "reason": "token (USE): the action says none of the 48 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 63,
+   "kind": "APPLY_WITH",
+   "proof": "cube_sum_not_4_mod_9",
+   "reason": "token (APPLY_WITH): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 106,
+   "kind": "APPLY_WITH",
+   "proof": "cube_sum_not_4_mod_9",
+   "reason": "token (APPLY_WITH): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 120,
+   "kind": "APPLY_WITH",
+   "proof": "cube_sum_not_4_mod_9",
+   "reason": "token (APPLY_WITH): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 126,
+   "kind": "APPLY_WITH",
+   "proof": "cube_sum_not_4_mod_9",
+   "reason": "token (APPLY_WITH): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 147,
+   "kind": "APPLY_WITH",
+   "proof": "cube_sum_not_4_mod_9",
+   "reason": "token (APPLY_WITH): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 162,
+   "kind": "APPLY_WITH",
+   "proof": "cube_sum_not_4_mod_9",
+   "reason": "token (APPLY_WITH): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 168,
+   "kind": "APPLY_WITH",
+   "proof": "cube_sum_not_4_mod_9",
+   "reason": "token (APPLY_WITH): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 175,
+   "kind": "APPLY_WITH",
+   "proof": "cube_sum_not_4_mod_9",
+   "reason": "token (APPLY_WITH): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 182,
+   "kind": "APPLY_WITH",
+   "proof": "cube_sum_not_4_mod_9",
+   "reason": "token (APPLY_WITH): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 188,
+   "kind": "APPLY_WITH",
+   "proof": "cube_sum_not_4_mod_9",
+   "reason": "token (APPLY_WITH): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 0,
+   "kind": "USE",
+   "proof": "three_consecutive_not_squarefree",
+   "reason": "token (USE): the action says none of the 44 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 7,
+   "kind": "USE",
+   "proof": "three_consecutive_not_squarefree",
+   "reason": "token (USE): the action says none of the 45 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 12,
+   "kind": "USE",
+   "proof": "three_consecutive_not_squarefree",
+   "reason": "token (USE): the action says none of the 45 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 16,
+   "kind": "USE",
+   "proof": "three_consecutive_not_squarefree",
+   "reason": "token (USE): the action says none of the 45 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 5,
+   "kind": "REFINE",
+   "proof": "find_all_xy_eq_x_plus_y",
+   "reason": "token (REFINE): the action says none of the 31 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 1,
+   "kind": "FORWARD",
+   "proof": "frobenius_3_5",
+   "reason": "token (FORWARD): the action says none of the 45 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 6,
+   "kind": "REFINE",
+   "proof": "sqrt3_irrational",
+   "reason": "token (REFINE): the action says none of the 32 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 16,
+   "kind": "REFINE",
+   "proof": "sqrt3_irrational",
+   "reason": "token (REFINE): the action says none of the 32 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 29,
+   "kind": "REFINE",
+   "proof": "sqrt3_irrational",
+   "reason": "token (REFINE): the action says none of the 45 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 6,
+   "kind": "REFINE",
+   "proof": "sqrt3_irrational",
+   "reason": "token (REFINE): the action says none of the 32 options",
+   "source": "bank / strict"
+  },
+  {
+   "error": "Missing",
+   "index": 16,
+   "kind": "REFINE",
+   "proof": "sqrt3_irrational",
+   "reason": "token (REFINE): the action says none of the 32 options",
+   "source": "bank / strict"
+  },
+  {
+   "error": "Missing",
+   "index": 29,
+   "kind": "REFINE",
+   "proof": "sqrt3_irrational",
+   "reason": "token (REFINE): the action says none of the 44 options",
+   "source": "bank / strict"
+  },
+  {
+   "error": "Missing",
+   "index": 7,
+   "kind": "REFINE",
+   "proof": "x2_y2_3z2",
+   "reason": "token (REFINE): the action says none of the 32 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 19,
+   "kind": "REFINE",
+   "proof": "x2_y2_3z2",
+   "reason": "token (REFINE): the action says none of the 32 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 32,
+   "kind": "REFINE",
+   "proof": "x2_y2_3z2",
+   "reason": "token (REFINE): the action says none of the 34 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 46,
+   "kind": "REFINE",
+   "proof": "x2_y2_3z2",
+   "reason": "token (REFINE): the action says none of the 34 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 7,
+   "kind": "REFINE",
+   "proof": "x2_y2_3z2",
+   "reason": "token (REFINE): the action says none of the 32 options",
+   "source": "bank / strict"
+  },
+  {
+   "error": "Missing",
+   "index": 19,
+   "kind": "REFINE",
+   "proof": "x2_y2_3z2",
+   "reason": "token (REFINE): the action says none of the 32 options",
+   "source": "bank / strict"
+  },
+  {
+   "error": "Missing",
+   "index": 32,
+   "kind": "REFINE",
+   "proof": "x2_y2_3z2",
+   "reason": "token (REFINE): the action says none of the 33 options",
+   "source": "bank / strict"
+  },
+  {
+   "error": "Missing",
+   "index": 46,
+   "kind": "REFINE",
+   "proof": "x2_y2_3z2",
+   "reason": "token (REFINE): the action says none of the 33 options",
+   "source": "bank / strict"
+  },
+  {
+   "error": "Missing",
+   "index": 4,
+   "kind": "REFINE",
+   "proof": "no_x2_minus_2y2_eq_3",
+   "reason": "token (REFINE): the action says none of the 32 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 6,
+   "kind": "CLAIM",
+   "proof": "imo1982_p1",
+   "reason": "token (CLAIM): the action says none of the 49 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 8,
+   "kind": "CLAIM",
+   "proof": "imo1982_p1",
+   "reason": "token (CLAIM): the action says none of the 50 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 10,
+   "kind": "CLAIM",
+   "proof": "imo1982_p1",
+   "reason": "token (CLAIM): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 14,
+   "kind": "CLAIM",
+   "proof": "imo1982_p1",
+   "reason": "token (CLAIM): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 16,
+   "kind": "CLAIM",
+   "proof": "imo1982_p1",
+   "reason": "token (CLAIM): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 18,
+   "kind": "CLAIM",
+   "proof": "imo1982_p1",
+   "reason": "token (CLAIM): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 20,
+   "kind": "CLAIM",
+   "proof": "imo1982_p1",
+   "reason": "token (CLAIM): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 22,
+   "kind": "CLAIM",
+   "proof": "imo1982_p1",
+   "reason": "token (CLAIM): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 30,
+   "kind": "REFINE",
+   "proof": "imo1982_p1",
+   "reason": "token (REFINE): the action says none of the 32 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 35,
+   "kind": "REFINE",
+   "proof": "imo1982_p1",
+   "reason": "token (REFINE): the action says none of the 25 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 49,
+   "kind": "CLAIM",
+   "proof": "imo1982_p1",
+   "reason": "token (CLAIM): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 53,
+   "kind": "CLAIM",
+   "proof": "imo1982_p1",
+   "reason": "token (CLAIM): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 56,
+   "kind": "REFINE",
+   "proof": "imo1982_p1",
+   "reason": "token (REFINE): the action says none of the 32 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 58,
+   "kind": "REFINE",
+   "proof": "imo1982_p1",
+   "reason": "token (REFINE): the action says none of the 32 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 59,
+   "kind": "CLAIM",
+   "proof": "imo1982_p1",
+   "reason": "token (CLAIM): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 60,
+   "kind": "REFINE",
+   "proof": "imo1982_p1",
+   "reason": "token (REFINE): the action says none of the 32 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 61,
+   "kind": "CLAIM",
+   "proof": "imo1982_p1",
+   "reason": "token (CLAIM): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 62,
+   "kind": "REFINE",
+   "proof": "imo1982_p1",
+   "reason": "token (REFINE): the action says none of the 32 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 64,
+   "kind": "REFINE",
+   "proof": "imo1982_p1",
+   "reason": "token (REFINE): the action says none of the 32 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 65,
+   "kind": "CLAIM",
+   "proof": "imo1982_p1",
+   "reason": "token (CLAIM): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 66,
+   "kind": "REFINE",
+   "proof": "imo1982_p1",
+   "reason": "token (REFINE): the action says none of the 32 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 67,
+   "kind": "CLAIM",
+   "proof": "imo1982_p1",
+   "reason": "token (CLAIM): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 68,
+   "kind": "REFINE",
+   "proof": "imo1982_p1",
+   "reason": "token (REFINE): the action says none of the 32 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 69,
+   "kind": "CLAIM",
+   "proof": "imo1982_p1",
+   "reason": "token (CLAIM): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 70,
+   "kind": "REFINE",
+   "proof": "imo1982_p1",
+   "reason": "token (REFINE): the action says none of the 32 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 71,
+   "kind": "CLAIM",
+   "proof": "imo1982_p1",
+   "reason": "token (CLAIM): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 72,
+   "kind": "REFINE",
+   "proof": "imo1982_p1",
+   "reason": "token (REFINE): the action says none of the 32 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 73,
+   "kind": "CLAIM",
+   "proof": "imo1982_p1",
+   "reason": "token (CLAIM): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 74,
+   "kind": "REFINE",
+   "proof": "imo1982_p1",
+   "reason": "token (REFINE): the action says none of the 32 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 76,
+   "kind": "REFINE",
+   "proof": "imo1982_p1",
+   "reason": "token (REFINE): the action says none of the 32 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 71,
+   "kind": "REFINE",
+   "proof": "imo1988_p6",
+   "reason": "token (REFINE): the action says none of the 25 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 71,
+   "kind": "REFINE",
+   "proof": "imo1988_p6",
+   "reason": "token (REFINE): the action says none of the 24 options",
+   "source": "bank / strict"
+  },
+  {
+   "error": "Missing",
+   "index": 11,
+   "kind": "REFINE",
+   "proof": "n5_minus_n_div30",
+   "reason": "token (REFINE): the action says none of the 32 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 2,
+   "kind": "REFINE",
+   "proof": "fe_quadratic",
+   "reason": "token (REFINE): the action says none of the 32 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 14,
+   "kind": "CLAIM",
+   "proof": "aime1985_p3",
+   "reason": "token (CLAIM): the action says none of the 50 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 23,
+   "kind": "FORWARD",
+   "proof": "aime1985_p3",
+   "reason": "token (FORWARD): the action says none of the 49 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 29,
+   "kind": "FORWARD",
+   "proof": "aime1985_p3",
+   "reason": "token (FORWARD): the action says none of the 49 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 35,
+   "kind": "FORWARD",
+   "proof": "aime1985_p3",
+   "reason": "token (FORWARD): the action says none of the 49 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 41,
+   "kind": "FORWARD",
+   "proof": "aime1985_p3",
+   "reason": "token (FORWARD): the action says none of the 49 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 47,
+   "kind": "FORWARD",
+   "proof": "aime1985_p3",
+   "reason": "token (FORWARD): the action says none of the 49 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 53,
+   "kind": "FORWARD",
+   "proof": "aime1985_p3",
+   "reason": "token (FORWARD): the action says none of the 49 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 59,
+   "kind": "FORWARD",
+   "proof": "aime1985_p3",
+   "reason": "token (FORWARD): the action says none of the 49 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 65,
+   "kind": "FORWARD",
+   "proof": "aime1985_p3",
+   "reason": "token (FORWARD): the action says none of the 49 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 82,
+   "kind": "APPLY_WITH",
+   "proof": "aime1985_p3",
+   "reason": "token (APPLY_WITH): the action says none of the 49 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 90,
+   "kind": "FORWARD",
+   "proof": "aime1985_p3",
+   "reason": "token (FORWARD): the action says none of the 49 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 96,
+   "kind": "FORWARD",
+   "proof": "aime1985_p3",
+   "reason": "token (FORWARD): the action says none of the 49 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 102,
+   "kind": "FORWARD",
+   "proof": "aime1985_p3",
+   "reason": "token (FORWARD): the action says none of the 49 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 108,
+   "kind": "FORWARD",
+   "proof": "aime1985_p3",
+   "reason": "token (FORWARD): the action says none of the 49 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 114,
+   "kind": "FORWARD",
+   "proof": "aime1985_p3",
+   "reason": "token (FORWARD): the action says none of the 49 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 120,
+   "kind": "FORWARD",
+   "proof": "aime1985_p3",
+   "reason": "token (FORWARD): the action says none of the 49 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 126,
+   "kind": "FORWARD",
+   "proof": "aime1985_p3",
+   "reason": "token (FORWARD): the action says none of the 49 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 132,
+   "kind": "FORWARD",
+   "proof": "aime1985_p3",
+   "reason": "token (FORWARD): the action says none of the 49 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 10,
+   "kind": "CLAIM",
+   "proof": "aime1991_p1",
+   "reason": "token (CLAIM): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 21,
+   "kind": "CLAIM",
+   "proof": "aime1991_p1",
+   "reason": "token (CLAIM): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 25,
+   "kind": "CLAIM",
+   "proof": "aime1991_p1",
+   "reason": "token (CLAIM): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 36,
+   "kind": "CLAIM",
+   "proof": "aime1991_p1",
+   "reason": "token (CLAIM): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 43,
+   "kind": "CLAIM",
+   "proof": "aime1991_p1",
+   "reason": "token (CLAIM): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 47,
+   "kind": "CLAIM",
+   "proof": "aime1991_p1",
+   "reason": "token (CLAIM): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 55,
+   "kind": "FORWARD",
+   "proof": "aime1991_p1",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 64,
+   "kind": "CLAIM",
+   "proof": "aime1991_p1",
+   "reason": "token (CLAIM): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 94,
+   "kind": "CLAIM",
+   "proof": "aime1991_p1",
+   "reason": "token (CLAIM): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 96,
+   "kind": "CLAIM",
+   "proof": "aime1991_p1",
+   "reason": "token (CLAIM): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 107,
+   "kind": "CLAIM",
+   "proof": "aime1991_p1",
+   "reason": "token (CLAIM): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 116,
+   "kind": "CLAIM",
+   "proof": "aime1991_p1",
+   "reason": "token (CLAIM): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 118,
+   "kind": "CLAIM",
+   "proof": "aime1991_p1",
+   "reason": "token (CLAIM): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 128,
+   "kind": "FORWARD",
+   "proof": "aime1991_p1",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 135,
+   "kind": "CLAIM",
+   "proof": "aime1991_p1",
+   "reason": "token (CLAIM): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 8,
+   "kind": "CLAIM",
+   "proof": "aime1987_p5",
+   "reason": "token (CLAIM): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 12,
+   "kind": "FORWARD",
+   "proof": "aime1987_p5",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 25,
+   "kind": "FORWARD",
+   "proof": "aime1987_p5",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 30,
+   "kind": "CLAIM",
+   "proof": "aime1987_p5",
+   "reason": "token (CLAIM): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 39,
+   "kind": "FORWARD",
+   "proof": "aime1987_p5",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 45,
+   "kind": "FORWARD",
+   "proof": "aime1987_p5",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 51,
+   "kind": "FORWARD",
+   "proof": "aime1987_p5",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 57,
+   "kind": "FORWARD",
+   "proof": "aime1987_p5",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 63,
+   "kind": "FORWARD",
+   "proof": "aime1987_p5",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 69,
+   "kind": "FORWARD",
+   "proof": "aime1987_p5",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 75,
+   "kind": "FORWARD",
+   "proof": "aime1987_p5",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 81,
+   "kind": "FORWARD",
+   "proof": "aime1987_p5",
+   "reason": "token (FORWARD): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 87,
+   "kind": "FORWARD",
+   "proof": "aime1987_p5",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 92,
+   "kind": "CLAIM",
+   "proof": "aime1987_p5",
+   "reason": "token (CLAIM): the action says none of the 54 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 96,
+   "kind": "CLAIM",
+   "proof": "aime1987_p5",
+   "reason": "token (CLAIM): the action says none of the 55 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 101,
+   "kind": "FORWARD",
+   "proof": "aime1987_p5",
+   "reason": "token (FORWARD): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 107,
+   "kind": "FORWARD",
+   "proof": "aime1987_p5",
+   "reason": "token (FORWARD): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 113,
+   "kind": "FORWARD",
+   "proof": "aime1987_p5",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 119,
+   "kind": "FORWARD",
+   "proof": "aime1987_p5",
+   "reason": "token (FORWARD): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 125,
+   "kind": "FORWARD",
+   "proof": "aime1987_p5",
+   "reason": "token (FORWARD): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 131,
+   "kind": "FORWARD",
+   "proof": "aime1987_p5",
+   "reason": "token (FORWARD): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 137,
+   "kind": "FORWARD",
+   "proof": "aime1987_p5",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 149,
+   "kind": "FORWARD",
+   "proof": "aime1987_p5",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 160,
+   "kind": "FORWARD",
+   "proof": "aime1987_p5",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 166,
+   "kind": "FORWARD",
+   "proof": "aime1987_p5",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 171,
+   "kind": "CLAIM",
+   "proof": "aime1987_p5",
+   "reason": "token (CLAIM): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 180,
+   "kind": "FORWARD",
+   "proof": "aime1987_p5",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 186,
+   "kind": "FORWARD",
+   "proof": "aime1987_p5",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 192,
+   "kind": "FORWARD",
+   "proof": "aime1987_p5",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 198,
+   "kind": "FORWARD",
+   "proof": "aime1987_p5",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 204,
+   "kind": "FORWARD",
+   "proof": "aime1987_p5",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 210,
+   "kind": "FORWARD",
+   "proof": "aime1987_p5",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 216,
+   "kind": "FORWARD",
+   "proof": "aime1987_p5",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 222,
+   "kind": "FORWARD",
+   "proof": "aime1987_p5",
+   "reason": "token (FORWARD): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 228,
+   "kind": "FORWARD",
+   "proof": "aime1987_p5",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 233,
+   "kind": "CLAIM",
+   "proof": "aime1987_p5",
+   "reason": "token (CLAIM): the action says none of the 54 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 242,
+   "kind": "FORWARD",
+   "proof": "aime1987_p5",
+   "reason": "token (FORWARD): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 248,
+   "kind": "FORWARD",
+   "proof": "aime1987_p5",
+   "reason": "token (FORWARD): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 254,
+   "kind": "FORWARD",
+   "proof": "aime1987_p5",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 260,
+   "kind": "FORWARD",
+   "proof": "aime1987_p5",
+   "reason": "token (FORWARD): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 266,
+   "kind": "FORWARD",
+   "proof": "aime1987_p5",
+   "reason": "token (FORWARD): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 272,
+   "kind": "FORWARD",
+   "proof": "aime1987_p5",
+   "reason": "token (FORWARD): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 278,
+   "kind": "FORWARD",
+   "proof": "aime1987_p5",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 290,
+   "kind": "FORWARD",
+   "proof": "aime1987_p5",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 5,
+   "kind": "CLAIM",
+   "proof": "aime1986_p5",
+   "reason": "token (CLAIM): the action says none of the 46 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 12,
+   "kind": "USE",
+   "proof": "aime1986_p5",
+   "reason": "token (USE): the action says none of the 46 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 19,
+   "kind": "CLAIM",
+   "proof": "aime1999_p3",
+   "reason": "token (CLAIM): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 46,
+   "kind": "FORWARD",
+   "proof": "aime1999_p3",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 52,
+   "kind": "FORWARD",
+   "proof": "aime1999_p3",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 82,
+   "kind": "FORWARD",
+   "proof": "aime1999_p3",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 88,
+   "kind": "FORWARD",
+   "proof": "aime1999_p3",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 23,
+   "kind": "USE",
+   "proof": "aime1985_p13",
+   "reason": "token (USE): the action says none of the 48 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 4,
+   "kind": "FORWARD",
+   "proof": "aime1989_p9",
+   "reason": "token (FORWARD): the action says none of the 50 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 12,
+   "kind": "CLAIM",
+   "proof": "aime1989_p9",
+   "reason": "token (CLAIM): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 9,
+   "kind": "LINCOMB",
+   "proof": "aime1997_p3",
+   "reason": "token (LINCOMB): the action says none of the 50 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 12,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 24,
+   "kind": "CLAIM",
+   "proof": "aime1997_p3",
+   "reason": "token (CLAIM): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 33,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 38,
+   "kind": "CLAIM",
+   "proof": "aime1997_p3",
+   "reason": "token (CLAIM): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 46,
+   "kind": "CLAIM",
+   "proof": "aime1997_p3",
+   "reason": "token (CLAIM): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 55,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 61,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 66,
+   "kind": "CLAIM",
+   "proof": "aime1997_p3",
+   "reason": "token (CLAIM): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 72,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 86,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 92,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 98,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 104,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 110,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 116,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 122,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 128,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 134,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 139,
+   "kind": "CLAIM",
+   "proof": "aime1997_p3",
+   "reason": "token (CLAIM): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 148,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 154,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 160,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 166,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 171,
+   "kind": "CLAIM",
+   "proof": "aime1997_p3",
+   "reason": "token (CLAIM): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 180,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 186,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 192,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 198,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 204,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 221,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 226,
+   "kind": "CLAIM",
+   "proof": "aime1997_p3",
+   "reason": "token (CLAIM): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 229,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 235,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 240,
+   "kind": "CLAIM",
+   "proof": "aime1997_p3",
+   "reason": "token (CLAIM): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 243,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 248,
+   "kind": "CLAIM",
+   "proof": "aime1997_p3",
+   "reason": "token (CLAIM): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 251,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 257,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 263,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 268,
+   "kind": "CLAIM",
+   "proof": "aime1997_p3",
+   "reason": "token (CLAIM): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 273,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 281,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 287,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 293,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 299,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 305,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 311,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 317,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 323,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 329,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 335,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 340,
+   "kind": "CLAIM",
+   "proof": "aime1997_p3",
+   "reason": "token (CLAIM): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 349,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 355,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 361,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 367,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 372,
+   "kind": "CLAIM",
+   "proof": "aime1997_p3",
+   "reason": "token (CLAIM): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 381,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 387,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 393,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 399,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 405,
+   "kind": "FORWARD",
+   "proof": "aime1997_p3",
+   "reason": "token (FORWARD): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 1,
+   "kind": "CLAIM",
+   "proof": "aime1990_p3",
+   "reason": "token (CLAIM): the action says none of the 49 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 1,
+   "kind": "CLAIM",
+   "proof": "aime1989_p1",
+   "reason": "token (CLAIM): the action says none of the 50 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 2,
+   "kind": "REFINE",
+   "proof": "aime1989_p1",
+   "reason": "token (REFINE): the action says none of the 33 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 15,
+   "kind": "REFINE",
+   "proof": "aime1989_p4",
+   "reason": "token (REFINE): the action says none of the 31 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 17,
+   "kind": "CLAIM",
+   "proof": "aime1989_p4",
+   "reason": "token (CLAIM): the action says none of the 50 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 18,
+   "kind": "CLAIM",
+   "proof": "aime1989_p4",
+   "reason": "token (CLAIM): the action says none of the 50 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 19,
+   "kind": "LINCOMB",
+   "proof": "aime1989_p4",
+   "reason": "token (LINCOMB): the action says none of the 50 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 32,
+   "kind": "REFINE",
+   "proof": "aime1989_p4",
+   "reason": "token (REFINE): the action says none of the 31 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 43,
+   "kind": "REFINE",
+   "proof": "aime1989_p4",
+   "reason": "token (REFINE): the action says none of the 32 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 4,
+   "kind": "CLAIM",
+   "proof": "aime1989_p7",
+   "reason": "token (CLAIM): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 6,
+   "kind": "CLAIM",
+   "proof": "aime1989_p7",
+   "reason": "token (CLAIM): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 8,
+   "kind": "CLAIM",
+   "proof": "aime1989_p7",
+   "reason": "token (CLAIM): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 8,
+   "kind": "CLAIM",
+   "proof": "aime1991_p13",
+   "reason": "token (CLAIM): the action says none of the 49 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 13,
+   "kind": "CLAIM",
+   "proof": "aime1991_p13",
+   "reason": "token (CLAIM): the action says none of the 50 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 27,
+   "kind": "FORWARD",
+   "proof": "aime1993_p6",
+   "reason": "token (FORWARD): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 32,
+   "kind": "FORWARD",
+   "proof": "aime1993_p6",
+   "reason": "token (FORWARD): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 37,
+   "kind": "FORWARD",
+   "proof": "aime1993_p6",
+   "reason": "token (FORWARD): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 0,
+   "kind": "FORWARD",
+   "proof": "aime1983_p6",
+   "reason": "token (FORWARD): the action says none of the 32 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 2,
+   "kind": "FORWARD",
+   "proof": "aime1983_p6",
+   "reason": "token (FORWARD): the action says none of the 50 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 4,
+   "kind": "CLAIM",
+   "proof": "aime1983_p6",
+   "reason": "token (CLAIM): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 2,
+   "kind": "FORWARD",
+   "proof": "aime1986_p6",
+   "reason": "token (FORWARD): the action says none of the 47 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 6,
+   "kind": "FORWARD",
+   "proof": "aime1986_p6",
+   "reason": "token (FORWARD): the action says none of the 48 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 5,
+   "kind": "CLAIM",
+   "proof": "aime1984_p7",
+   "reason": "token (CLAIM): the action says none of the 47 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 10,
+   "kind": "CLAIM",
+   "proof": "aime1984_p7",
+   "reason": "token (CLAIM): the action says none of the 49 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 15,
+   "kind": "CLAIM",
+   "proof": "aime1984_p7",
+   "reason": "token (CLAIM): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 20,
+   "kind": "CLAIM",
+   "proof": "aime1984_p7",
+   "reason": "token (CLAIM): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 43,
+   "kind": "CLAIM",
+   "proof": "aime1984_p7",
+   "reason": "token (CLAIM): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 49,
+   "kind": "CLAIM",
+   "proof": "aime1984_p7",
+   "reason": "token (CLAIM): the action says none of the 54 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 55,
+   "kind": "CLAIM",
+   "proof": "aime1984_p7",
+   "reason": "token (CLAIM): the action says none of the 54 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 104,
+   "kind": "CLAIM",
+   "proof": "aime1984_p7",
+   "reason": "token (CLAIM): the action says none of the 54 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 130,
+   "kind": "FORWARD",
+   "proof": "aime1984_p7",
+   "reason": "token (FORWARD): the action says none of the 37 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 53,
+   "kind": "FORWARD",
+   "proof": "aime1985_p5",
+   "reason": "token (FORWARD): the action says none of the 37 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 56,
+   "kind": "FORWARD",
+   "proof": "aime1985_p5",
+   "reason": "token (FORWARD): the action says none of the 38 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 59,
+   "kind": "FORWARD",
+   "proof": "aime1985_p5",
+   "reason": "token (FORWARD): the action says none of the 39 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 39,
+   "kind": "CLAIM",
+   "proof": "aime1988_p8",
+   "reason": "token (CLAIM): the action says none of the 48 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 29,
+   "kind": "CLAIM",
+   "proof": "aime1998_p14",
+   "reason": "token (CLAIM): the action says none of the 48 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 43,
+   "kind": "CLAIM",
+   "proof": "aime1998_p14",
+   "reason": "token (CLAIM): the action says none of the 48 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 57,
+   "kind": "CLAIM",
+   "proof": "aime1998_p14",
+   "reason": "token (CLAIM): the action says none of the 48 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 71,
+   "kind": "CLAIM",
+   "proof": "aime1998_p14",
+   "reason": "token (CLAIM): the action says none of the 48 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 75,
+   "kind": "CLAIM",
+   "proof": "aime1998_p14",
+   "reason": "token (CLAIM): the action says none of the 48 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 85,
+   "kind": "CLAIM",
+   "proof": "aime1998_p14",
+   "reason": "token (CLAIM): the action says none of the 49 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 99,
+   "kind": "CLAIM",
+   "proof": "aime1998_p14",
+   "reason": "token (CLAIM): the action says none of the 48 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 2,
+   "kind": "CLAIM",
+   "proof": "amc_alg_04",
+   "reason": "token (CLAIM): the action says none of the 48 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 0,
+   "kind": "CLAIM",
+   "proof": "amc_alg_05",
+   "reason": "token (CLAIM): the action says none of the 47 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 2,
+   "kind": "LINCOMB",
+   "proof": "amc_alg_05",
+   "reason": "token (LINCOMB): the action says none of the 48 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 0,
+   "kind": "CLAIM",
+   "proof": "amc_alg_06",
+   "reason": "token (CLAIM): the action says none of the 47 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 4,
+   "kind": "REFINE",
+   "proof": "amc_div_01",
+   "reason": "token (REFINE): the action says none of the 32 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 10,
+   "kind": "USE",
+   "proof": "amc_div_03",
+   "reason": "token (USE): the action says none of the 47 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 14,
+   "kind": "USE",
+   "proof": "amc_div_03",
+   "reason": "token (USE): the action says none of the 47 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 18,
+   "kind": "USE",
+   "proof": "amc_div_03",
+   "reason": "token (USE): the action says none of the 47 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 22,
+   "kind": "USE",
+   "proof": "amc_div_03",
+   "reason": "token (USE): the action says none of the 47 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 26,
+   "kind": "USE",
+   "proof": "amc_div_03",
+   "reason": "token (USE): the action says none of the 47 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 30,
+   "kind": "USE",
+   "proof": "amc_div_03",
+   "reason": "token (USE): the action says none of the 47 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 11,
+   "kind": "USE",
+   "proof": "amc_div_04",
+   "reason": "token (USE): the action says none of the 47 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 2,
+   "kind": "USE",
+   "proof": "amc_div_05",
+   "reason": "token (USE): the action says none of the 48 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 5,
+   "kind": "USE",
+   "proof": "amc_div_05",
+   "reason": "token (USE): the action says none of the 48 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 0,
+   "kind": "FORWARD",
+   "proof": "amc_mod_02",
+   "reason": "kind (-): the action says none of the 9 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 1,
+   "kind": "CLAIM",
+   "proof": "amc_mod_02",
+   "reason": "token (CLAIM): the action says none of the 31 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 3,
+   "kind": "CLAIM",
+   "proof": "amc_mod_02",
+   "reason": "token (CLAIM): the action says none of the 45 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 0,
+   "kind": "FORWARD",
+   "proof": "amc_mod_03",
+   "reason": "kind (-): the action says none of the 9 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 53,
+   "kind": "USE",
+   "proof": "amc_prime_01",
+   "reason": "token (USE): the action says none of the 47 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 69,
+   "kind": "USE",
+   "proof": "amc_prime_01",
+   "reason": "token (USE): the action says none of the 48 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 77,
+   "kind": "USE",
+   "proof": "amc_prime_01",
+   "reason": "token (USE): the action says none of the 48 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 93,
+   "kind": "USE",
+   "proof": "amc_prime_01",
+   "reason": "token (USE): the action says none of the 48 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 101,
+   "kind": "USE",
+   "proof": "amc_prime_01",
+   "reason": "token (USE): the action says none of the 48 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 113,
+   "kind": "USE",
+   "proof": "amc_prime_01",
+   "reason": "token (USE): the action says none of the 48 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 117,
+   "kind": "USE",
+   "proof": "amc_prime_01",
+   "reason": "token (USE): the action says none of the 48 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 17,
+   "kind": "CLAIM",
+   "proof": "amc_prime_03",
+   "reason": "token (CLAIM): the action says none of the 50 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 29,
+   "kind": "CLAIM",
+   "proof": "amc_prime_03",
+   "reason": "token (CLAIM): the action says none of the 50 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 33,
+   "kind": "FORWARD",
+   "proof": "amc_prime_03",
+   "reason": "token (FORWARD): the action says none of the 49 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 0,
+   "kind": "FORWARD",
+   "proof": "amc_sum_01",
+   "reason": "kind (-): the action says none of the 11 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 0,
+   "kind": "FORWARD",
+   "proof": "amc_sum_02",
+   "reason": "kind (-): the action says none of the 11 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 0,
+   "kind": "FORWARD",
+   "proof": "amc_sum_03",
+   "reason": "kind (-): the action says none of the 11 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 0,
+   "kind": "FORWARD",
+   "proof": "amc_sum_04",
+   "reason": "kind (-): the action says none of the 11 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 10,
+   "kind": "CLAIM",
+   "proof": "amc_dio_01",
+   "reason": "token (CLAIM): the action says none of the 48 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 0,
+   "kind": "CLAIM",
+   "proof": "amc_alg_15",
+   "reason": "token (CLAIM): the action says none of the 47 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 0,
+   "kind": "CLAIM",
+   "proof": "amc_alg_16",
+   "reason": "token (CLAIM): the action says none of the 46 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 3,
+   "kind": "CLAIM",
+   "proof": "aime1986_p10",
+   "reason": "token (CLAIM): the action says none of the 50 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 5,
+   "kind": "CLAIM",
+   "proof": "aime1986_p10",
+   "reason": "token (CLAIM): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 7,
+   "kind": "CLAIM",
+   "proof": "aime1986_p10",
+   "reason": "token (CLAIM): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 12,
+   "kind": "CLAIM",
+   "proof": "aime1986_p10",
+   "reason": "token (CLAIM): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 14,
+   "kind": "CLAIM",
+   "proof": "aime1986_p10",
+   "reason": "token (CLAIM): the action says none of the 54 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 23,
+   "kind": "CLAIM",
+   "proof": "aime1986_p10",
+   "reason": "token (CLAIM): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 25,
+   "kind": "CLAIM",
+   "proof": "aime1986_p10",
+   "reason": "token (CLAIM): the action says none of the 54 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 34,
+   "kind": "CLAIM",
+   "proof": "aime1986_p10",
+   "reason": "token (CLAIM): the action says none of the 54 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 9,
+   "kind": "FORWARD",
+   "proof": "aime1989_p3",
+   "reason": "token (FORWARD): the action says none of the 49 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 15,
+   "kind": "FORWARD",
+   "proof": "aime1989_p3",
+   "reason": "token (FORWARD): the action says none of the 49 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 21,
+   "kind": "FORWARD",
+   "proof": "aime1989_p3",
+   "reason": "token (FORWARD): the action says none of the 49 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 27,
+   "kind": "FORWARD",
+   "proof": "aime1989_p3",
+   "reason": "token (FORWARD): the action says none of the 49 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 33,
+   "kind": "FORWARD",
+   "proof": "aime1989_p3",
+   "reason": "token (FORWARD): the action says none of the 49 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 39,
+   "kind": "FORWARD",
+   "proof": "aime1989_p3",
+   "reason": "token (FORWARD): the action says none of the 49 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 45,
+   "kind": "FORWARD",
+   "proof": "aime1989_p3",
+   "reason": "token (FORWARD): the action says none of the 49 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 51,
+   "kind": "FORWARD",
+   "proof": "aime1989_p3",
+   "reason": "token (FORWARD): the action says none of the 49 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 8,
+   "kind": "CLAIM",
+   "proof": "aime1990_p15",
+   "reason": "token (CLAIM): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 10,
+   "kind": "CLAIM",
+   "proof": "aime1990_p15",
+   "reason": "token (CLAIM): the action says none of the 54 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 10,
+   "kind": "CLAIM",
+   "proof": "aime1991_p8",
+   "reason": "token (CLAIM): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 34,
+   "kind": "CLAIM",
+   "proof": "aime1991_p8",
+   "reason": "token (CLAIM): the action says none of the 55 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 40,
+   "kind": "CLAIM",
+   "proof": "aime1991_p8",
+   "reason": "token (CLAIM): the action says none of the 55 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 42,
+   "kind": "CLAIM",
+   "proof": "aime1991_p8",
+   "reason": "token (CLAIM): the action says none of the 55 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 54,
+   "kind": "CLAIM",
+   "proof": "aime1991_p8",
+   "reason": "token (CLAIM): the action says none of the 54 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 70,
+   "kind": "CLAIM",
+   "proof": "aime1991_p8",
+   "reason": "token (CLAIM): the action says none of the 54 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 83,
+   "kind": "CLAIM",
+   "proof": "aime1991_p8",
+   "reason": "token (CLAIM): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 113,
+   "kind": "CLAIM",
+   "proof": "aime1991_p8",
+   "reason": "token (CLAIM): the action says none of the 55 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 115,
+   "kind": "CLAIM",
+   "proof": "aime1991_p8",
+   "reason": "token (CLAIM): the action says none of the 55 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 127,
+   "kind": "CLAIM",
+   "proof": "aime1991_p8",
+   "reason": "token (CLAIM): the action says none of the 54 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 143,
+   "kind": "CLAIM",
+   "proof": "aime1991_p8",
+   "reason": "token (CLAIM): the action says none of the 54 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 156,
+   "kind": "CLAIM",
+   "proof": "aime1991_p8",
+   "reason": "token (CLAIM): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 183,
+   "kind": "CLAIM",
+   "proof": "aime1991_p8",
+   "reason": "token (CLAIM): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 189,
+   "kind": "CLAIM",
+   "proof": "aime1991_p8",
+   "reason": "token (CLAIM): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 232,
+   "kind": "CLAIM",
+   "proof": "aime1991_p8",
+   "reason": "token (CLAIM): the action says none of the 53 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 238,
+   "kind": "CLAIM",
+   "proof": "aime1991_p8",
+   "reason": "token (CLAIM): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 272,
+   "kind": "USE",
+   "proof": "aime1991_p8",
+   "reason": "token (USE): the action says none of the 47 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 301,
+   "kind": "USE",
+   "proof": "aime1991_p8",
+   "reason": "token (USE): the action says none of the 45 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 307,
+   "kind": "USE",
+   "proof": "aime1991_p8",
+   "reason": "token (USE): the action says none of the 46 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 308,
+   "kind": "USE",
+   "proof": "aime1991_p8",
+   "reason": "token (USE): the action says none of the 48 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 313,
+   "kind": "USE",
+   "proof": "aime1991_p8",
+   "reason": "token (USE): the action says none of the 46 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 314,
+   "kind": "USE",
+   "proof": "aime1991_p8",
+   "reason": "token (USE): the action says none of the 48 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 319,
+   "kind": "USE",
+   "proof": "aime1991_p8",
+   "reason": "token (USE): the action says none of the 45 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 320,
+   "kind": "USE",
+   "proof": "aime1991_p8",
+   "reason": "token (USE): the action says none of the 46 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 324,
+   "kind": "USE",
+   "proof": "aime1991_p8",
+   "reason": "token (USE): the action says none of the 46 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 325,
+   "kind": "USE",
+   "proof": "aime1991_p8",
+   "reason": "token (USE): the action says none of the 48 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 0,
+   "kind": "CLAIM",
+   "proof": "aime2002ii_p3",
+   "reason": "token (CLAIM): the action says none of the 49 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 5,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 49 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 13,
+   "kind": "CLAIM",
+   "proof": "aime2002ii_p3",
+   "reason": "token (CLAIM): the action says none of the 50 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 21,
+   "kind": "CLAIM",
+   "proof": "aime2002ii_p3",
+   "reason": "token (CLAIM): the action says none of the 50 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 36,
+   "kind": "CLAIM",
+   "proof": "aime2002ii_p3",
+   "reason": "token (CLAIM): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 44,
+   "kind": "CLAIM",
+   "proof": "aime2002ii_p3",
+   "reason": "token (CLAIM): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 52,
+   "kind": "CLAIM",
+   "proof": "aime2002ii_p3",
+   "reason": "token (CLAIM): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 61,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 50 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 66,
+   "kind": "CLAIM",
+   "proof": "aime2002ii_p3",
+   "reason": "token (CLAIM): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 75,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 50 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 80,
+   "kind": "CLAIM",
+   "proof": "aime2002ii_p3",
+   "reason": "token (CLAIM): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 88,
+   "kind": "CLAIM",
+   "proof": "aime2002ii_p3",
+   "reason": "token (CLAIM): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 97,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 50 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 103,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 108,
+   "kind": "CLAIM",
+   "proof": "aime2002ii_p3",
+   "reason": "token (CLAIM): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 117,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 123,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 129,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 134,
+   "kind": "CLAIM",
+   "proof": "aime2002ii_p3",
+   "reason": "token (CLAIM): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 143,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 148,
+   "kind": "CLAIM",
+   "proof": "aime2002ii_p3",
+   "reason": "token (CLAIM): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 157,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 169,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 175,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 181,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 186,
+   "kind": "CLAIM",
+   "proof": "aime2002ii_p3",
+   "reason": "token (CLAIM): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 195,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 201,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 206,
+   "kind": "CLAIM",
+   "proof": "aime2002ii_p3",
+   "reason": "token (CLAIM): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 211,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 217,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 223,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 229,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 235,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 50 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 241,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 247,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 253,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 271,
+   "kind": "CLAIM",
+   "proof": "aime2002ii_p3",
+   "reason": "token (CLAIM): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 276,
+   "kind": "CLAIM",
+   "proof": "aime2002ii_p3",
+   "reason": "token (CLAIM): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 281,
+   "kind": "CLAIM",
+   "proof": "aime2002ii_p3",
+   "reason": "token (CLAIM): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 287,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 50 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 292,
+   "kind": "CLAIM",
+   "proof": "aime2002ii_p3",
+   "reason": "token (CLAIM): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 298,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 50 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 303,
+   "kind": "CLAIM",
+   "proof": "aime2002ii_p3",
+   "reason": "token (CLAIM): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 308,
+   "kind": "CLAIM",
+   "proof": "aime2002ii_p3",
+   "reason": "token (CLAIM): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 314,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 50 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 320,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 325,
+   "kind": "CLAIM",
+   "proof": "aime2002ii_p3",
+   "reason": "token (CLAIM): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 331,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 337,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 343,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 348,
+   "kind": "CLAIM",
+   "proof": "aime2002ii_p3",
+   "reason": "token (CLAIM): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 354,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 359,
+   "kind": "CLAIM",
+   "proof": "aime2002ii_p3",
+   "reason": "token (CLAIM): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 365,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 377,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 383,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 389,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 394,
+   "kind": "CLAIM",
+   "proof": "aime2002ii_p3",
+   "reason": "token (CLAIM): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 400,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 406,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 411,
+   "kind": "CLAIM",
+   "proof": "aime2002ii_p3",
+   "reason": "token (CLAIM): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 417,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 423,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 429,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 435,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 441,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 50 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 447,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 453,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 459,
+   "kind": "FORWARD",
+   "proof": "aime2002ii_p3",
+   "reason": "token (FORWARD): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 1,
+   "kind": "CLAIM",
+   "proof": "n2_3n_5_not_121",
+   "reason": "token (CLAIM): the action says none of the 47 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 36,
+   "kind": "CLAIM",
+   "proof": "n2_3n_5_not_121",
+   "reason": "token (CLAIM): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 47,
+   "kind": "CLAIM",
+   "proof": "n2_3n_5_not_121",
+   "reason": "token (CLAIM): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 58,
+   "kind": "CLAIM",
+   "proof": "n2_3n_5_not_121",
+   "reason": "token (CLAIM): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 66,
+   "kind": "CLAIM",
+   "proof": "n2_3n_5_not_121",
+   "reason": "token (CLAIM): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 69,
+   "kind": "CLAIM",
+   "proof": "n2_3n_5_not_121",
+   "reason": "token (CLAIM): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 77,
+   "kind": "CLAIM",
+   "proof": "n2_3n_5_not_121",
+   "reason": "token (CLAIM): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 80,
+   "kind": "CLAIM",
+   "proof": "n2_3n_5_not_121",
+   "reason": "token (CLAIM): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 88,
+   "kind": "CLAIM",
+   "proof": "n2_3n_5_not_121",
+   "reason": "token (CLAIM): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 91,
+   "kind": "CLAIM",
+   "proof": "n2_3n_5_not_121",
+   "reason": "token (CLAIM): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 99,
+   "kind": "CLAIM",
+   "proof": "n2_3n_5_not_121",
+   "reason": "token (CLAIM): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 102,
+   "kind": "CLAIM",
+   "proof": "n2_3n_5_not_121",
+   "reason": "token (CLAIM): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 110,
+   "kind": "CLAIM",
+   "proof": "n2_3n_5_not_121",
+   "reason": "token (CLAIM): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 113,
+   "kind": "CLAIM",
+   "proof": "n2_3n_5_not_121",
+   "reason": "token (CLAIM): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 121,
+   "kind": "CLAIM",
+   "proof": "n2_3n_5_not_121",
+   "reason": "token (CLAIM): the action says none of the 51 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 124,
+   "kind": "CLAIM",
+   "proof": "n2_3n_5_not_121",
+   "reason": "token (CLAIM): the action says none of the 52 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 11,
+   "kind": "REFINE",
+   "proof": "mersenne_base_2",
+   "reason": "token (REFINE): the action says none of the 32 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 19,
+   "kind": "REFINE",
+   "proof": "mersenne_base_2",
+   "reason": "token (REFINE): the action says none of the 38 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 11,
+   "kind": "REFINE",
+   "proof": "mersenne_composite_exponent",
+   "reason": "token (REFINE): the action says none of the 32 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 19,
+   "kind": "REFINE",
+   "proof": "mersenne_composite_exponent",
+   "reason": "token (REFINE): the action says none of the 38 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 25,
+   "kind": "REFINE",
+   "proof": "mersenne_composite_exponent",
+   "reason": "token (REFINE): the action says none of the 32 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 11,
+   "kind": "REFINE",
+   "proof": "imo1977_p6",
+   "reason": "token (REFINE): the action says none of the 32 options",
+   "source": "bank / prefix"
+  },
+  {
+   "error": "Missing",
+   "index": 0,
+   "kind": "REFINE",
+   "proof": "succ_inj",
+   "reason": "token (REFINE): the action says none of the 12 options",
+   "source": "library"
+  },
+  {
+   "error": "Missing",
+   "index": 4,
+   "kind": "REFINE",
+   "proof": "mul_eq_zero",
+   "reason": "token (REFINE): the action says none of the 15 options",
+   "source": "library"
+  },
+  {
+   "error": "Missing",
+   "index": 0,
+   "kind": "REFINE",
+   "proof": "Z.mk_eq",
+   "reason": "token (REFINE): the action says none of the 14 options",
+   "source": "library"
+  },
+  {
+   "error": "Missing",
+   "index": 1,
+   "kind": "REFINE",
+   "proof": "Z.of_N_inj",
+   "reason": "token (REFINE): the action says none of the 17 options",
+   "source": "library"
+  },
+  {
+   "error": "Missing",
+   "index": 1,
+   "kind": "REFINE",
+   "proof": "Z.zero_ne_one",
+   "reason": "token (REFINE): the action says none of the 24 options",
+   "source": "library"
+  },
+  {
+   "error": "Missing",
+   "index": 3,
+   "kind": "REFINE",
+   "proof": "Z.ring_neg",
+   "reason": "token (REFINE): the action says none of the 18 options",
+   "source": "library"
+  },
+  {
+   "error": "Missing",
+   "index": 1,
+   "kind": "REFINE",
+   "proof": "Z.le_refl",
+   "reason": "token (REFINE): the action says none of the 18 options",
+   "source": "library"
+  },
+  {
+   "error": "Missing",
+   "index": 14,
+   "kind": "REFINE",
+   "proof": "Z.le_antisymm",
+   "reason": "token (REFINE): the action says none of the 19 options",
+   "source": "library"
+  },
+  {
+   "error": "Missing",
+   "index": 0,
+   "kind": "REFINE",
+   "proof": "Z.add_nonneg",
+   "reason": "token (REFINE): the action says none of the 19 options",
+   "source": "library"
+  },
+  {
+   "error": "Missing",
+   "index": 4,
+   "kind": "REFINE",
+   "proof": "Z.sq_nonneg",
+   "reason": "token (REFINE): the action says none of the 19 options",
+   "source": "library"
+  },
+  {
+   "error": "Missing",
+   "index": 6,
+   "kind": "REFINE",
+   "proof": "Z.not_nonneg_neg",
+   "reason": "token (REFINE): the action says none of the 24 options",
+   "source": "library"
+  },
+  {
+   "error": "Missing",
+   "index": 10,
+   "kind": "REFINE",
+   "proof": "Z.strong_induction",
+   "reason": "token (REFINE): the action says none of the 19 options",
+   "source": "library"
+  },
+  {
+   "error": "Missing",
+   "index": 51,
+   "kind": "REFINE",
+   "proof": "Z.bezout_aux",
+   "reason": "token (REFINE): the action says none of the 20 options",
+   "source": "library"
+  },
+  {
+   "error": "Missing",
+   "index": 10,
+   "kind": "REFINE",
+   "proof": "Z.exists_prime_dvd",
+   "reason": "token (REFINE): the action says none of the 19 options",
+   "source": "library"
+  },
+  {
+   "error": "Missing",
+   "index": 44,
+   "kind": "REFINE",
+   "proof": "Z.exists_prime_dvd",
+   "reason": "token (REFINE): the action says none of the 20 options",
+   "source": "library"
+  },
+  {
+   "error": "Missing",
+   "index": 10,
+   "kind": "USE",
+   "proof": "cube_minus_n_div6",
+   "reason": "token (USE): the action says none of the 42 options",
+   "source": "library"
+  },
+  {
+   "error": "Missing",
+   "index": 13,
+   "kind": "USE",
+   "proof": "cube_minus_n_div6",
+   "reason": "token (USE): the action says none of the 42 options",
+   "source": "library"
+  },
+  {
+   "error": "Missing",
+   "index": 16,
+   "kind": "USE",
+   "proof": "cube_minus_n_div6",
+   "reason": "token (USE): the action says none of the 42 options",
+   "source": "library"
+  },
+  {
+   "error": "Missing",
+   "index": 19,
+   "kind": "USE",
+   "proof": "cube_minus_n_div6",
+   "reason": "token (USE): the action says none of the 42 options",
+   "source": "library"
+  },
+  {
+   "error": "Missing",
+   "index": 22,
+   "kind": "USE",
+   "proof": "cube_minus_n_div6",
+   "reason": "token (USE): the action says none of the 42 options",
+   "source": "library"
+  },
+  {
+   "error": "Missing",
+   "index": 25,
+   "kind": "USE",
+   "proof": "cube_minus_n_div6",
+   "reason": "token (USE): the action says none of the 42 options",
+   "source": "library"
+  },
+  {
+   "error": "Missing",
+   "index": 10,
+   "kind": "USE",
+   "proof": "five_dvd_fifth_power",
+   "reason": "token (USE): the action says none of the 42 options",
+   "source": "library"
+  },
+  {
+   "error": "Missing",
+   "index": 13,
+   "kind": "USE",
+   "proof": "five_dvd_fifth_power",
+   "reason": "token (USE): the action says none of the 42 options",
+   "source": "library"
+  },
+  {
+   "error": "Missing",
+   "index": 16,
+   "kind": "USE",
+   "proof": "five_dvd_fifth_power",
+   "reason": "token (USE): the action says none of the 42 options",
+   "source": "library"
+  },
+  {
+   "error": "Missing",
+   "index": 19,
+   "kind": "USE",
+   "proof": "five_dvd_fifth_power",
+   "reason": "token (USE): the action says none of the 42 options",
+   "source": "library"
+  },
+  {
+   "error": "Missing",
+   "index": 22,
+   "kind": "USE",
+   "proof": "five_dvd_fifth_power",
+   "reason": "token (USE): the action says none of the 42 options",
+   "source": "library"
+  },
+  {
+   "error": "Missing",
+   "index": 24,
+   "kind": "REFINE",
+   "proof": "Z.sqrt2_aux",
+   "reason": "token (REFINE): the action says none of the 43 options",
+   "source": "library"
+  }
+ ],
+ "failures_by_kind": {
+  "APPLY_WITH": 12,
+  "CLAIM": 155,
+  "FORWARD": 183,
+  "LINCOMB": 3,
+  "REFINE": 60,
+  "USE": 46
+ },
+ "machine": {
+  "commit": "f840710dd0b2a28482638ea351d528235f3e8411",
+  "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+  "cores": 2,
+  "cores_usable": 2,
+  "cpu": "Intel(R) Xeon(R) Processor @ 2.30GHz",
+  "loadavg_start": [
+   0.42,
+   0.23,
+   0.09
+  ],
+  "memory_gb": 7.83,
+  "os": "Linux-6.18.44-fc-v300-x86_64-with-glibc2.39",
+  "python": "3.13.16",
+  "tree_clean_outside_preprint": true
+ },
+ "sources": {
+  "bank / prefix": {
+   "actions": 6033,
+   "errors": 0,
+   "missing": 424,
+   "ms_per_action": 1.1436080242000648,
+   "proofs": 187,
+   "said": 5609,
+   "seconds": 6.899
+  },
+  "bank / strict": {
+   "actions": 538,
+   "errors": 0,
+   "missing": 8,
+   "ms_per_action": 1.4624494219331738,
+   "proofs": 8,
+   "said": 530,
+   "seconds": 0.787
+  },
+  "library": {
+   "actions": 2677,
+   "errors": 0,
+   "missing": 27,
+   "ms_per_action": 0.8661016227120318,
+   "proofs": 453,
+   "said": 2650,
+   "seconds": 2.319
+  }
+ },
+ "total": {
+  "actions": 9248,
+  "errors": 0,
+  "missing": 459,
+  "proofs": 648,
+  "said": 8789,
+  "seconds": 10.005
+ },
+ "world_seconds": 59.62
+}

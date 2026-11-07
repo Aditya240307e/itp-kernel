@@ -1,0 +1,90 @@
+\section{Using the system}\label{sec:usage}
+
+\ITP\ is used as a Python library.
+There is no surface language and no command-line prover: a definition, a tactic script and a query are Python, and a proof is a program that builds a term and submits it.
+This section shows the system in use.
+Each listing was run for this report (by \code{run\_listings.py} of the supplementary material), and the output printed under it is the output of that run.
+The first two lines of every listing, which set up the module search path, are omitted here and are in the files.
+
+\subsection{Setting up}\label{sec:setup}
+
+The kernel needs a C++23 compiler (it uses \code{std::expected}); the measurements of this report were made with \mCompiler.
+Python 3.13 with \code{numpy}, \code{scipy} and \code{nanobind} runs the kernel, the libraries, the tactics and the gates; PyTorch and Gymnasium are needed only by the learner and by the Gymnasium wrapper of the environment, and Matplotlib only by the figures of the experiment report.
+From the root of the repository:
+\begin{lstlisting}[style=out]
+python3 -m venv .venv && source .venv/bin/activate
+pip install "numpy>=2.5" "scipy>=1.18" "nanobind>=3.1"
+make kernel         # builds the kernel and the frozen reference kernel
+make gates-quick    # six kernel gates and the first example
+\end{lstlisting}
+On the machine of \cref{sec:measure}, building both kernels from scratch took \kernelBuildS\,s and \code{make gates-quick} \gatesQuickS\,s.
+
+\subsection{A theorem, a decision procedure, and a refusal}\label{sec:use-prove}
+
+\Cref{lst:prove} defines a function by structural recursion, proves a theorem about it by induction, closes a polynomial identity with \code{ring}, and then tries two things that must fail.
+A \emph{world} is a kernel together with a name table; \code{nat\_lib.build\_nat()} returns one holding the library of unary naturals.
+\code{w.recursive} submits the function to the kernel, which checks that the recursion is structural; \code{w.prove} runs a tactic script over named hypotheses, extracts the finished term, and hands it to the kernel's checked entry point of \cref{sec:trust}, and only then does the theorem exist in the world.
+The false identity is refused by \code{ring} with the two normal forms in the message; the forged proof of $0=1$ never reaches the world, because the kernel checks it against the statement and finds that \code{Zero} and \code{Succ Zero} are different constructors.
+The independent checker then re-checks every global of the world, and the audit reports the axioms and quotient constants that a theorem depends on (here none).
+
+\lstfile[firstline=3]{A recursive function, an inductive proof, \code{ring}, and two refusals.}{lst:prove}{listings/ex_prove.py}
+\lstinputlisting[style=out]{listings/ex_prove.out}
+
+\subsection{Integers, \code{linarith} and \code{nlinarith}}\label{sec:use-int}
+
+The integers are a library like any other: a quotient of pairs of binary naturals with every law proved (\cref{sec:authoring}).
+In \cref{lst:int}, \code{ring} proves a polynomial identity over $\Z$; \code{linarith} finds non-negative multipliers by an exact simplex and the kernel checks that the weighted sum of the hypotheses and the negated goal is a negative constant, by \code{ring}; \code{nlinarith} adds products of hypotheses and squares and accepts a hint, here a proof of $0\le(x-y)^2$.
+A claim that does not follow is refused with the reason.
+Because the integers are built on the quotient, the audit of \code{am\_gm} reports the five quotient constants and no axiom: the trusted base of a statement about integers includes the rule $\kappa$ of \cref{sec:quot}, and this is visible.
+
+\lstfile[firstline=3]{Integers: \code{ring}, \code{linarith}, \code{nlinarith}, a refused claim, and an audit.}{lst:int}{listings/ex_int.py}
+\lstinputlisting[style=out]{listings/ex_int.out}
+
+\subsection{An episode in the environment}\label{sec:use-env}
+
+\Cref{lst:env} puts the same theorem to the environment instead of to a tactic script.
+An \code{Engine} serves one world; an \code{Episode} is one proof attempt on a statement, with the premises it may use.
+The menu lists the legal actions of the first open goal; an action that does not apply is refused and changes nothing; \code{INDUCT} is probed, taken, and the settling of the goals closes the base case by computation, leaving one goal with its induction hypothesis.
+The last lines run the blind search of the environment, iterative deepening over the menus with a budget of probes; the proof it returns has been replayed on a live proof and checked by the kernel, so a wrong search can only fail.
+
+\lstfile[firstline=3]{An episode: goal, menu, a refused action, an induction, and a blind search.}{lst:env}{listings/ex_env.py}
+\lstinputlisting[style=out]{listings/ex_env.out}
+
+\subsection{As a Gymnasium environment}\label{sec:use-gym}
+
+\Cref{lst:gym} loads the problem bank and plays random legal options on one problem.
+The observation is a dictionary of integer arrays (here only the shapes of three of them are printed), and every question the environment asks, here the kind of action, comes with a mask of its legal options.
+Random play over fifty decisions assembles four actions, of which the probe takes two and refuses two; a false statement could not be proved by any sequence of decisions, because the kernel checks the finished proof.
+Loading the bank builds a world of \bankGlobals{} globals in about \bankWorldSec{} seconds and, with PyTorch loaded, \bankRSSTorch{}~GB of memory (\cref{sec:why}).
+
+\lstfile[firstline=3]{The problem bank as a Gymnasium environment; random play over legal options.}{lst:gym}{listings/ex_gym.py}
+\lstinputlisting[style=out]{listings/ex_gym.out}
+
+\subsection{Checking, auditing, and reproducing}\label{sec:use-check}
+
+\Cref{tab:commands} lists the commands that check the system itself and what each establishes.
+The independent checker and the audit of \cref{lst:prove,lst:int} are also available on a whole world: \code{recheck\_world} of the module \code{recheck} exports the kernel's environment and re-checks every global, and \code{SecondOpinion} of the same module builds the checker's environment from the globals that a given set of terms needs, in seconds instead of a minute, and refuses (fails closed) a term that mentions anything else.
+A reference proof is replayed and judged in the same way (gates S47, S50).
+The measurements of \cref{sec:why} are reproduced by the scripts of the \code{preprint/} directory of the artifact (\cref{sec:conclusion}); every number of the text is read from their output.
+
+\begin{table}[t]
+\centering\tabfont
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{4.1cm}>{\raggedright\arraybackslash}p{7.4cm}r@{}}
+\toprule
+command & what it establishes & time\\
+\midrule
+\code{make gates-quick} & the build works: six kernel gates and an example & \gatesQuickS\,s\\
+\code{make gates} & the \gatesDefault{} default gates: kernel, tactics, environment, bank, contest proofs & 45\,min\\
+\code{make gates-all} & all \gatesAll{} gates, including the learner's, the repository's and the generator's & \fullGatesWallMin\,min\\
+\code{ITP\_VERIFY\_MEMO=1} \code{make gates} & the same, with every answer taken from a sharing table re-derived with the tables bypassed & about twice as long\\
+\code{make mutants-check} & each of the \mutTotal{} mutants and \toolFaults{} tool faults still applies to the code it re-breaks & seconds\\
+\code{python3 mutants/mutate.py} \textit{prefix} & the gates fail on every mutant whose name begins with the prefix & minutes to hours\\
+\code{make sanitize} & the gates of the default set that can run under AddressSanitizer and UndefinedBehaviorSanitizer (\sanGates{} of \sanDefault) & \sanSeconds\,s\\
+\code{make dataset-verify} & every recorded proof and sub-theorem of the dataset replays in a fresh engine and is kernel-checked & 25\,min\\
+\code{make audit} & the audit of the bank's statements against their intended meaning, with a sheet for second readers & minutes\\
+\bottomrule
+\end{tabular}
+\caption{Commands that check the system and what they establish.
+  Times are on the two-core machine of \cref{sec:measure}; those of the quick gates, of all the gates and of the sanitizer run were measured for this report, and the others are those given by the repository's documentation.}
+\label{tab:commands}
+\end{table}

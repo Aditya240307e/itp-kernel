@@ -1,0 +1,340 @@
+{
+ "args": {
+  "cap_mb": 2500.0,
+  "cap_s": 120.0,
+  "data": "<repo>/data/dataset_v2",
+  "out": "preprint/measurements/check.json",
+  "proofs": 16,
+  "quick": false
+ },
+ "independent_setup": {
+  "globals": 274,
+  "seconds": 1.35
+ },
+ "machine": {
+  "commit": "f840710dd0b2a28482638ea351d528235f3e8411",
+  "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+  "cores": 2,
+  "cores_usable": 2,
+  "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+  "loadavg_start": [
+   0.3,
+   0.69,
+   0.68
+  ],
+  "memory_gb": 7.84,
+  "os": "Linux-6.18.44-fc-v233-x86_64-with-glibc2.39",
+  "python": "3.13.16",
+  "tree_clean_outside_preprint": true
+ },
+ "peak_rss_mb": 1330.3,
+ "proofs": {
+  "actions_max": 466,
+  "actions_median": 11,
+  "actions_min": 1,
+  "actions_total": 6033,
+  "deciles": [
+   1,
+   2,
+   4,
+   5,
+   7,
+   11,
+   16,
+   25,
+   43,
+   70
+  ],
+  "problems": 268,
+  "proved": 187
+ },
+ "sample": [
+  {
+   "actions": 1,
+   "independent": {
+    "accepted": true,
+    "message": "OK",
+    "rss_delta_mb": 57.00390625,
+    "seconds": 2.8270929280001837,
+    "status": "ok"
+   },
+   "kernel_check_s": 0.020542782999655174,
+   "name": "aime1986_p4",
+   "replay_s": 0.05296152999972037,
+   "term_tree_nodes": 124359
+  },
+  {
+   "actions": 1,
+   "independent": {
+    "accepted": true,
+    "message": "OK",
+    "rss_delta_mb": 1.03125,
+    "seconds": 0.11253711500012287,
+    "status": "ok"
+   },
+   "kernel_check_s": 0.0013034769999649143,
+   "name": "ident_diff_squares",
+   "replay_s": 0.003562256999884994,
+   "term_tree_nodes": 4665
+  },
+  {
+   "actions": 2,
+   "independent": {
+    "accepted": true,
+    "message": "OK",
+    "rss_delta_mb": 1.84375,
+    "seconds": 0.20047213199995895,
+    "status": "ok"
+   },
+   "kernel_check_s": 0.0026950930000566586,
+   "name": "ineq_am_gm_two",
+   "replay_s": 0.007264352000220242,
+   "term_tree_nodes": 9911
+  },
+  {
+   "actions": 4,
+   "independent": {
+    "accepted": true,
+    "message": "OK",
+    "rss_delta_mb": 3.58203125,
+    "seconds": 0.30179647399972964,
+    "status": "ok"
+   },
+   "kernel_check_s": 0.00429010899961213,
+   "name": "amc_ineq_01",
+   "replay_s": 0.011095312999714224,
+   "term_tree_nodes": 16887
+  },
+  {
+   "actions": 4,
+   "independent": {
+    "accepted": true,
+    "message": "OK",
+    "rss_delta_mb": 10.48828125,
+    "seconds": 0.5561977990000742,
+    "status": "ok"
+   },
+   "kernel_check_s": 0.00839828000016496,
+   "name": "ineq_three_squares",
+   "replay_s": 0.022326190000057977,
+   "term_tree_nodes": 34311
+  },
+  {
+   "actions": 6,
+   "independent": {
+    "accepted": true,
+    "message": "OK",
+    "rss_delta_mb": 6.88671875,
+    "seconds": 0.45610831899966797,
+    "status": "ok"
+   },
+   "kernel_check_s": 0.006094348999795329,
+   "name": "amc_ineq_05",
+   "replay_s": 0.015351321999787615,
+   "term_tree_nodes": 20353
+  },
+  {
+   "actions": 7,
+   "independent": {
+    "accepted": true,
+    "message": "OK",
+    "rss_delta_mb": 1.84375,
+    "seconds": 0.15038764500013713,
+    "status": "ok"
+   },
+   "kernel_check_s": 0.0026286260003871575,
+   "name": "amc_ind_02",
+   "replay_s": 0.012454463000267424,
+   "term_tree_nodes": 9223
+  },
+  {
+   "actions": 10,
+   "independent": {
+    "accepted": true,
+    "message": "OK",
+    "rss_delta_mb": 14.73046875,
+    "seconds": 0.9222542279999288,
+    "status": "ok"
+   },
+   "kernel_check_s": 0.01686464900012652,
+   "name": "amc_seq_01",
+   "replay_s": 0.03733054400026958,
+   "term_tree_nodes": 44151
+  },
+  {
+   "actions": 13,
+   "independent": {
+    "accepted": true,
+    "message": "OK",
+    "rss_delta_mb": 81.37890625,
+    "seconds": 2.9729774630000065,
+    "status": "ok"
+   },
+   "kernel_check_s": 0.05959989899974971,
+   "name": "aime1990_p15",
+   "replay_s": 0.10602800199967533,
+   "term_tree_nodes": 96811
+  },
+  {
+   "actions": 16,
+   "independent": {
+    "accepted": true,
+    "message": "OK",
+    "rss_delta_mb": 16.75390625,
+    "seconds": 1.1903177200001664,
+    "status": "ok"
+   },
+   "kernel_check_s": 0.02238889999989624,
+   "name": "no_f_f_succ",
+   "replay_s": 0.04791944699991291,
+   "term_tree_nodes": 57427
+  },
+  {
+   "actions": 19,
+   "independent": {
+    "accepted": true,
+    "message": "OK",
+    "rss_delta_mb": 35.37890625,
+    "seconds": 1.2647013570003764,
+    "status": "ok"
+   },
+   "kernel_check_s": 0.02642106600023908,
+   "name": "pell_infinitely_many",
+   "replay_s": 0.07407590100001471,
+   "term_tree_nodes": 51945
+  },
+  {
+   "actions": 31,
+   "independent": {
+    "accepted": true,
+    "message": "OK",
+    "rss_delta_mb": 83.99609375,
+    "seconds": 3.3023872079998,
+    "status": "ok"
+   },
+   "kernel_check_s": 0.07575961900010952,
+   "name": "amc_seq_02",
+   "replay_s": 0.15655806999984634,
+   "term_tree_nodes": 157199
+  },
+  {
+   "actions": 43,
+   "independent": {
+    "accepted": true,
+    "message": "OK",
+    "rss_delta_mb": 24.50390625,
+    "seconds": 1.5044316220000837,
+    "status": "ok"
+   },
+   "kernel_check_s": 0.03759930100022757,
+   "name": "imo1977_p6",
+   "replay_s": 0.09176534199968955,
+   "term_tree_nodes": 57243
+  },
+  {
+   "actions": 53,
+   "independent": {
+    "accepted": true,
+    "message": "OK",
+    "rss_delta_mb": 395.26171875,
+    "seconds": 17.46928360999982,
+    "status": "ok"
+   },
+   "kernel_check_s": 0.1587476350000543,
+   "name": "imo1964_p2",
+   "replay_s": 0.31616286599955856,
+   "term_tree_nodes": 486741
+  },
+  {
+   "actions": 119,
+   "independent": {
+    "accepted": true,
+    "message": "OK",
+    "rss_delta_mb": 1256.78515625,
+    "seconds": 53.64808437700003,
+    "status": "ok"
+   },
+   "kernel_check_s": 1.4484436650000134,
+   "name": "amc_prime_01",
+   "replay_s": 2.5473089820002315,
+   "term_tree_nodes": 448062
+  },
+  {
+   "actions": 466,
+   "independent": {
+    "rss_delta_mb": 2504.73828125,
+    "seconds": 98.5358781660002,
+    "status": "memory"
+   },
+   "kernel_check_s": 6.4292928079999,
+   "name": "aime2002ii_p3",
+   "replay_s": 8.408991112999956,
+   "term_tree_nodes": 1444581
+  }
+ ],
+ "summary": {
+  "independent_accepted": 15,
+  "independent_error": 0,
+  "independent_memory": 1,
+  "independent_ok": 15,
+  "independent_rss_delta_mb": {
+   "max": 1256.78515625,
+   "median": 16.75390625,
+   "min": 1.03125,
+   "n": 15,
+   "p90": 395.26171875,
+   "total": 1991.46875
+  },
+  "independent_s": {
+   "max": 53.64808437700003,
+   "median": 1.1903177200001664,
+   "min": 0.11253711500012287,
+   "n": 15,
+   "p90": 17.46928360999982,
+   "total": 86.87902999700009
+  },
+  "independent_timeout": 0,
+  "kernel_check_s": {
+   "max": 6.4292928079999,
+   "median": 0.021465841499775706,
+   "min": 0.0013034769999649143,
+   "n": 16,
+   "p90": 1.4484436650000134,
+   "total": 8.321070258999953
+  },
+  "replay_s": {
+   "max": 8.408991112999956,
+   "median": 0.05044048849981664,
+   "min": 0.003562256999884994,
+   "n": 16,
+   "p90": 2.5473089820002315,
+   "total": 11.911155693998808
+  },
+  "replayed": 16,
+  "sampled": 16
+ },
+ "world": {
+  "globals": 748,
+  "kernel_checked_entry_points": {
+   "declare_checked": {
+    "calls": 681,
+    "seconds": 7.892
+   },
+   "finish_inductive": {
+    "calls": 12,
+    "seconds": 0.0
+   },
+   "finish_recursive_function_checked": {
+    "calls": 24,
+    "seconds": 0.0
+   }
+  },
+  "kernel_seconds": 7.892,
+  "kernel_share": 0.10771090892744004,
+  "peak_rss_mb": 1299.5,
+  "problems": 268,
+  "python": "3.13.16",
+  "rss_mb": 1299.5,
+  "seconds": 73.27
+ }
+}

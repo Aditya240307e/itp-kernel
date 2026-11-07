@@ -1,0 +1,190 @@
+\section{What the design buys, and how it differs}\label{sec:why}
+
+\Cref{sec:impl} describes the design; this section says what it is for, measures what it costs, and positions it among other systems.
+It contains no result of learning.
+Every claim about what a learner \emph{gains} is a claim about the properties of the interface; whether a particular learner profits is an empirical question that this report does not answer.
+
+\subsection{What a learning loop needs, and what the design provides}\label{sec:properties}
+
+A learning system uses a proof assistant in two ways: as a \emph{judge} of finished proofs, whose verdict is the training signal, and as an \emph{environment} that is called very many times.
+\Cref{tab:properties} lists six properties of the design that bear on these roles, the mechanism behind each, and what we measured at this commit (\cref{sec:measure}).
+
+\begin{table}[t]
+\centering\tabfont
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{3.1cm}>{\raggedright\arraybackslash}p{4.7cm}>{\raggedright\arraybackslash}p{4.7cm}@{}}
+\toprule
+property & mechanism & measured (\cref{sec:measure})\\
+\midrule
+a verdict that the proposer cannot influence, cheap enough to be asked for every finished proof &
+  one checked entry point (\cref{sec:trust}); a second checker as a witness (\cref{sec:indep}) &
+  kernel check of a reference proof: median \chkKernelMedianMs\,ms, longest \chkKernelMaxS\,s; the \kerDecls{} declarations of the libraries in \kerRecheckA\,s\\
+trying an action and taking it back &
+  checkpoint and rewind in time proportional to the allocation (\cref{sec:kernel}); probes (\cref{sec:env}) &
+  median probe \probeMed\,ms, 99th percentile \probeNinetyNine\,ms; a checkpoint--rewind pair \rewPairNsA\,ns\\
+actions that are well formed by construction, and no text in the loop &
+  menus; the typed term builder (\cref{sec:env}) &
+  one decision of the Gymnasium interface: median \decMed\,ms, \gymDecPerS{} decisions per second on one core\\
+work measured in steps, not seconds &
+  deterministic fuel; per-kind budgets; fail-closed exhaustion (\cref{sec:kernel,sec:env}) &
+  the outcomes of \wkTasks{} tasks are identical in three runs (in process, one worker, two workers); \applyFuelShare\,\% of the \applyProbes{} \code{APPLY} probes ended by the budget\\
+scale-out by forking &
+  one process holds the world; workers share it &
+  two workers: speed-up \wkSpeedup\ (efficiency \wkEff), \wkPSS\,MB proportional memory\\
+failed attempts yield theorems &
+  hindsight; portable actions; the recorder (\cref{sec:env}) &
+  exactness enforced by replay and kernel check (gate S47)\\
+\bottomrule
+\end{tabular}
+\caption{Properties of the design that matter to a learning loop and the measurement behind each.
+  The numbers are those of \cref{sec:measure}; none is a comparison with another system.}
+\label{tab:properties}
+\end{table}
+
+\paragraph{Why these properties matter to learning.}
+In reinforcement learning on theorem proving the reward is sparse and comes from the judge: an episode that ends without a checked proof earns nothing.
+A judge that a policy could influence invites exploitation, and the kernel being the only way in (\cref{sec:trust}) removes the opportunity.
+Search and rollouts need states that can be restored, and a learner that can probe an action before it takes it can use the refusal as information; a probe costing milliseconds makes this affordable at the scale of a search.
+A finite menu, or a typed builder that offers only the tokens that keep a term well typed, removes a class of failures that a learner would otherwise have to learn to avoid: actions that do not parse.
+Budgets measured in kernel steps make a result a function of the task and not of the machine's load, which a comparison of two learners requires; and a budget that is reported as spent, and not as a refusal, keeps the learner from learning that an action is wrong when it was merely slow.
+Finally, a proof attempt that fails still contains theorems, and an environment that can extract them exactly turns a failure into data.
+
+\paragraph{What the design costs.}
+The calculus is smaller than that of Lean or Rocq (\cref{sec:limits}); the libraries hold \libGlobals{} declarations, where the mathematical libraries of general-purpose assistants hold orders of magnitude more; the automation is limited to the decision procedures of \cref{sec:certificates} and the tactics of \cref{sec:authoring}; the interface is Python, and its cost is dominated not by the kernel but by the layer that assembles the questions (\cref{sec:measure}); and statements must be written in Python, since there is no surface language.
+A learner trained on text from other assistants cannot be pointed at this one.
+
+\subsection{Measurements}\label{sec:measure}
+
+\paragraph{Setup.}
+All timings are wall-clock measurements of the code the repository runs, on a virtual machine with \mCores{} cores (\mCPU), \mMemGB\,GB of memory, \mOS, Python \mPython{} and \mCompiler, at commit \mCommit; one core is used unless stated.
+The measured scripts are in the artifact (\cref{sec:conclusion}) and every number in the text is read from their output.
+A \emph{probe} is one try of an action on a goal by the engine, whoever asks, and is the unit in which the budgets of experiments are written; a \emph{decision} is one answer to one question of the assembler of \cref{sec:env} (the kind of action, a lemma, a hypothesis, the next token of a term), so that an action takes several decisions and an action that carries a term takes many.
+Where a measurement was repeated (the library build, the re-check of the kernel, the micro-benchmarks) both runs are given as ``A / B''.
+The one-minute load average of the machine at the start of each run, which the output records, was at most \loadStartMax{} (on two cores).
+
+\paragraph{Building and checking the libraries.}
+The library chain of \cref{tab:libs} is built from nothing in \libBuildA\,s (\libBuildB\,s in a second run), with a peak resident memory of \libPeakRSS\,MB.
+The values of its definitions and theorems have, counted as trees, \shareTree{} nodes, and the kernel holds \shareDistinct{} distinct nodes for the types and values together, a factor of \shareRatio{} (\cref{sec:kernel}); the largest value, \code{\shareLargestName}, has \shareLargest{} nodes as a tree.
+Submitting each of the \kerDecls{} checked declarations of the finished world to the kernel again, in an empty context, takes \kerRecheckA\,s / \kerRecheckB\,s, with a median of \kerMedianUs\,\textmu s per declaration, and the kernel rejects none.
+The independent checker takes \indLoadA\,s / \indLoadB\,s to load the world (export and parse) and \indCheckA\,s / \indCheckB\,s to check its \indGlobals{} globals, about \indOverKernel{} times the kernel's time, and rejects none.
+
+\paragraph{The cost of trust on the problem bank.}
+The kernel's check of a finished proof against its statement is cheap enough to be made for every proof an environment produces.
+\Cref{fig:trust} plots, for \chkSampled{} reference proofs of the bank sampled evenly by length, the time of the kernel's check and of the independent checker against the size of the proof term counted as a tree.
+The kernel's median is \chkKernelMedianMs\,ms and its longest check, of a term of \chkCapNodes{} nodes, is \chkCapKernelS\,s.
+The independent checker, run in a child process with a cap of \chkCapS\,s and \chkCapMB\,MB, accepted \chkAccepted{} of the \chkSampled{} proofs, at a median of \chkIndMedianS\,s (longest \chkIndMaxS\,s) and between \chkRatioMin{} and \chkRatioMax{} times (median \chkRatioMedian) the kernel's time, using a median of \chkIndMemMedianMB\,MB (at most \chkIndMemMaxMB\,MB); on the longest proof (\code{\chkCapName}, \chkCapActions{} actions) it stopped at the memory cap after \chkCapAfterS\,s without a verdict, which is reported as such and not as a rejection.
+The independent checker is thus a witness, for the final proof and not for the inner loop; the table of every sampled proof is in \cref{app:check}.
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}
+\begin{axis}[width=0.82\linewidth, height=6.4cm, xmode=log, ymode=log, xlabel={size of the proof term (nodes, counted as a tree)}, ylabel={time to check (ms)},
+  xmin=2e3, xmax=3e6, ymin=0.5, ymax=3e5, grid=both, major grid style={rulegrey!60, line width=0.3pt}, minor grid style={rulegrey!20, line width=0.2pt},
+  axis line style={ink!60}, tick style={ink!60}, tick label style={font=\footnotesize}, label style={font=\footnotesize},
+  legend style={at={(0.03,0.97)}, anchor=north west, font=\footnotesize, draw=rulegrey, fill=white, fill opacity=0.9, text opacity=1, row sep=1pt, inner sep=3pt}, legend cell align=left]
+\addplot[only marks, mark=*, mark size=2.2pt, color=cblue, mark options={draw=white, line width=0.4pt}] coordinates {\scatterKernel};
+\addlegendentry{kernel}
+\addplot[only marks, mark=square*, mark size=2.2pt, color=corange, mark options={draw=white, line width=0.4pt}] coordinates {\scatterIndep};
+\addlegendentry{independent checker}
+\addplot[only marks, mark=square, mark size=2.6pt, color=corange, mark options={line width=0.9pt}] coordinates {\scatterIndepCap};
+\addlegendentry{stopped at the memory cap}
+\end{axis}
+\end{tikzpicture}
+\caption{The cost of trusting a proof: time to check \chkSampled{} reference proofs of the problem bank, sampled evenly by length, with the kernel and with the independent checker, against the size of the proof term.
+  Both axes are logarithmic.
+  The hollow marker is the time at which the independent checker stopped, at its memory cap, without a verdict.}
+\label{fig:trust}
+\end{figure}
+
+\paragraph{Latency of the environment.}
+\Cref{tab:latency} gives percentiles of the operations of the environment, taken from the instrumented runs of the blind search and of a uniformly random policy on \blindProblems{} problems of the bank that have reference proofs, evenly spaced in length; \cref{app:probes} gives the probes by kind of action.
+These are the costs of the engine on the actions that these two simple procedures try; a trained policy would try other actions, in other proportions.
+\Cref{app:probes} shows that the budget does real work: of the \applyProbes{} \code{APPLY} probes, \applyFuel{} (\applyFuelShare\,\%) ended with the budget spent and not with an answer, and the budget bounds what such a probe can cost whatever the goal and whoever asks.
+The slowest probe of the \probeN{} took \probeMax\,ms (a \code{REFINE}, which supplies a term with holes); the slowest \code{APPLY} probe took \applyMaxMs\,ms.
+
+\begin{table}[t]
+\centering\tabfont
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+operation & $n$ & median (ms) & 90th (ms) & 99th (ms)\\
+\midrule
+probe of an action & \probeN & \probeMed & \probeNinety & \probeNinetyNine\\
+menu of a goal (mean \menuMeanOpts{} options) & \menuN & \menuMed & \menuNinety & \menuNinetyNine\\
+start of an episode on a problem & \startN & \startMed & \startNinety & \startNinetyNine\\
+replay of one recorded action & \replayN & \replayMed & \replayNinety & \replayNinetyNine\\
+one decision of the Gymnasium interface & \decN & \decMed & \decNinety & \decNinetyNine\\
+\bottomrule
+\end{tabular}
+\caption{Latency of the operations of the environment on the problem bank (milliseconds).
+  Probes, menus, starts and replays are those of the blind search and a uniformly random policy on \blindProblems{} problems; decisions are those of the instrumented Gymnasium loop with uniformly random legal choices.}
+\label{tab:latency}
+\end{table}
+
+\paragraph{Throughput.}
+\Cref{tab:throughput} gives rates on one core.
+The engine, driven directly by the blind search, performs \blindProbesPerS{} probes per second (a range of \blindProbesMin{} to \blindProbesMax{} over two passes), and a problem takes \blindSecPerProblem\,s of its budget of \benchProbeBudget{} probes; the search solves none of the \blindProblems{} problems within that budget, and is a baseline for the cost of the machinery, not for difficulty.
+The time is divided as follows (an instrumented pass, which costs \blindOverhead{} times the plain one and changes no outcome): \blindTacticShare\,\% in the tactics that carry out the actions, \blindProbeShare\,\% in the rest of the probes (checkpoint, settling, rewind), \blindMenuShare\,\% in listing menus.
+Through the Gymnasium interface with uniformly random legal choices, the environment makes \gymDecPerS{} decisions per second; \gymAssemblerShare\,\% of the time is spent in the assembler that builds the questions and the options and \gymFeaturesShare\,\% in the features, while probes, the tactics that carry them out, episode starts and replays together take \gymEngineShare\,\% and menus \gymMenuShare\,\% (a profiled pass of \decN{} decisions).
+A probe happens only when an action is complete, which under random choices takes \decPerProbeGym{} decisions on average in this pass, so the interface makes only \gymProbesPerS{} probes per second on this path; the same random policy driven for \uniLimitS{} seconds on each of the \blindProblems{} problems makes \uniDecPerS{} decisions, takes \uniActPerS{} actions and probes \uniProbesPerS{} times per second, \decPerProbeUni{} decisions to a probe, with \uniAssemblerShare\,\% of the time in the assembler.
+The cost of a decision is therefore the cost of the Python layer that assembles it, and not of the kernel or the engine; this is where a faster implementation of the interface would gain.
+
+\begin{table}[t]
+\centering\tabfont
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{6.4cm}lr@{}}
+\toprule
+workload (one core, unless said) & unit & rate\\
+\midrule
+blind search through the engine (\blindProblems{} problems) & probes per second & \blindProbesPerS\\
+uniformly random choices through the Gymnasium interface & decisions per second & \gymDecPerS\\
+\quad the same, driven for \uniLimitS\,s on each of the \blindProblems{} problems & decisions / actions / probes per second & \uniDecPerS\ / \uniActPerS\ / \uniProbesPerS\\
+blind search in forked workers: one worker & probes per second & \wkOneRate\\
+\quad two workers & probes per second & \wkTwoRate\\
+\bottomrule
+\end{tabular}
+\caption{Throughput of the stack on the problem bank.
+  The worker rows are of a different workload, the evaluation harness on \wkTasks{} tasks with a budget of 100 probes each (\wkProbes{} probes in all), and are not comparable with the first; they measure scaling and not peak speed.}
+\label{tab:throughput}
+\end{table}
+
+\paragraph{Scaling, memory, determinism.}
+With the world built once and shared by forked workers, two workers on the two cores finish the same \wkTasks{} tasks in \wkTwoSec\,s against \wkOneSec\,s for one, a speed-up of \wkSpeedup{} and an efficiency of \wkEff.
+The memory of the pair, counted as proportional set size (what the processes cost together, where summing their resident sets would count the shared world again for each), is \wkPSS\,MB; the world of the bank (\bankGlobals{} globals, \bankProblems{} problems) is built in \bankWorldSecB\,s and peaks at \bankRSSnoTorch\,GB (\bankRSSTorch\,GB, and \bankWorldSec\,s, in the run with PyTorch loaded); of the build, \kernelShare\,\% of the time (\kernelSecInWorld\,s) is spent in the kernel's checked entry points, which received \kernelCallsInWorld{} declarations, and the rest in the Python layer that runs the tactics which construct the proofs.
+Nothing is claimed beyond two workers: the machine has two cores.
+The result rows of the three runs (in process, one worker, two workers) agree on every field that is not a measurement of time, for all \detTasks{} tasks and with none left out for coming near the time limit; their outcome digest is \code{\detDigest}, the same on any machine that finds the same proofs after the same number of probes.
+The world of the libraries has the same digest of the names and types of its globals, \code{\worldDigestShort\ldots}, in both runs of the build.
+
+\paragraph{Micro-benchmarks.}
+A call across the Python--C++ boundary costs \ffiNsA\,ns / \ffiNsB\,ns; a checkpoint followed by a rewind of an empty region \rewPairNsA\,ns / \rewPairNsB\,ns; building a node, \nodeBuildNsA\,ns / \nodeBuildNsB\,ns from Python; and rewinding after about \rewNodes{} nodes were allocated \rewindUsA\,\textmu s / \rewindUsB\,\textmu s, or \rewindNsNodeA\,ns / \rewindNsNodeB\,ns per node.
+Binary numerals are evaluated by reduction in the kernel: a product of a \prodSmallBitsA-bit and a \prodSmallBitsB-bit numeral is decided in \prodSmallMsA\,ms / \prodSmallMsB\,ms, and one of \prodLargeBitsA{} by \prodLargeBitsB{} bits in \prodLargeMsA\,ms / \prodLargeMsB\,ms.
+
+\paragraph{What the measurements do not show.}
+They are of one machine with two virtual cores, and a larger machine would change the absolute numbers and, above two workers, the scaling.
+The workloads are a blind search and a random policy, and the latency of a trained policy's actions was not measured.
+The sample of reference proofs for the cost of trust is \chkSampled{} of \proofsProved{}.
+No figure here is compared with a figure for another system.
+
+\subsection{How it differs from other systems}\label{sec:related}
+
+We contrast design choices and give no speed comparison: the published figures of other systems are for other tasks on other hardware, and a fair comparison would formalise the same statements in each system and time both on one machine, which we have not done.
+
+\paragraph{Learners attached to general-purpose assistants.}
+CoqGym and GamePad (Coq), HOList (HOL Light), lean-gym, LeanDojo, Pantograph and the Kimina Lean Server (Lean) connect a learner to an existing proof assistant that runs as a separate process, and exchange text or serialised terms with it \citep{yang19,huang19,bansal19,leangym,yang23,aniva24,dossantos25}.
+What this gives a learner that \ITP\ cannot give is the assistant's libraries of formalised mathematics, its automation, its community, and a kernel with a long record.
+Much of the engineering of these systems goes into making the interface dependable; LeanDojo, Pantograph and the Kimina server are in part that.
+\ITP\ draws the boundary elsewhere: the environment is in the process of the kernel, a state is a value that can be checkpointed, and an action is data and not syntax.
+The price is the one listed in \cref{sec:properties}.
+
+\paragraph{Purpose-built systems.}
+INT, an environment and a generator of problems for inequalities, Peano, a dependently typed environment with a finite action space, and Minimo, which conjectures and proves in Peano, are environments built for learning and not interfaces to an existing assistant \citep{wu21,poesia23,poesia24}.
+\ITP\ shares the aim and is closest to Peano in using dependent types and a finite menu of actions.
+Its own choices are a calculus with inductive families, quotients and proof irrelevance (\cref{sec:theory}), a deterministic work budget in the kernel, a second checker and a mutation catalogue (\cref{sec:testing}), a typed term builder with which an agent says arbitrary well-typed terms (\cref{sec:env}), and a bank of competition problems with a family-disjoint split.
+Hindsight relabelling on proof search trees is used by Minimo, and the idea is hindsight experience replay \citep{andrychowicz17}; we use it for the same purpose and claim nothing for it.
+
+\paragraph{Trust.}
+The kernel of Lean is small too; its type theory has been analysed formally \citep{carneiro19}, and an independent implementation of its kernel exists \citep{carneiro24}.
+We do not claim a more trustworthy kernel.
+The claim is narrower: the whole stack up to the action interface is small enough to be tested as a unit, by mutation among other means; the cost of every call is a deterministic budget; and a second implementation of the specification is part of the repository (\cref{sec:testing}).
+
+\paragraph{Learners that use text.}
+Language-model provers \citep{polu20,han22,polu23,lample22,jiang23,xin24,xin25,ren25,lin25,hubert25} and benchmarks such as miniF2F \citep{zheng22} work on the surface syntax of Lean, Metamath or Isabelle.
+\ITP\ has no surface language, so these models and corpora do not transfer to it; its interface is aimed at policies that read tokens of goals and choose among options.
+A problem bank of \bankProblems{} statements is small beside these benchmarks; what it offers is five levels of difficulty, a tier of statements without proofs that a prover is asked to find, and splits that keep the problems of a family together.

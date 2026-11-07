@@ -1,0 +1,243 @@
+{
+ "args": {
+  "out": "preprint/measurements/deviations.json",
+  "quick": false
+ },
+ "constructors": 19,
+ "control": {
+  "And": false,
+  "Eq": false,
+  "Ex": false,
+  "Le": false,
+  "Nat": false,
+  "Or": false,
+  "Q": true,
+  "R": true
+ },
+ "families": 14,
+ "families_with_a_recursive_field": 3,
+ "family_elsewhere_in_a_field": [],
+ "family_in_index_of_recursive_field": [],
+ "family_in_result_index": [],
+ "globals": 748,
+ "machine": {
+  "commit": "f840710dd0b2a28482638ea351d528235f3e8411",
+  "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+  "cores": 2,
+  "cores_usable": 2,
+  "cpu": "Intel(R) Xeon(R) Processor @ 2.30GHz",
+  "loadavg_start": [
+   0.98,
+   0.6,
+   0.27
+  ],
+  "memory_gb": 7.83,
+  "os": "Linux-6.18.44-fc-v300-x86_64-with-glibc2.39",
+  "python": "3.13.16",
+  "tree_clean_outside_preprint": true
+ },
+ "scan": [
+  {
+   "constructors": [
+    {
+     "constructor": "Zero",
+     "family_elsewhere_in_a_field": false,
+     "family_in_index_of_recursive_field": false,
+     "family_in_result_index": false,
+     "recursive_fields": 0
+    },
+    {
+     "constructor": "Succ",
+     "family_elsewhere_in_a_field": false,
+     "family_in_index_of_recursive_field": false,
+     "family_in_result_index": false,
+     "recursive_fields": 1
+    }
+   ],
+   "family": "Nat"
+  },
+  {
+   "constructors": [
+    {
+     "constructor": "tt",
+     "family_elsewhere_in_a_field": false,
+     "family_in_index_of_recursive_field": false,
+     "family_in_result_index": false,
+     "recursive_fields": 0
+    }
+   ],
+   "family": "True"
+  },
+  {
+   "constructors": [],
+   "family": "False"
+  },
+  {
+   "constructors": [
+    {
+     "constructor": "refl",
+     "family_elsewhere_in_a_field": false,
+     "family_in_index_of_recursive_field": false,
+     "family_in_result_index": false,
+     "recursive_fields": 0
+    }
+   ],
+   "family": "Eq"
+  },
+  {
+   "constructors": [
+    {
+     "constructor": "conj",
+     "family_elsewhere_in_a_field": false,
+     "family_in_index_of_recursive_field": false,
+     "family_in_result_index": false,
+     "recursive_fields": 0
+    }
+   ],
+   "family": "And"
+  },
+  {
+   "constructors": [
+    {
+     "constructor": "inl",
+     "family_elsewhere_in_a_field": false,
+     "family_in_index_of_recursive_field": false,
+     "family_in_result_index": false,
+     "recursive_fields": 0
+    },
+    {
+     "constructor": "inr",
+     "family_elsewhere_in_a_field": false,
+     "family_in_index_of_recursive_field": false,
+     "family_in_result_index": false,
+     "recursive_fields": 0
+    }
+   ],
+   "family": "Or"
+  },
+  {
+   "constructors": [
+    {
+     "constructor": "ex_intro",
+     "family_elsewhere_in_a_field": false,
+     "family_in_index_of_recursive_field": false,
+     "family_in_result_index": false,
+     "recursive_fields": 0
+    }
+   ],
+   "family": "Ex"
+  },
+  {
+   "constructors": [
+    {
+     "constructor": "le_n",
+     "family_elsewhere_in_a_field": false,
+     "family_in_index_of_recursive_field": false,
+     "family_in_result_index": false,
+     "recursive_fields": 0
+    },
+    {
+     "constructor": "le_S",
+     "family_elsewhere_in_a_field": false,
+     "family_in_index_of_recursive_field": false,
+     "family_in_result_index": false,
+     "recursive_fields": 1
+    }
+   ],
+   "family": "Le"
+  },
+  {
+   "constructors": [],
+   "family": "__Empty"
+  },
+  {
+   "constructors": [
+    {
+     "constructor": "__tt",
+     "family_elsewhere_in_a_field": false,
+     "family_in_index_of_recursive_field": false,
+     "family_in_result_index": false,
+     "recursive_fields": 0
+    }
+   ],
+   "family": "__Unit"
+  },
+  {
+   "constructors": [
+    {
+     "constructor": "XH",
+     "family_elsewhere_in_a_field": false,
+     "family_in_index_of_recursive_field": false,
+     "family_in_result_index": false,
+     "recursive_fields": 0
+    },
+    {
+     "constructor": "XO",
+     "family_elsewhere_in_a_field": false,
+     "family_in_index_of_recursive_field": false,
+     "family_in_result_index": false,
+     "recursive_fields": 1
+    },
+    {
+     "constructor": "XI",
+     "family_elsewhere_in_a_field": false,
+     "family_in_index_of_recursive_field": false,
+     "family_in_result_index": false,
+     "recursive_fields": 1
+    }
+   ],
+   "family": "Pos"
+  },
+  {
+   "constructors": [
+    {
+     "constructor": "N0",
+     "family_elsewhere_in_a_field": false,
+     "family_in_index_of_recursive_field": false,
+     "family_in_result_index": false,
+     "recursive_fields": 0
+    },
+    {
+     "constructor": "Npos",
+     "family_elsewhere_in_a_field": false,
+     "family_in_index_of_recursive_field": false,
+     "family_in_result_index": false,
+     "recursive_fields": 0
+    }
+   ],
+   "family": "N"
+  },
+  {
+   "constructors": [
+    {
+     "constructor": "pair",
+     "family_elsewhere_in_a_field": false,
+     "family_in_index_of_recursive_field": false,
+     "family_in_result_index": false,
+     "recursive_fields": 0
+    }
+   ],
+   "family": "Prod"
+  },
+  {
+   "constructors": [
+    {
+     "constructor": "Bool.false",
+     "family_elsewhere_in_a_field": false,
+     "family_in_index_of_recursive_field": false,
+     "family_in_result_index": false,
+     "recursive_fields": 0
+    },
+    {
+     "constructor": "Bool.true",
+     "family_elsewhere_in_a_field": false,
+     "family_in_index_of_recursive_field": false,
+     "family_in_result_index": false,
+     "recursive_fields": 0
+    }
+   ],
+   "family": "Bool"
+  }
+ ],
+ "world_seconds": 55.13
+}

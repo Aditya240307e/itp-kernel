@@ -1,0 +1,173 @@
+\section{Implementation}\label{sec:impl}
+
+\ITP\ is one program in two languages.
+The kernel is written in C++23 and exposed to Python through a nanobind module \citep{nanobind}; everything above it (the authoring layer, the libraries, the tactics, the decision procedures, the environment and the Gymnasium interface) is Python.
+\Cref{fig:arch} shows the layers and the one direction in which trust flows, and \cref{tab:loc} gives the size of each component at the commit at which the measurements of \cref{sec:why} were made.
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[x=1cm,y=1cm,font=\footnotesize,
+  box/.style={draw=ink, line width=0.5pt, fill=white, rounded corners=1.5pt, align=center, inner sep=3pt, minimum height=0.9cm, font=\scriptsize},
+  band/.style={draw=rulegrey, line width=0.6pt, rounded corners=3pt},
+  lab/.style={font=\scriptsize\bfseries, anchor=north west, inner sep=3pt},
+  flow/.style={-{Latex[length=1.8mm]}, line width=0.7pt, color=ink},
+  door/.style={-{Latex[length=2.2mm]}, line width=1.4pt, color=corange}]
+  % bands
+  \node[band, fill=trusted,   minimum width=10.6cm, minimum height=2.45cm, anchor=south west] (K) at (0,0) {};
+  \node[band, fill=untrusted, minimum width=10.6cm, minimum height=1.95cm, anchor=south west] (A) at (0,3.15) {};
+  \node[band, fill=untrusted, minimum width=10.6cm, minimum height=1.95cm, anchor=south west] (E) at (0,5.8) {};
+  \node[band, fill=second,    minimum width=3.0cm,  minimum height=2.45cm, anchor=south west] (I) at (11.4,0) {};
+  \node[draw=muted, dashed, line width=0.6pt, rounded corners=3pt, minimum width=14.4cm, minimum height=0.8cm, anchor=south west, fill=white] (L) at (0,8.15) {\scriptsize learner or search procedure \emph{(outside this report)}};
+  % labels
+  \node[lab] at (K.north west) {Kernel (C++23, trusted)};
+  \node[lab] at (A.north west) {Authoring layer and libraries (Python, untrusted)};
+  \node[lab] at (E.north west) {Environment (Python, untrusted)};
+  \node[lab] at (I.north west) {Independent checker};
+  % kernel boxes
+  \node[box, minimum width=2.3cm] (k1) at (1.3,0.95)  {term store\\ hash-consed,\\ 11 node kinds};
+  \node[box, minimum width=2.3cm] (k2) at (3.85,0.95) {evaluator,\\ conversion,\\ memo tables};
+  \node[box, minimum width=2.3cm] (k3) at (6.4,0.95)  {type checker,\\ unifier,\\ Miller patterns};
+  \node[box, minimum width=2.0cm, draw=corange, line width=1.0pt] (k4) at (9.0,0.95) {checked\\ entry points};
+  % authoring boxes
+  \node[box, minimum width=2.3cm] (a1) at (1.3,3.95)  {worlds, terms,\\ tactics};
+  \node[box, minimum width=3.2cm] (a2) at (4.55,3.95) {\code{ring}, \code{linarith},\\ \code{nlinarith},\\ \code{linear\_combination}};
+  \node[box, minimum width=2.9cm] (a3) at (8.25,3.95) {libraries: logic, $\Fam{Nat}$, $\Fam{N}$,\\ $\Fam{Z}$, $\Quot$, number theory};
+  % environment boxes
+  \node[box, minimum width=2.3cm] (e1) at (1.3,6.6)  {Gymnasium\\ \code{BankEnv}};
+  \node[box, minimum width=2.6cm] (e2) at (4.0,6.6)  {engine, episodes,\\ menus, probes};
+  \node[box, minimum width=2.2cm] (e3) at (6.75,6.6) {typed term\\ builder};
+  \node[box, minimum width=2.5cm] (e4) at (9.3,6.6)  {hindsight, portable\\ actions, bank};
+  \node[box, minimum width=2.75cm] (i1) at (12.9,0.95) {re-checks every\\ definition, guard,\\ quotient roles};
+  % flows
+  \draw[flow, <->] (L.south) -- ++(0,-0.35) node[right, font=\scriptsize] {observations, options} -| (e1.north);
+  \draw[flow, <->] (E.south west) ++(5.3,0) -- ++(0,-0.7) node[midway, right, font=\scriptsize] {tactic calls};
+  \draw[door] (a3.south) -- (k4.north) node[midway, left, font=\scriptsize, color=corange] {terms: the one door};
+  \draw[door] (a1.south) -- (k1.north);
+  % export to the second checker
+  \draw[flow] (K.east) -- node[above, align=center, font=\scriptsize] {text\\ export} (I.west);
+\end{tikzpicture}
+\caption{Architecture.
+  Orange: the trusted base, the kernel, whose checked entry points are the only way a declaration enters the environment (the heavy arrows).
+  Blue: untrusted layers; they construct terms and can only submit them.
+  Grey: the independent checker, a second implementation of the specification that reads the kernel's text export of an environment and re-checks every definition.}
+\label{fig:arch}
+\end{figure}
+
+\begin{table}[t]
+\centering\tabfont
+\begin{tabular}{@{}lp{8.6cm}r@{}}
+\toprule
+component & role & lines\\
+\midrule
+kernel (C++23) & term store, evaluation, checking, unification, tactic core, bindings & \lockernel\\
+frozen reference kernel & the previous generation, kept fixed as a point of comparison & \locrefkernel\\
+authoring layer & worlds, terms, tactics, \code{ring}, \code{linarith}, \code{linear\_combination} & \locauthoring\\
+libraries & logic, naturals, integers, quotients, number theory & \loclibdir\\
+independent checker & second implementation of the specification & \locchecker\\
+environment & engine, menus, probes, term builder, hindsight, recorder & \locenvdir\\
+problem bank & 268 statements, reference proofs, statement audit & \locprobdir\\
+Gymnasium and learning code & \code{BankEnv}; code of a first learner, not evaluated here & \loclearner\\
+synthetic theorem generator & & \locsynth\\
+experiment drivers & benchmarks, measurement scripts, pipeline for later runs & \locexper\\
+tests (the gates) & & \loctests\\
+mutation catalogue and driver & & \locmutants\\
+tools, examples & & \loctools, \locexamples\\
+\bottomrule
+\end{tabular}
+\caption{Size of the components in lines of source (Python, C++ and headers) in the files tracked by git at commit \mCommit.}
+\label{tab:loc}
+\end{table}
+
+\subsection{The kernel}\label{sec:kernel}
+
+\paragraph{Terms.}
+Every node is interned in a pool of its kind, an open-addressing hash table with a finalising mix of the hash so that structurally related nodes do not cluster; structurally equal terms are the same handle (a tag and an index), and equality of terms is a comparison of integers \citep{filliatre06}.
+Terms are therefore DAGs, and the cost of checking a proof is a function of its size as a DAG and not as a tree.
+The values of the \shareValues\ definitions and theorems of the libraries have, together, \shareTree\ nodes counted as trees, whereas their types and values together consist of \shareDistinct\ distinct nodes, a factor of \shareRatio.
+Each compound node carries precomputed facts (the range of loose bound variables, the set of free context variables, a saturating size, and whether it mentions a metavariable), which let instantiation and abstraction skip every subterm they cannot affect.
+Bound variables are de Bruijn indices, so that a closed term has one representation, and variables of the context are de Bruijn levels, so that extending the context renumbers nothing \citep{debruijn72,mcbride04,chargueraud12}.
+
+\paragraph{Environments and values.}
+The evaluator of \cref{sec:conv} runs in persistent environments, singly linked lists with Myers' skew-binary jump pointers \citep{myers83,okasaki95}: extension is one allocation and indexing is logarithmic, and closures share their environments.
+Values are copied in constant time through shared immutable sequences, and the neutral-term spines of a conversion are compared by identity before they are compared by content.
+Reference counts are intrusive and released iteratively, since a chain half a million nodes long once overflowed the stack when it was freed recursively.
+
+\paragraph{Memoisation.}
+Four tables and a quick check sit in front of the evaluator, and each table is keyed so that a hit is a fact about the question asked.
+The \emph{typing memo} records the type of a term of at least 16 nodes, keyed by the node, the typing context, the evaluation switches and the epochs of the tables it depends on; it is used only for terms without metavariables in contexts without metavariables, and not at all while constraints are pending.
+A \emph{quick conversion} on syntax runs before the evaluator and can only answer ``yes'' (identical nodes, congruence, binders, one delta step, beta), within a budget of steps and depth; on a ``no'' or a give-up the evaluator decides.
+Two tables remember pairs of shared constructor values and shared spines found convertible or unifiable after real work, and a fourth remembers the read-back of shared stuck values, which removes the exponential cost of failing on a DAG whose paths are all walked.
+During the build of the libraries, \memoShare\,\% of typing queries are answered from the memo (\memoHits{} hits, \memoMisses{} misses), and the quick conversion settles \synSettled\ of the \synTried\ comparisons it is asked.
+With a debugging switch on, \emph{every} answer taken from any table is re-derived with all tables bypassed and a step limit, and a mismatch throws; the gates run with it on.
+No table stores a refusal, so a table can hide a bug only by answering ``yes'' wrongly, which is what the verification switch is for.
+
+\paragraph{Resource control.}
+Every function that can run long begins with a check that decrements a deterministic work counter (``fuel'') and compares the stack pointer with the thread's floor, and throws a typed exception when the counter is spent or the stack is nearly full.
+Both exceptions are caught at the module boundary and turn a runaway computation into a refusal that names the cause; nothing else can be read from them, and no code path treats exhaustion as success.
+The authoring default is $2\times10^9$ steps per call; the environment gives each kind of action its own, much smaller, budget, so that a probe that does not finish is reported as having run out of work and not as having been refused.
+Conversions are nested at most 256 deep and proof-irrelevance checks eight deep, and beyond the bound the answer is ``not equal'' and ``not irrelevant''.
+The work of the decision procedures that is done in Python before the kernel sees a term is counted too, in units of the same budget (\cref{sec:testing}, finding F90).
+
+\paragraph{State is a value.}
+A \emph{checkpoint} records the sizes of the node pools, of the table of globals, and the marks of the metavariable trail; \emph{rewind} truncates the pools back to those sizes, removes the interned entries of the nodes it discards, and undoes the assignments since the mark.
+Its cost is proportional to what was allocated since the checkpoint.
+This is what a probe uses: run an action, observe the goals it leaves, and rewind, so that a refused action leaves the kernel exactly as it was.
+The Python layer keeps handles to kernel nodes in caches that refuse to store while a probe is open, since a handle stored across a rewind could name a node that no longer exists or, worse, another node that took its index.
+
+\paragraph{Determinism.}
+No result depends on a memory address: tables are keyed by indices and hashes of indices, and no iteration order of an address-keyed container reaches a result.
+The same probe gives the same goals, and a whole run gives the same outcome digest on every repetition (\cref{sec:why}).
+
+\subsection{The authoring layer and the libraries}\label{sec:authoring}
+
+The authoring layer builds terms and drives the kernel's tactics; \emph{nothing in it is trusted}.
+A \texttt{World} is one kernel with a name table.
+Binders are written in higher-order abstract syntax (\texttt{w.pi(A, lambda x: B(x))}) and built in the locally nameless style: a bound variable is a fresh context variable while the body is built and is abstracted when the binder closes.
+Declarations (\texttt{inductive}, \texttt{define}, \texttt{recursive}, \texttt{theorem}) go through the checked entry points of \cref{sec:trust}.
+A proof is a script of tactics over named hypotheses (\texttt{intro}, \texttt{cases}, \texttt{induct}, \texttt{apply}, \texttt{rewrite}, \texttt{exact}, \texttt{ring}, \texttt{linarith}, and others); the script builds a term, and the term is submitted.
+
+The libraries are built in stages, each on the last, entirely through this layer: logic and equality; unary naturals; binary naturals; the ring lemmas; quotients; the integers as the quotient of pairs of binary naturals; elementary number theory; an extension library; and the Olympiad-problem library.
+\Cref{tab:libs} lists the stages.
+A census of the \libGlobals\ declarations gives \censusInd\ inductive families with \censusCtor\ constructors, \censusDef\ definitions, \censusRec\ recursive functions, \censusThm\ theorems, the \censusQuot\ quotient constants and one axiom, \censusAxiomName\ (excluded middle, used by the number-theory library).
+
+\begin{table}[t]
+\centering\tabfont
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+stage (module) & declarations & build, run 1 (s) & run 2 (s)\\
+\midrule
+\libGroupRows
+\midrule
+total & \libGlobals & \libBuildA & \libBuildB\\
+\bottomrule
+\end{tabular}
+\caption{The library chain, built from nothing by \ITP, on the machine of \cref{sec:why}: declarations added at each stage and the time to build it, in two independent runs.}
+\label{tab:libs}
+\end{table}
+
+\subsection{The independent checker}\label{sec:indep}
+
+A second checker, \texttt{indep\_checker}, re-checks the results.
+It was written from the specification of \cref{sec:theory}, not from the C++ kernel, and built differently on purpose.
+\begin{center}\tabfont
+\begin{tabular}{@{}lp{5.2cm}p{5.6cm}@{}}
+\toprule
+ & kernel & independent checker\\
+\midrule
+language, size & C++23, \lockernel\ lines & Python, \locchecker\ lines (with its drivers)\\
+variables & de Bruijn indices and levels & names, explicit capture-avoiding substitution\\
+conversion & evaluation to a semantic domain, memo tables & weak-head normalisation, no caches\\
+fixpoints & one layer on any argument & only on a constructor argument\\
+$\eta$ & function $\eta$ & function $\eta$, in both directions\\
+metavariables, $\sy{let}$ & supported & reported as unsupported\\
+\bottomrule
+\end{tabular}
+\end{center}
+It shares with the kernel only the \emph{input format}: the kernel's text export of an environment.
+It re-implements the universe rule for products, the structural guard, the parameter analysis, the \textsc{Match} rule with the forcing of \cref{alg:force}, the elimination restriction, definitional proof irrelevance with its depth bound, and the validation of the quotient constants; for those it does not trust the labels the kernel puts on them.
+It checks every definition and theorem of an environment (the value against the type), every recursive function against the guard, and every type; it does \emph{not} re-check the admission of inductive families (the positivity and universe conditions \textbf{A4} and \textbf{A5}), nor the unifier, which it does not need: an admitted term contains no metavariable.
+Used on the libraries, it re-checks all \indGlobals{} globals in about \indCheckA\,s (after a load of \indLoadA\,s) and accepts every one; on the reference proofs of the problem bank it re-checks a sample (\cref{sec:why}).
+It is slow and memory-hungry by design: it is a witness and not a tool of the inner loop, and a proof it cannot finish within its limits is reported as such and counted, and not as accepted.
+
+The checker has found defects in the kernel, among them an unvalidated binder annotation in a lambda checked against a product (F21); the comparison has also exposed disagreements that were defects of the checker (F27: the checker had no function $\eta$) and one defect of both, a branchless match on an inhabitant of an opaque type constant, which each accepted as a proof of anything until a test of quotients tried an inhabited opaque type (F26, a soundness defect, fixed in both).
+The last case is the lesson of the apparatus: two implementations of one specification agree on whatever the specification gets wrong.

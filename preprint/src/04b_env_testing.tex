@@ -1,0 +1,244 @@
+\subsection{The environment}\label{sec:env}
+
+The environment is the Python layer of \code{src/python/environment} together with the problem bank (\locenvdir{} and \locprobdir{} lines, \cref{tab:loc}).
+It is untrusted (\cref{sec:trust}): it asks the tactic layer to construct terms, and what an episode ends with is a proof term that the kernel checks against the statement.
+Its job is to make three things operations of a library call and not services of a process: to read a state as data, to try an action and take it back, and to list what can be done.
+
+\paragraph{Goals and steps.}
+A \emph{goal} is a target and the types and names of its hypotheses, all of them kernel handles.
+Terms are hash-consed, so two searches that reach the same goal by different routes reach the same object, and a goal has a key under which a search can recognise it.
+A goal can be read as arrays (node tags, scalars, child pointers, roots, heights) by a consumer that wants the term structure, or as a token sequence by one that wants a sequence.
+A \emph{step} is an \emph{action}, a kind and its arguments (\cref{tab:actions}), applied to the first open goal.
+After every step the goals it leaves are \emph{settled}, in the same way in a probe as in a replay: a goal that a hypothesis or reflexivity closes is closed, and the quantifiers and implications at the head of a goal are introduced, so that no step is spent on either.
+
+\begin{table}[t]
+\centering\tabfont
+\begin{tabular}{@{}l>{\raggedright\arraybackslash}p{3.3cm}>{\raggedright\arraybackslash}p{6.4cm}@{}}
+\toprule
+kind & argument & effect\\
+\midrule
+\multicolumn{3}{@{}l}{\emph{First language: the agent chooses an action from a finite menu (kinds 0--11)}}\\
+\code{INTRO} & --- & introduce the first binder (needed only when automatic introduction is off)\\
+\code{CASES}, \code{INDUCT} & a hypothesis, and hypotheses to generalise & case analysis, induction\\
+\code{APPLY} & a lemma or hypothesis of the menu & apply it, where the goal determines its data arguments\\
+\code{REWRITE} & a lemma or hypothesis, a direction & rewrite at the first instance\\
+\code{RING}, \code{LINARITH}, \code{NLINARITH} & --- & the decision procedures of \cref{sec:certificates}; \code{NLINARITH} multiplies pairs of hypotheses\\
+\code{BY\_CONTRA} & --- & classical: assume the negation, prove \code{False}\\
+\code{INTERVAL\_CASES} & a variable and its two bounds & split an integer variable bounded on both sides\\
+\code{INSTANTIATE} & terms of the goal's pool & \code{have h := H t$_1$ \ldots}\\
+\code{USE} & a term of the pool & the witness of an existential goal\\
+\midrule
+\multicolumn{3}{@{}l}{\emph{Second language: the arguments are said, one typed choice at a time (kinds 12--20)}}\\
+\code{CLAIM} & a statement & \code{have h : s}; two goals, the statement and the goal with \code{h}\\
+\code{REFINE} & a term with holes & \code{exact}; each hole is a proposition left as a goal\\
+\code{APPLY\_WITH}, \code{REWRITE\_WITH} & a source and the data arguments the goal does not determine & apply, rewrite; the unifier finds the rest\\
+\code{REWRITE\_AT} & as \code{REWRITE\_WITH}, and a hypothesis & rewrite inside a hypothesis\\
+\code{FORWARD} & a source and argument slots & \code{have h := source s$_1$ \ldots}\\
+\code{INDUCT\_WITH} & a library principle, its other arguments, a variable & induction by a chosen principle; the motive is read off the goal\\
+\code{INJECT} & a hypothesis $c\,\vs{a}=c\,\vs{b}$ & the equations $\vs{a}=\vs{b}$\\
+\code{LINCOMB} & hypotheses and coefficient terms & \code{linear\_combination}, closed by \code{ring}\\
+\bottomrule
+\end{tabular}
+\caption{The twenty-one kinds of action.
+  The numbers are part of the data format of recorded proofs.}
+\label{tab:actions}
+\end{table}
+
+\paragraph{Probes.}
+A \emph{probe} takes a checkpoint (\cref{sec:kernel}), runs an action on a one-goal copy of the goal, reads off the goals the action leaves, and rewinds: every node allocated in the meantime is reclaimed and every assignment of a metavariable undone.
+Its outcome is one of four statuses: \code{ok}, with the goals the action leaves; \code{refused}, when the tactic or the kernel said no, when the goal came back unchanged, or when the goals it leaves are not independent; \code{fuel}, when the work budget ran out; and \code{bug}, when something other than a refusal went wrong.
+Taking an action probes it first, so that an action that does not apply raises an error and changes nothing, and a learner or a search can try as many actions as it likes at the price of the probes.
+
+\paragraph{Budgets.}
+Every probe runs under a deterministic work budget that depends on the kind of action: $5\times10^6$ steps by default, $5\times10^7$ for \code{RING}, \code{LINARITH}, \code{INTERVAL\_CASES} and \code{LINCOMB}, and $1.5\times10^8$ for \code{NLINARITH}.
+The decision procedures compute in Python before the kernel sees a term, and they spend the same units: the normaliser of \code{ring} counts its work before it allocates the memory the work stands for, and stops at one fiftieth of the kernel budget of the call.
+Listing a menu runs kernel calls as well (the normal forms of candidate facts and of the goal), and each is bounded by $5\times10^6$ steps, a candidate fact of \code{INSTANTIATE} by one fiftieth of that.
+A spent budget is reported as \code{fuel} and never as a refusal, since a larger budget might succeed; a learner should not be taught that an action is wrong because it was slow.
+The three places where such a bound was missing (the assembler of terms, the listing of a menu, the normaliser of \code{ring}) were found by long runs, two of which were killed by the operating system, and not by any gate; each is now pinned (findings F86, F87, F90 of \cref{sec:testing}).
+
+\paragraph{The first language.}
+Twelve kinds of action take their arguments from a finite menu.
+A menu is a list of actions together with the table of lemmas and hypotheses they name; the lemmas offered for \code{APPLY} and \code{REWRITE} are those that a library index says can match the goal, and for \code{APPLY} those whose data arguments the goal determines.
+The two kinds that carry terms, \code{INSTANTIATE} and \code{USE}, take them from a deterministic pool of small well-typed terms built from the variables and numerals of the goal.
+A menu is a finite, ordered, deterministic list, so that a policy can score it and a search can enumerate it.
+
+\paragraph{The second language and the typed term builder.}
+A finite menu cannot offer an arbitrary term: a witness, an intermediate statement, an instance of a lemma at chosen arguments.
+Nine further kinds therefore take \emph{codes}, tuples of tokens of a \emph{typed term builder}.
+A term is built in prefix order, one choice per step, and at each step the builder offers only the tokens that keep the term well typed: a variable of the context applied to $k$ arguments, a global applied to $k$ arguments, a numeral of the type at the hole, a lambda, a universal quantifier, an implication, a sort, a term of the pool, or (for \code{REFINE}) a proposition left open as a goal.
+A head takes the arguments its type needs to reach the type at the hole, except those that the expected type already determines (the implicit carriers), so that a statement is said without the noise that a fully applied term would carry.
+A policy that chooses among the offered tokens cannot say an ill-typed term; the gates check this by random walks over the choices, and the kernel checks the finished term again.
+The builder says and builds back the terms of the proofs of the libraries (\code{encode}, \code{build}) with one exception that it reports and does not hide: a term with \code{match} or \code{let} cannot be said, which concerns two proofs of the libraries and the statement of functional extensionality.
+A lemma above the engine's premise limit cannot be said either.
+
+\paragraph{Premises and regimes.}
+An attempt may use only the globals that its \emph{premises} allow, a number: a theorem is attacked with the library that precedes it, and the problems of a bank do not see each other's solutions.
+Two regimes follow from the lemmas that were written for a problem.
+In the \emph{prefix} regime every global before the theorem is on offer, the problem's own helpers included, which measures how well an agent uses a good lemma; with its helper on the menu a problem can be a single action.
+In the \emph{strict} regime the helpers written for the problem are hidden, from the menu and from the builder alike, so that the problem tests whether the ideas can be found.
+A reference proof must be self-contained for the strict regime (it proves its lemmas inline), and this is checked by replaying the proof with the helpers hidden, not assumed.
+An episode carries its own premises, so that episodes of different regimes interleave on one engine.
+
+\paragraph{Portable actions and the recorder.}
+An action can be written as plain data, with no kernel handle and no index into a menu: a lemma is named by its identifier in the world, a hypothesis by its level.
+A recorded proof can therefore be stored in a file, sent to another process and replayed in a fresh engine; malformed data raises the environment's error and nothing else.
+The \emph{recorder} turns authored tactic proofs into such sequences.
+It runs a library with every tactic call logged as a tree, translates each call into candidate plans of engine actions, keeps the first plan whose probe leaves as many goals as the author's call left, carries it out, and finally has the kernel check the proof the engine built.
+All but six of the 459 recorded proofs of the libraries replay in this way; the six, named in the gate S40 together with their reasons, are two proofs whose terms contain a \code{match} or compute only, two authored inductions whose hypothesis the engine does not have, and two applications whose goals the engine settles by itself.
+A translation that is wrong makes a replay fail, and cannot produce a false theorem.
+
+\paragraph{Hindsight.}
+A failed attempt contains theorems that \emph{were} proved: a case that closed, a fact that an action derived.
+With tracking on, an episode keeps its proof tree and returns these as new standalone problems with proofs, by analogy with relabelling a failed trajectory by what it did achieve \citep{andrychowicz17}.
+Because the engine settles goals, the statement of a sub-tree as the agent saw it is not always the statement that a replay proves; an example is therefore returned only after it has been replayed from its own data in a fresh engine and checked by the kernel, and the candidates that cannot be made exact are dropped and counted by reason.
+Hindsight is a feature of the data, not of the logic: the examples are as sound as the replay that produced them.
+
+\paragraph{The problem bank.}
+A \emph{problem} is a theorem of one deterministic world plus what a dataset needs to know about it: the problem in words, its source, topics and a level from 1 to 5, whether it asks for a proof, for an answer (``determine all'': the answer is part of the statement, an equivalence with the solution set) or for an example, a reference proof, and an executable reading of the intended meaning.
+The bank has \bankProblems{} problems from AMC, AIME, IMO, ISL and APMO papers, classical exercises, and graded problems written for the bank, in a world of \bankGlobals{} globals (the libraries and the statements).
+\proofsProved{} of them have a reference proof that is kernel-checked and replays through the action language; the remaining \statementOnly{} are \emph{statement-only}: the formal statement is the task, and an agent that proves one is checked by the kernel all the same.
+The reference proofs total \proofsTotalActions{} actions (median \proofsMedian, 90th percentile \proofsNinety, longest \proofsMax).
+The kernel establishes that a proof proves its statement; that the statement says what the problem says is a separate question.
+A statement is therefore read back from its kernel term into a small syntax tree and evaluated on integers, over windows of small values, against an intended meaning that the person who formalised the problem wrote as a Python predicate; the meaning of each symbol of the library is written down once, in a few dozen lines to audit, and compared with the library's definition.
+Mutated statements (a swapped relation, a dropped hypothesis) serve as negative controls that the comparison must notice or explain.
+A check on a window is a check of meaning on small values and never of truth.
+For the statement-only problems, an exhaustive search on a larger range, written from the problem and not from the formal statement, supplies evidence for the claim itself.
+A statement audit reports, for every problem, the checks made and the cautions where the evidence is weaker.
+No second reader's verdict is recorded yet, and a misreading of the English that the statement and its executable reading share is invisible to every check (\cref{sec:limits}).
+The splits into training, development and test problems are by family and not by problem (the two parts of one olympiad problem, or a statement and its restatement, belong together), and the split of a family is a pure function of its key, so that adding problems moves none.
+
+\paragraph{The Gymnasium interface.}
+\code{BankEnv} wraps the engine for the bank as a Gymnasium environment \citep{towers24,brockman16} at the level of the policy's \emph{decisions}.
+One episode is one proof attempt on the first open goal.
+To act, the agent answers the engine's questions in turn (the kind of action, the lemma, the hypothesis, then the next token of a term), each among the \emph{options} that the engine offers at that point; when the last question is answered the action is probed and, if it applies, taken.
+The observation is a dictionary of integer arrays: the goal as token identifiers with a segment and a hypothesis index for each token, the number of hypotheses and goals left, the budget left, the overlap of each global's symbols with the goal, the kind of decision, the tokens of the type of the term being said, and the options as integer rows with a count and a legality mask.
+The action space is \code{Discrete(1024)}, the index of an option; an illegal index raises an error, or with \code{illegal='penalize'} loses the decision.
+The reward is $1$ when the finished proof has been checked by the kernel, and an optional penalty per action or refusal; an episode is truncated after 60 actions (taken or refused) or 600 decisions, both configurable.
+An episode may start from any closed statement given as portable data, which is how hindsight examples are used.
+There is no text interface anywhere in this chain.
+
+\subsection{Testing}\label{sec:testing}
+
+The architecture localises what must be right.
+Only the kernel can accept a false statement; the independent checker is a witness whose disagreement is information; everything else can lose a proof but not make one.
+The tests are accordingly aimed at the kernel and at the boundary around it, and the rest of the apparatus protects usefulness (an action that should apply, a probe that returns).
+This subsection describes the apparatus and states what each part shows.
+The numbers are those that the named gates printed when we ran them for this report (\code{measure\_gates.py}), at commit \mCommit{} on the machine of \cref{sec:measure}; all \gatesAll{} gates were then run once more, as a whole (\cref{app:gates}), and the logs of both runs are in the supplementary material.
+
+\paragraph{Gates.}
+A \emph{gate} is a self-contained script that exits 0 and prints no failure if and only if the property it protects holds.
+There are \gatesAll{} (\gatesDefault{} by default; the others need the machine-learning libraries, the repository, or the synthetic theorem generator), organised by what they protect: the kernel against a frozen reference, its soundness, boundaries and performance guards, quotients, proof irrelevance and the work budget; the libraries and decision procedures; the environment; the problem bank; and the repository itself.
+The gates of the default set can also be run with every answer that the kernel takes from a sharing table re-derived with the tables bypassed (\code{ITP\_VERIFY\_MEMO=1}, \cref{sec:kernel}); this about doubles their time and is how the memo tables are tested.
+
+\begin{table}[t]
+\centering\tabfont
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{3.3cm}>{\raggedright\arraybackslash}p{4.4cm}>{\raggedright\arraybackslash}p{5.1cm}@{}}
+\toprule
+apparatus & what is compared or attempted & result at this commit\\
+\midrule
+lockstep against the frozen reference kernel (S2, harness) &
+  random typed terms with \code{match}, corpora of inductive families and recursive functions, random terms for normal forms, conversion and typing; both kernels must give the same verdict &
+  \lockMatchTerms{} well-typed and \lockIllTyped{} ill-typed matches, \lockDepChecked{} dependent-typing checks, \lockAdmission{} admission and \lockGuard{} guard cases, \harnessComparisons{} comparisons on \harnessTerms{} terms; no disagreement\\
+self-consistency oracle &
+  random tactic scripts in five distributions; after each tactic the partial proof must type-check against the statement &
+  \oracleCompleted{} proofs completed, \oracleVerified{} verified; no unattributed failure\\
+independent checker (S8) &
+  random scope-aware mutations of valid proofs, judged by the kernel and by the checker &
+  \indepMutated{} mutated proofs: both accept \indepBothAccept{}, both reject \indepBothReject{}, no verdict differs\\
+soundness canaries (S15, S16) &
+  a blind random generator of proof attempts on statements that are \emph{false}; the same generator on true statements as a check on its power &
+  classical axioms: \canaryClassAttempts{} attempts at \canaryClassFalse{} false statements, none completes; \canaryClassPowerOk{} of \canaryClassPower{} attempts at true ones complete, all verified. Quotients: \canaryQuotAttempts{} attempts, none completes; \canaryQuotPowerOk{} of \canaryQuotPower{}, all verified\\
+boundary (S19) &
+  malformed or hostile calls through the Python API: nothing may crash, hang, or be accepted &
+  \boundaryCases{} cases pass; \boundarySeeds{} seeds of \boundaryCallsSeed{} random calls, each in a child process\\
+\bottomrule
+\end{tabular}
+\caption{Parts of the test apparatus aimed at the kernel and what they printed.
+  A random generator that completes nothing is also what a toothless generator does, so each canary is paired with a run of the same generator on true statements, which must complete and verify a minimum number of proofs.}
+\label{tab:testing}
+\end{table}
+
+\paragraph{Lockstep against a frozen reference.}
+The previous generation of the kernel (absolute universe levels, variables as levels) is kept byte-for-byte, with its checksums pinned by a gate, and the same random inputs are given to it and to the hybrid kernel.
+Where the hybrid kernel is deliberately stricter, or fixes a defect of the reference, the gate says so explicitly (for instance F19; \cref{tab:findings} counts the findings by layer).
+The lockstep comparison tests that a rewrite of the representation preserved the behaviour; it says nothing about a defect that both kernels share.
+
+\paragraph{A second checker.}
+\Cref{sec:indep} describes the checker; \cref{tab:testing} gives its agreement with the kernel on mutated proofs.
+The mutations (a variable replaced by another in scope or by a constant, a constant replaced, a universe level shifted, the two parts of an application exchanged, a binder annotation replaced, two branches of a match exchanged, the decreasing argument of a fixpoint moved) produce mostly ill-typed terms, which is what the comparison needs: a checker that accepts a term that the kernel rejects, or conversely, is a finding.
+
+\paragraph{Canaries.}
+If a rule added to the trusted base made it inconsistent, a blind generator of tactic scripts would eventually complete and verify a proof of a false statement.
+The canaries of the two additions that put the base at risk (the classical axioms, in the world in which \code{Type 0} is \code{Prop}, and the quotient constants) throw random attempts at statements that are false in the intended model.
+That none completes is evidence of the kind that testing gives: of the absence of a cheap attack, not of consistency.
+
+\paragraph{Falsification through the environment.}
+A fuzzer drives the tactic layer, the unifier and the kernel's final check through the environment: it generates statements about the natural numbers or the integers, decides by evaluation which are true (true ones by equality-preserving rewrites of a random term, false ones by a small perturbation of a true one), and runs the search on each.
+It classifies the outcomes as \code{REJECTED} (a finished proof that the kernel then refused: a defect of the tactic layer or the unifier), \code{UNSOUND} (a proof of a statement that is false at some point: a defect of the kernel, which should be impossible) and \code{ERROR} (any other exception out of the engine).
+A rejection is always a bug, since it is a disagreement between two layers; the first two defects found this way were in the tactic layer and the unifier.
+The campaign that collects its results into one folder (\code{make soundness}) takes hours, was not run for this report, and its output is not quoted.
+
+\paragraph{Mutation testing.}
+A test suite that has never failed has not been shown to test anything.
+The mutation catalogue holds \mutTotal{} mutants, each of which re-breaks one rule of the system in an isolated copy of the tree, and the gates must fail on it.
+Of these, \mutKernel{} mutate the C++ kernel (\mutKernelHeader{} the header, \mutBindings{} the bindings), \mutChecker{} the independent checker, \mutTactic{} the tactic layer and the decision procedures, \mutLibrary{} the libraries, and \mutEnv{} the environment, the action language, the term builder and the recorder.
+A mutant that no gate catches is a gap in the tests unless it is one of the \mutEquiv{} documented equivalents, for which no input can tell the mutant from the original.
+Its limits are part of the result.
+The catalogue was run series by series as the code it refers to was written; the more recent additions were run against the gates that pin them; we report no single pass of all of it against the final commit, which takes many hours.
+There are no mutants of the same kind for the problem-set modules, the learner, the generator or most of the experiment pipeline, whose gates rely on fixtures with hand-worked expectations and on tamper tests, and have not been shown to bite by mutation.
+Some mutants are known to survive (one of the recorder's, whose fallback nothing exercises), and twenty environment mutants whose anchors were repaired by hand after a refactoring were not run again.
+The mutants are written by the author of the code, so they measure the tests against the faults that the author can imagine.
+
+\paragraph{Sanitizers.}
+The evaluator owns its memory by hand (intrusive reference counts, single-allocation sequences, a trampoline that frees deep chains iteratively), and a bug there would not show as a wrong answer but as a use after free that the functional gates cannot see.
+The kernel can be built with AddressSanitizer and UndefinedBehaviorSanitizer, and the gates run under it.
+For this report we ran \sanGates{} of the \sanDefault{} gates that the tool selects by default (the lockstep, soundness, quotient, irrelevance, conversion, tactic and independent-checker gates of the kernel and the differential harness) with the sanitizers on, and all pass, in \sanSeconds{} seconds.
+The tool leaves out \sanLeftOut{} further gates, because they limit the address space, which the sanitizer cannot start under, or carry time limits meant for an unsanitized build, or recurse a gigabyte deep, which the sanitizer reports as a false positive.
+The remaining gates of the default set, the long ones of the libraries, the environment and the bank, were not run under the sanitizers.
+Leak detection is off, since the Python interpreter itself leaks at exit; the evaluator's leaks are checked separately, by a standalone driver, which we did not run for this report.
+
+\paragraph{Faults in the tools that make evidence.}
+The numbers of an experimental report come from tools, and a test written together with the code it checks tends to check what the code does and not what it must do.
+Single-line faults were therefore injected into each of \toolCount{} tools (the soundness folder, the statement audit, the number checker, the record of which code produced a result, the digest of the code, and the runner of these faults itself), \toolFaults{} faults in all, and the gate section written for the tool must fail for every one.
+Of the first 172 faults, 21 got past the tests that had been written for the tool, among them stages that reused a saved result made for other code and would have made a folder say \code{CLEAN} about code it had never looked at (finding F88); all \toolFaults{} are now caught.
+
+\paragraph{The log of findings.}
+Every defect found while building the system, by a gate, a mutant, the second checker, a long run or a reading, is recorded in a log with its status and the test that fails without the fix.
+It holds \findNumbers{} numbered findings (\findRows{} rows; the second, F2, has two parts).
+Of the rows, \findFixed{} are fixed and pinned by a test that fails without the fix, \findConstruction{} are removed by the construction of the hybrid representation, \findMitigated{} are mitigated with the root cause open, \findPartial{} is partial, \findDocumented{} are documented design consequences or hazards, and \findOpen{} are open (\cref{sec:limits}).
+The author tagged each row, when it was written, with the layer in which the defect lived and the effect it could have had; \cref{tab:findings} counts them (a row with two layers counts in both).
+
+\begin{table}[t]
+\centering\tabfont
+\begin{tabular}{@{}llrp{6.2cm}@{}}
+\toprule
+layer & trust & rows & examples\\
+\midrule
+kernel & trusted & \findKernel & a lambda checked against a product never validated its binder annotation (F21); evaluation unfolds a fixpoint on a neutral argument (F23); conversion is incomplete on stuck matches (F28); work unbounded (F30)\\
+independent checker & witness & \findChecker & no function $\eta$ (F27); a branchless match on an opaque type constant accepted (F26)\\
+tactic layer, unifier, libraries & untrusted & \findTactic & \code{apply} accepted a solution of the wrong type for a metavariable (F25); a work bound missing in \code{ring} (F90)\\
+environment: engine, builder & untrusted & \findEngine & unbounded kernel calls while listing a menu (F87) or assembling a term (F86)\\
+bank, recorder, hindsight, generator & untrusted & \findData & statements, duplicated or misleading data; exactness of hindsight (F72)\\
+training and experiment pipeline & untrusted & \findPipeline & estimates, documents, the record of the code\\
+tests and tooling & --- & \findTooling & the mutation driver was vacuous after a reorganisation: every mutant looked caught (F71)\\
+\bottomrule
+\end{tabular}
+\caption{The \findRows{} rows of the log of findings by the layer in which the defect lived.
+  Three rows record trusted code that accepted what it must refuse (\findAcceptsIds): the first is in the frozen reference kernel (the hybrid kernel is stricter), the second was found by the independent checker, and the third, a soundness defect found while designing the quotient gate, was in the kernel and in the checker.
+  All three are fixed and covered by tests that fail without the fix.}
+\label{tab:findings}
+\end{table}
+
+\paragraph{What the lessons are.}
+Four findings are lessons about the apparatus and not about the logic.
+\emph{Two implementations of one specification agree on whatever the specification gets wrong} (F26): a branchless \code{match} on an inhabitant of an opaque type constant was accepted as a proof of anything by the kernel and by the checker, because both read the family of a type from the same unwritten assumption, and it was found by a test of quotients that for the first time inhabited an opaque type.
+\emph{A check that can fail for reasons of infrastructure needs a baseline that runs in the same infrastructure} (F71): after a reorganisation, the copy of the tree in which the mutation driver runs a mutant lacked a directory, every gate crashed on an import, every mutant was reported as caught, and the baseline, which ran in the original tree, could not show it; the giveaway was a mutant ``caught'' by a seventy-second gate in no time.
+\emph{A work bound must cover every computation that precedes the kernel} (F86, F87, F90): all three were found by the first long run of a component that the gates had run only briefly.
+\emph{Tests written with the code check what the code does} (F88), which is why the tools that make evidence have faults injected into them.
+
+\paragraph{What the testing shows and does not show.}
+The kernel has been compared with an earlier kernel and with an independently written checker on large numbers of generated and mutated inputs, attacked with blind generators on false statements, built with sanitizers, and mutated; every defect so found is recorded.
+None of this proves the kernel sound.
+The two checkers share one specification, and a defect of the specification is invisible to both; the generators sample distributions that the author chose; the mutants are the faults that the author imagined; and the lockstep comparison is blind to what the two kernels share.
+The statement of a theorem lies outside the chain altogether.
+Soundness is tested here and not proved, and we make no claim of being more trustworthy than any other kernel.

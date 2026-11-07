@@ -1,0 +1,109 @@
+\section{Limitations}\label{sec:limits}
+
+This section collects what the system does not do and what the evidence does not show.
+It is organised by layer.
+Where the log of findings (\cref{tab:findings}) has an entry, its number is given.
+The log holds \findNumbers{} findings; \findOpen{} are open: F28 (conversion), F61 (the assembler of the policy interface), F67 (the time of the independent checker), and F70, which records a measurement of an early learner on an earlier version of the bank and not a defect of the system.
+
+\subsection{The calculus}
+
+\paragraph{Universes.}
+There is no cumulativity and there is no universe polymorphism (\cref{sec:syntax}).
+A definition used at two levels is written twice, and a term of one level is used at another by an explicit construction.
+The eleventh kind of node, meant for level parameters, is not used.
+
+\paragraph{Inductive types and recursion.}
+A declaration is of one family (A6 of \cref{sec:ind}): there are no mutual families, no occurrence of the family nested in an argument of another (\code{List Bad}), no coinductive types, and no inductive--recursive or inductive--inductive definitions.
+Recursion is structural on one argument of one family, with no mutual recursion; well-founded recursion is not a primitive.
+Pattern matching on an indexed family is the kernel's \code{match} with index forcing (\cref{sec:ind}), which is first-order: it solves a field that stands alone at an index position, compares a field met twice, matches equal constructors, refutes two different ones, and declines everything else; equations between indices that need computation to solve are left to the user, and a refuted branch must still be written.
+The argument that the forcing is sound is not formalised, and it is the most delicate part of the kernel.
+Discrimination and injectivity lemmas are generated for families without indices or parameters only, there is no heterogeneous equality, and \code{cases} does not use them by itself (F2b).
+
+\paragraph{Conversion.}
+Conversion has $\eta$ for functions and for nothing else; there are no records, and no $\eta$ for the unit type.
+Definitional proof irrelevance holds only in the Prop configuration, and the calculus has uniqueness of identity proofs there, so it is not a setting for univalent development.
+The decision procedure is incomplete and not transitive on stuck case analyses (F28): two terms that each convert to their own normal form can fail to convert to each other, so that \code{exact} or \code{apply} can miss an equality that normalising both sides exposes.
+The failure is in the safe direction, since a positive answer is always justified by evaluation.
+Conversion is exponential in the depth of a shared term whose two sides unfold differently (F29); the work bound turns the blow-up into an exhausted budget, and the root cause is open.
+A fixpoint is unfolded at any argument and not only at a constructor (F23), which is mitigated for the proofs that the tactic layer builds and remains a difference from the specification (\cref{sec:conv}).
+
+\paragraph{Axioms, language, libraries.}
+One axiom is shipped, excluded middle; the quotient rule is part of the kernel, and the integers depend on it (\cref{sec:quot}).
+The audit of a theorem lists the axioms and quotient constants it depends on.
+There is no surface language: a statement is a Python expression over the kernel's term builder, and there are no implicit arguments or coercions for the author, no type classes, no notation mechanism beyond infix names, and no module system.
+The libraries (\libGlobals{} declarations, \cref{tab:libs}) cover the naturals, integers and some number theory; there are no real numbers, no algebraic structures, and no geometry or combinatorics.
+
+\paragraph{Metatheory.}
+Subject reduction, strong normalisation and consistency are not proved for the calculus as implemented, and no part of its metatheory is mechanised (\cref{sec:meta}).
+The two deviations of \cref{app:deviations} are places where the implementation is weaker than the specification it was written against; we do not know whether either can be exploited to derive a contradiction, and we have not tried to prove that neither can.
+Neither is reachable from the environment, whose actions can neither declare a family nor say a \code{match}; both are reachable from the Python interface of the kernel, which is what a library author uses.
+
+\subsection{Trust and testing}
+
+\paragraph{Soundness is tested, not proved.}
+The trusted base is the kernel (\locKernelHeader{} lines of header and \locBindings{} of bindings) and the entry points that guard it, the C++ compiler and the Python interpreter that call it.
+The evidence that it is sound is the apparatus of \cref{sec:testing}, which finds defects and cannot show their absence.
+Its second checker (\locchecker{} lines) is a re-implementation from the same specification by the same author, so it does not catch a flaw in the specification or a misreading that both share, and it does not re-check the admission of inductive families (D2 of \cref{app:deviations}).
+The mutants are written by the author of the code and measure the tests against the faults that the author can imagine, and the \mutEquiv{} equivalent mutants are the author's judgement.
+
+\paragraph{The independent checker is slow.}
+It takes about \indOverKernel{} times the kernel's time over the libraries, between \chkRatioMin{} and \chkRatioMax{} times on the sample of reference proofs, and it needed more than \chkCapMB\,MB on one proof, where it stopped without a verdict.
+The log records case-enumeration proofs for which it takes minutes (F67), which the gates check with the independent checker only on request.
+It is a witness for a finished proof, not a component of a loop.
+
+\paragraph{What was and was not run for this report.}
+The gates, the sanitizer run, the library and environment measurements, and the listings were run at the commit of the report on one machine: Linux, x86-64, two virtual cores, \mCompiler.
+The campaign of falsification by fuzzing (\code{make soundness}), a single pass of the whole mutation catalogue against the final commit, the gates run with the sharing tables of the kernel bypassed (\code{ITP\_VERIFY\_MEMO=1}), the long gates of the bank under the sanitizers, the leak detector of the sanitizer, and other platforms and compilers were not run; the repository contains the commands for each.
+The measurements of cost are of this machine.
+The counts and digests are properties of the code, and the times are not.
+
+\paragraph{Budgets.}
+The work bound of the kernel counts evaluation steps, and the tactics that compute in Python before the kernel sees anything have bounds of their own.
+Three places where a bound was missing were found by long runs and not by any gate (F86, F87, F90), and we know of no argument that there are no others.
+
+\subsection{The environment and the bank}
+
+\paragraph{The interface.}
+An episode acts on the first open goal; there is no choice of goal and no tactic combinator, and a proof is a sequence of single actions.
+The automation is the decision procedures for polynomial arithmetic over the naturals and the integers (\code{ring}, \code{linarith}, \code{nlinarith}, \code{linear\_combination}), enumeration over an interval, and rewriting; there is no general-purpose simplifier with a lemma database that grows, no SMT back end, and no tactic for the arithmetic of the reals.
+A term with \code{match} or \code{let} cannot be said to the typed builder, which concerns two proofs of the libraries and the statement of functional extensionality, and a lemma above the premise limit cannot be said.
+The assembler, the policy-facing interface, says \asmSaid{} of the \asmActions{} actions of the \asmProofs{} recorded proofs of the dataset (the reference proofs of the bank in both regimes, and the libraries' proofs), at \asmMsPerAction\,ms an action.
+It cannot say the other \asmMissing{}: \asmPrefixMissing{} in the reference proofs of the bank in the regime that offers every earlier global, \asmStrictMissing{} in the second proofs of the strict regime, and \asmLibMissing{} in the libraries.
+They are of the kinds \asmMissingKinds{}, and in each of them some token that the action needs is not among the options offered at that point.
+The log of findings (F61) attributes the failures that it had counted to steps whose terms fit their holes only up to computation, which the matcher of the typed builder does not see through; that entry was written at an earlier state of the repository and its figures do not match these, and we have not classified the present failures further.
+A policy trained on the recorded actions would not meet these, and a measure of how often it can reproduce a recorded proof is bounded by the fraction that the assembler can say.
+The recorder replays 453 of the 459 recorded proofs of the libraries, and the six that it does not are named in a gate.
+In the prefix regime a problem with a helper on the menu can be a single action, which measures the use of a lemma and not the finding of an idea; the strict regime hides the helpers, and only the problems with a self-contained reference proof have one.
+
+\paragraph{The bank.}
+It is small (\bankProblems{} problems) and tilted toward the easy end.
+\Cref{tab:bank} gives the levels: \bankLevelsLowProved{} of the \proofsProved{} problems with a reference proof are of levels 1 to 3, and of the \bankLevelFiveTotal{} problems of level 5 one has a proof.
+Of the \bankImoLike{} problems from the IMO, its shortlist and the APMO, \bankImoLikeProved{} have a proof; the others are statements, with exhaustive evidence on small ranges that they are true.
+Of the problems, \bankOrigContest{} are formalised as in a contest, \bankOrigAdapted{} are changed to fit the vocabulary (integers instead of reals, one part of several), \bankOrigStyle{} are written for the bank in the manner of a contest and are not contest problems, and \bankOrigFolklore{} are classical facts and exercises; the texts of the AIME problems are paraphrased.
+The topics are arithmetic, algebra and number theory (\bankTopicNT{} problems carry the number-theory tag); \bankTopicCombinatorics{} are tagged combinatorics and none is geometry.
+That a statement says what its problem says is checked by evaluation on windows of small values against an executable reading written by the person who formalised it, and no second reader has recorded a verdict; a misreading shared by the statement and its executable reading is invisible to every check.
+The split is by family, so that the test problems are not restatements of training problems, but \bankSplitTest{} problems in a test split, eight of them statements without proofs, are a small test.
+
+\begin{table}[t]
+\centering\tabfont
+\begin{tabular}{@{}cccc@{}}
+\toprule
+level & with a reference proof & statement only & all\\
+\midrule
+\bankLevelRows
+\bottomrule
+\end{tabular}
+\caption{The problems of the bank by level (how much thinking a problem asks for, not how long its proof is) and by whether a kernel-checked reference proof exists.
+  The counts are read from the released dataset file.}
+\label{tab:bank}
+\end{table}
+
+\paragraph{Hindsight and throughput.}
+Hindsight returns the sub-theorems of a proof tree that can be made exact; those that cannot are dropped and counted, so the yield on a given attempt is less than the number of its solved sub-goals.
+The interface is in Python, and a decision costs the cost of the assembler (\cref{sec:measure}); the throughput of a decision is therefore far from the throughput of the kernel.
+Scaling was measured to two workers on a machine with two cores.
+No GPU or accelerator is involved in the environment, and none was measured.
+
+\paragraph{No learning.}
+The report contains no experiment in which a policy was trained on the environment, and claims nothing about what a learner would achieve with it.
+\Cref{sec:why} describes properties of the interface and what they cost; whether they help a learner is the subject of future work, and the comparison with other systems is of design and not of speed.

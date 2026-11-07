@@ -1,0 +1,43 @@
+A. level 1: the five declared types equal the independently written ones: {'Quot': True, 'Quot.mk': True, 'Quot.lift': True, 'Quot.ind': True, 'Quot.sound': True}
+   independent checker validated the roles: True; re-check of all 33 globals: 0 rejected
+   refuse outside the Prop/Type world (prop_elim off)          ok
+   refuse a second declaration                                 ok
+   refuse a global id that does not exist                      ok
+   refuse a family that is not an equality (And)               ok
+   refuse a definition (Not) instead of a family               ok
+   refuse a name clash (a global called Quot.lift)             ok
+   refuse an equality family with two constructors             ok
+   refuse an equality family whose constructor proves every a = b ok
+   refuse an equality family at Type0 (j = 0)                  ok
+   refuse an "equality" valued in Type1 instead of Prop        ok
+   level 2: types equal the specification: {'Quot': True, 'Quot.mk': True, 'Quot.lift': True, 'Quot.ind': True, 'Quot.sound': True}
+   level 2: lift (mk _) computes (both checkers accept): True; a wrong value is refused by both: True
+B/C/D. 49 cases (25 expected accepted, 24 expected rejected): the kernel and the independent checker both gave the expected verdict on 49 of them
+D. funext declared as a THEOREM (kernel-checked); independent re-check of the 34 globals: 0 rejected; it rests on axioms [] and quotient constants ['Quot', 'Quot.lift', 'Quot.mk', 'Quot.sound']
+   the theorem's statement is the classical axiom's statement: True
+   trusted-base accounting of the quotient world (34 globals): axioms [], quotient constants ['Quot', 'Quot.mk', 'Quot.lift', 'Quot.ind', 'Quot.sound']
+B2. global opaque neutrals: 4 cases, 0 wrong verdicts
+   conv_open eta: {'fun x => f x  ==  f': True, 'f  ==  fun x => f x': True, 'fun a => add a  ==  add': True, 'add  ==  fun a => add a': True, 'fun a b => add a b  ==  add': True, 'add  ==  fun a b => add a b': True}
+   conv_open non-eta (must be False): {'fun x => S (f x)  ==  f': False, 'f  ==  fun x => f (S x)': False}
+   conv_open eta for a raw Fix: {'fun x => F x  ==  F': True, 'F  ==  fun x => F x': True} ; non-eta (must be False): {'fun x => S (F x)  ==  F': False, 'F  ==  fun x => F (S x)': False}
+E. untampered environment: roles validated True; the computation case is accepted: True
+   Quot.lift without its h argument             -> quotient rule DISABLED, definitions reported 1  , case still computes: False ok
+   Quot.sound concluding mk a = mk a            -> quotient rule DISABLED, definitions reported 1  , case still computes: False ok
+   Quot.lift whose h only asks f a = f a        -> quotient rule DISABLED, definitions reported 1  , case still computes: False ok
+   Quot.ind with a motive into Type1            -> quotient rule DISABLED, definitions reported 1  , case still computes: False ok
+   a second global holding the mk role          -> quotient rule DISABLED, definitions reported 1  , case still computes: False ok
+   the mk role moved onto ind                   -> quotient rule DISABLED, definitions reported 1  , case still computes: False ok
+   Eq with an extra constructor                 -> quotient rule DISABLED, definitions reported 1  , case still computes: False ok
+   Eq whose constructor is not refl             -> quotient rule DISABLED, definitions reported 1  , case still computes: False ok
+F. branchless match on a Quot value : False -> kernel False, independent False (both must refuse); by inference alone (explicit motive): False
+   branchless match on an element of an opaque type Foo : False -> kernel False, independent False
+   cases on a Quot hypothesis         refused: True
+   induct on a Quot hypothesis        refused: True
+   cases on an opaque hypothesis      refused: True
+   induct on an opaque hypothesis     refused: True
+   is_inductive flags: {'Nat': True, 'False': True, 'Eq': True, 'And': True, 'Le': True, 'Quot': False, 'Quot.mk': False, 'Quot.lift': False, 'add': False, 'Not': False, 'refl': False}; a freshly declared empty family: True
+   cases on an inhabitant of the empty inductive family still proves `Empty -> False`: True
+G. soundness canary (Quot constants available): 4200 random proof attempts on 7 FALSE statements about quotients, 0 completed, verified proof of a false statement: None
+   canary POWER (same generator, 5 TRUE statements): 3000 attempts, 67 completed, 67 verified
+elapsed 1s
+S16 QUOT GATE: PASS

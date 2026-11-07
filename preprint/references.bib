@@ -1,0 +1,759 @@
+% references.bib -- every entry was checked against the publisher's, the proceedings' or the arXiv listing's record
+% (title, authors, venue, year). Where only some of the authors of a long list are given, the list ends in "and others".
+
+% ------------------------------------------------------------------------------------------------ type theory
+@article{coquand88cc,
+  author    = {Coquand, Thierry and Huet, G{\'e}rard},
+  title     = {The calculus of constructions},
+  journal   = {Information and Computation},
+  volume    = {76},
+  number    = {2--3},
+  pages     = {95--120},
+  year      = {1988}
+}
+
+@incollection{coquand90ind,
+  author    = {Coquand, Thierry and Paulin-Mohring, Christine},
+  title     = {Inductively defined types},
+  booktitle = {COLOG-88: International Conference on Computer Logic},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {417},
+  pages     = {50--66},
+  publisher = {Springer},
+  year      = {1990},
+  doi       = {10.1007/3-540-52335-9_47}
+}
+
+@inproceedings{paulin93,
+  author    = {Paulin-Mohring, Christine},
+  title     = {Inductive definitions in the system {Coq} -- rules and properties},
+  booktitle = {Typed Lambda Calculi and Applications (TLCA)},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {664},
+  pages     = {328--345},
+  publisher = {Springer},
+  year      = {1993}
+}
+
+@article{dybjer94,
+  author    = {Dybjer, Peter},
+  title     = {Inductive families},
+  journal   = {Formal Aspects of Computing},
+  volume    = {6},
+  number    = {4},
+  pages     = {440--465},
+  year      = {1994},
+  doi       = {10.1007/BF01211308}
+}
+
+@inproceedings{gimenez94,
+  author    = {Gim{\'e}nez, Eduardo},
+  title     = {Codifying guarded definitions with recursive schemes},
+  booktitle = {Types for Proofs and Programs (TYPES 1994)},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {996},
+  pages     = {39--59},
+  publisher = {Springer},
+  year      = {1995}
+}
+
+@incollection{barendregt92,
+  author    = {Barendregt, Henk P.},
+  title     = {Lambda calculi with types},
+  booktitle = {Handbook of Logic in Computer Science},
+  editor    = {Abramsky, Samson and Gabbay, Dov M. and Maibaum, Thomas S. E.},
+  volume    = {2},
+  pages     = {117--309},
+  publisher = {Oxford University Press},
+  year      = {1992}
+}
+
+@incollection{barendregt01,
+  author    = {Barendregt, Henk and Geuvers, Herman},
+  title     = {Proof-assistants using dependent type systems},
+  booktitle = {Handbook of Automated Reasoning},
+  editor    = {Robinson, Alan and Voronkov, Andrei},
+  volume    = {2},
+  pages     = {1149--1238},
+  publisher = {Elsevier and MIT Press},
+  year      = {2001}
+}
+
+@book{luo94,
+  author    = {Luo, Zhaohui},
+  title     = {Computation and Reasoning: A Type Theory for Computer Science},
+  publisher = {Oxford University Press},
+  year      = {1994}
+}
+
+@inproceedings{coquand86girard,
+  author    = {Coquand, Thierry},
+  title     = {An analysis of {Girard's} paradox},
+  booktitle = {Symposium on Logic in Computer Science (LICS)},
+  pages     = {227--236},
+  publisher = {IEEE Computer Society},
+  year      = {1986}
+}
+
+@inproceedings{hurkens95,
+  author    = {Hurkens, Antonius J. C.},
+  title     = {A simplification of {Girard's} paradox},
+  booktitle = {Typed Lambda Calculi and Applications (TLCA)},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {902},
+  pages     = {266--278},
+  publisher = {Springer},
+  year      = {1995}
+}
+
+@incollection{coquand90meta,
+  author    = {Coquand, Thierry},
+  title     = {Metamathematical investigations of a calculus of constructions},
+  booktitle = {Logic and Computer Science},
+  editor    = {Odifreddi, Piergiorgio},
+  pages     = {91--122},
+  publisher = {Academic Press},
+  year      = {1990}
+}
+
+@inproceedings{hofmann95quot,
+  author    = {Hofmann, Martin},
+  title     = {A simple model for quotient types},
+  booktitle = {Typed Lambda Calculi and Applications (TLCA)},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {902},
+  pages     = {216--234},
+  publisher = {Springer},
+  year      = {1995}
+}
+
+@article{gilbert19,
+  author    = {Gilbert, Ga{\"e}tan and Cockx, Jesper and Sozeau, Matthieu and Tabareau, Nicolas},
+  title     = {Definitional proof-irrelevance without {K}},
+  journal   = {Proceedings of the ACM on Programming Languages},
+  volume    = {3},
+  number    = {POPL},
+  year      = {2019},
+  doi       = {10.1145/3290316}
+}
+
+@mastersthesis{carneiro19,
+  author    = {Carneiro, Mario M.},
+  title     = {The type theory of {Lean}},
+  school    = {Carnegie Mellon University},
+  year      = {2019},
+  note      = {\url{https://github.com/digama0/lean-type-theory}}
+}
+
+@misc{carneiro24,
+  author       = {Carneiro, Mario M.},
+  title        = {{Lean4Lean}: Verifying a typechecker for {Lean}, in {Lean}},
+  howpublished = {arXiv:2403.14064},
+  year         = {2024}
+}
+
+@inproceedings{demoura15,
+  author    = {de Moura, Leonardo and Kong, Soonho and Avigad, Jeremy and van Doorn, Floris and von Raumer, Jakob},
+  title     = {The {Lean} theorem prover (system description)},
+  booktitle = {Automated Deduction -- CADE-25},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {9195},
+  pages     = {378--388},
+  publisher = {Springer},
+  year      = {2015},
+  doi       = {10.1007/978-3-319-21401-6_26}
+}
+
+@inproceedings{demoura21,
+  author    = {de Moura, Leonardo and Ullrich, Sebastian},
+  title     = {The {Lean} 4 theorem prover and programming language},
+  booktitle = {Automated Deduction -- CADE-28},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {12699},
+  pages     = {625--635},
+  publisher = {Springer},
+  year      = {2021}
+}
+
+@article{sozeau20,
+  author    = {Sozeau, Matthieu and Boulier, Simon and Forster, Yannick and Tabareau, Nicolas and Winterhalter, Th{\'e}o},
+  title     = {{Coq Coq Correct!} Verification of type checking and erasure for {Coq}, in {Coq}},
+  journal   = {Proceedings of the ACM on Programming Languages},
+  volume    = {4},
+  number    = {POPL},
+  year      = {2020},
+  doi       = {10.1145/3371076}
+}
+
+@article{abel18,
+  author    = {Abel, Andreas and {\"O}hman, Joakim and Vezzosi, Andrea},
+  title     = {Decidability of conversion for type theory in type theory},
+  journal   = {Proceedings of the ACM on Programming Languages},
+  volume    = {2},
+  number    = {POPL},
+  year      = {2018}
+}
+
+@inproceedings{berger91,
+  author    = {Berger, Ulrich and Schwichtenberg, Helmut},
+  title     = {An inverse of the evaluation functional for typed $\lambda$-calculus},
+  booktitle = {Symposium on Logic in Computer Science (LICS)},
+  pages     = {203--211},
+  publisher = {IEEE Computer Society},
+  year      = {1991}
+}
+
+@inproceedings{gregoire02,
+  author    = {Gr{\'e}goire, Benjamin and Leroy, Xavier},
+  title     = {A compiled implementation of strong reduction},
+  booktitle = {International Conference on Functional Programming (ICFP)},
+  pages     = {235--246},
+  publisher = {ACM},
+  year      = {2002},
+  doi       = {10.1145/581478.581501}
+}
+
+@article{miller91,
+  author    = {Miller, Dale},
+  title     = {A logic programming language with lambda-abstraction, function variables, and simple unification},
+  journal   = {Journal of Logic and Computation},
+  volume    = {1},
+  number    = {4},
+  pages     = {497--536},
+  year      = {1991}
+}
+
+@inproceedings{nipkow93,
+  author    = {Nipkow, Tobias},
+  title     = {Functional unification of higher-order patterns},
+  booktitle = {Symposium on Logic in Computer Science (LICS)},
+  pages     = {64--74},
+  publisher = {IEEE Computer Society},
+  year      = {1993}
+}
+
+@article{huet75,
+  author    = {Huet, G{\'e}rard P.},
+  title     = {A unification algorithm for typed $\lambda$-calculus},
+  journal   = {Theoretical Computer Science},
+  volume    = {1},
+  number    = {1},
+  pages     = {27--57},
+  year      = {1975}
+}
+
+@inproceedings{abel11,
+  author    = {Abel, Andreas and Pientka, Brigitte},
+  title     = {Higher-order dynamic pattern unification for dependent types and records},
+  booktitle = {Typed Lambda Calculi and Applications (TLCA)},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {6690},
+  pages     = {10--26},
+  publisher = {Springer},
+  year      = {2011},
+  doi       = {10.1007/978-3-642-21691-6_5}
+}
+
+@inproceedings{ziliani15,
+  author    = {Ziliani, Beta and Sozeau, Matthieu},
+  title     = {A unification algorithm for {Coq} featuring universe polymorphism and overloading},
+  booktitle = {International Conference on Functional Programming (ICFP)},
+  pages     = {179--191},
+  publisher = {ACM},
+  year      = {2015}
+}
+
+@incollection{goguen06,
+  author    = {Goguen, Healfdene and McBride, Conor and McKinna, James},
+  title     = {Eliminating dependent pattern matching},
+  booktitle = {Algebra, Meaning, and Computation: Essays Dedicated to Joseph A. Goguen on the Occasion of His 65th Birthday},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {4060},
+  pages     = {521--540},
+  publisher = {Springer},
+  year      = {2006},
+  doi       = {10.1007/11780274_27}
+}
+
+@inproceedings{cockx14,
+  author    = {Cockx, Jesper and Devriese, Dominique and Piessens, Frank},
+  title     = {Pattern matching without {K}},
+  booktitle = {International Conference on Functional Programming (ICFP)},
+  pages     = {257--268},
+  publisher = {ACM},
+  year      = {2014},
+  doi       = {10.1145/2628136.2628139}
+}
+
+@inproceedings{brady04,
+  author    = {Brady, Edwin and McBride, Conor and McKinna, James},
+  title     = {Inductive families need not store their indices},
+  booktitle = {Types for Proofs and Programs (TYPES 2003)},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {3085},
+  pages     = {115--129},
+  publisher = {Springer},
+  year      = {2004},
+  doi       = {10.1007/978-3-540-24849-1_8}
+}
+
+@article{debruijn72,
+  author    = {de Bruijn, Nicolaas G.},
+  title     = {Lambda calculus notation with nameless dummies, a tool for automatic formula manipulation, with application to the {Church--Rosser} theorem},
+  journal   = {Indagationes Mathematicae},
+  volume    = {34},
+  pages     = {381--392},
+  year      = {1972},
+  doi       = {10.1016/1385-7258(72)90034-0}
+}
+
+@inproceedings{mcbride04,
+  author    = {McBride, Conor and McKinna, James},
+  title     = {Functional pearl: {I} am not a number -- {I} am a free variable},
+  booktitle = {Haskell Workshop},
+  publisher = {ACM},
+  year      = {2004}
+}
+
+@article{chargueraud12,
+  author    = {Chargu{\'e}raud, Arthur},
+  title     = {The locally nameless representation},
+  journal   = {Journal of Automated Reasoning},
+  volume    = {49},
+  number    = {3},
+  pages     = {363--408},
+  year      = {2012},
+  doi       = {10.1007/s10817-011-9225-2}
+}
+
+@inproceedings{filliatre06,
+  author    = {Filli{\^a}tre, Jean-Christophe and Conchon, Sylvain},
+  title     = {Type-safe modular hash-consing},
+  booktitle = {ACM Workshop on ML},
+  pages     = {12--19},
+  publisher = {ACM},
+  year      = {2006}
+}
+
+@article{myers83,
+  author    = {Myers, Eugene W.},
+  title     = {An applicative random-access stack},
+  journal   = {Information Processing Letters},
+  volume    = {17},
+  number    = {5},
+  pages     = {241--248},
+  year      = {1983}
+}
+
+@inproceedings{okasaki95,
+  author    = {Okasaki, Chris},
+  title     = {Purely functional random-access lists},
+  booktitle = {Functional Programming Languages and Computer Architecture (FPCA)},
+  pages     = {86--95},
+  publisher = {ACM},
+  year      = {1995}
+}
+
+@article{mccune92,
+  author    = {McCune, William W.},
+  title     = {Experiments with discrimination-tree indexing and path indexing for term retrieval},
+  journal   = {Journal of Automated Reasoning},
+  volume    = {9},
+  number    = {2},
+  pages     = {147--167},
+  year      = {1992},
+  doi       = {10.1007/BF00245458}
+}
+
+@misc{kovacs-zoo,
+  author       = {Kov{\'a}cs, Andr{\'a}s},
+  title        = {elaboration-zoo: minimal implementations of dependent type theory elaborators},
+  howpublished = {GitHub repository, \url{https://github.com/AndrasKovacs/elaboration-zoo}}
+}
+
+@phdthesis{norell07,
+  author    = {Norell, Ulf},
+  title     = {Towards a practical programming language based on dependent type theory},
+  school    = {Chalmers University of Technology},
+  year      = {2007}
+}
+
+% ------------------------------------------------------------------------------------------------ trust, kernels, provers
+@book{gordon79,
+  author    = {Gordon, Michael J. C. and Milner, Robin and Wadsworth, Christopher P.},
+  title     = {Edinburgh {LCF}: A Mechanised Logic of Computation},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {78},
+  publisher = {Springer},
+  year      = {1979},
+  doi       = {10.1007/3-540-09724-4}
+}
+
+@inproceedings{harrison09,
+  author    = {Harrison, John},
+  title     = {{HOL Light}: An overview},
+  booktitle = {Theorem Proving in Higher Order Logics (TPHOLs)},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {5674},
+  pages     = {60--66},
+  publisher = {Springer},
+  year      = {2009},
+  doi       = {10.1007/978-3-642-03359-9_4}
+}
+
+@incollection{pollack98,
+  author    = {Pollack, Robert},
+  title     = {How to believe a machine-checked proof},
+  booktitle = {Twenty-Five Years of Constructive Type Theory},
+  editor    = {Sambin, Giovanni and Smith, Jan M.},
+  pages     = {205--220},
+  publisher = {Oxford University Press},
+  year      = {1998}
+}
+
+@inproceedings{mathlib20,
+  author    = {{The mathlib Community}},
+  title     = {The {Lean} mathematical library},
+  booktitle = {Certified Programs and Proofs (CPP)},
+  pages     = {367--381},
+  publisher = {ACM},
+  year      = {2020}
+}
+
+% ------------------------------------------------------------------------------------------------ arithmetic procedures and numerics
+@inproceedings{besson06,
+  author    = {Besson, Fr{\'e}d{\'e}ric},
+  title     = {Fast reflexive arithmetic tactics: the linear case and beyond},
+  booktitle = {Types for Proofs and Programs (TYPES 2006)},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {4502},
+  pages     = {48--62},
+  publisher = {Springer},
+  year      = {2007},
+  doi       = {10.1007/978-3-540-74464-1_4}
+}
+
+@inproceedings{gregoire05,
+  author    = {Gr{\'e}goire, Benjamin and Mahboubi, Assia},
+  title     = {Proving equalities in a commutative ring done right in {Coq}},
+  booktitle = {Theorem Proving in Higher Order Logics (TPHOLs)},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {3603},
+  pages     = {98--113},
+  publisher = {Springer},
+  year      = {2005},
+  doi       = {10.1007/11541868_7}
+}
+
+@inproceedings{harrison07,
+  author    = {Harrison, John},
+  title     = {Verifying nonlinear real formulas via sums of squares},
+  booktitle = {Theorem Proving in Higher Order Logics (TPHOLs)},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {4732},
+  pages     = {102--118},
+  publisher = {Springer},
+  year      = {2007}
+}
+
+@inproceedings{dutertre06,
+  author    = {Dutertre, Bruno and de Moura, Leonardo},
+  title     = {A fast linear-arithmetic solver for {DPLL(T)}},
+  booktitle = {Computer Aided Verification (CAV)},
+  series    = {Lecture Notes in Computer Science},
+  volume    = {4144},
+  pages     = {81--94},
+  publisher = {Springer},
+  year      = {2006},
+  doi       = {10.1007/11817963_11}
+}
+
+@article{bland77,
+  author    = {Bland, Robert G.},
+  title     = {New finite pivoting rules for the simplex method},
+  journal   = {Mathematics of Operations Research},
+  volume    = {2},
+  number    = {2},
+  pages     = {103--107},
+  year      = {1977}
+}
+
+@article{huangfu18,
+  author    = {Huangfu, Qi and Hall, J. A. Julian},
+  title     = {Parallelizing the dual revised simplex method},
+  journal   = {Mathematical Programming Computation},
+  volume    = {10},
+  number    = {1},
+  pages     = {119--142},
+  year      = {2018}
+}
+
+@article{scipy20,
+  author    = {Virtanen, Pauli and Gommers, Ralf and Oliphant, Travis E. and others},
+  title     = {{SciPy} 1.0: fundamental algorithms for scientific computing in {Python}},
+  journal   = {Nature Methods},
+  volume    = {17},
+  pages     = {261--272},
+  year      = {2020}
+}
+
+@misc{nanobind,
+  author       = {Jakob, Wenzel},
+  title        = {nanobind: tiny and efficient {C++/Python} bindings},
+  howpublished = {\url{https://github.com/wjakob/nanobind}},
+  year         = {2022}
+}
+
+% ------------------------------------------------------------------------------------------------ testing
+@article{demillo78,
+  author    = {DeMillo, Richard A. and Lipton, Richard J. and Sayward, Frederick G.},
+  title     = {Hints on test data selection: help for the practicing programmer},
+  journal   = {Computer},
+  volume    = {11},
+  number    = {4},
+  pages     = {34--41},
+  year      = {1978}
+}
+
+@article{jia11,
+  author    = {Jia, Yue and Harman, Mark},
+  title     = {An analysis and survey of the development of mutation testing},
+  journal   = {IEEE Transactions on Software Engineering},
+  volume    = {37},
+  number    = {5},
+  pages     = {649--678},
+  year      = {2011}
+}
+
+@article{mckeeman98,
+  author    = {McKeeman, William M.},
+  title     = {Differential testing for software},
+  journal   = {Digital Technical Journal},
+  volume    = {10},
+  number    = {1},
+  pages     = {100--107},
+  year      = {1998}
+}
+
+@article{miller90,
+  author    = {Miller, Barton P. and Fredriksen, Louis and So, Bryan},
+  title     = {An empirical study of the reliability of {UNIX} utilities},
+  journal   = {Communications of the ACM},
+  volume    = {33},
+  number    = {12},
+  pages     = {32--44},
+  year      = {1990}
+}
+
+% ------------------------------------------------------------------------------------------------ machine learning for theorem proving
+@misc{polu20,
+  author       = {Polu, Stanislas and Sutskever, Ilya},
+  title        = {Generative language modeling for automated theorem proving},
+  howpublished = {arXiv:2009.03393},
+  year         = {2020}
+}
+
+@inproceedings{polu23,
+  author    = {Polu, Stanislas and Han, Jesse Michael and Zheng, Kunhao and Baksys, Mantas and Babuschkin, Igor and Sutskever, Ilya},
+  title     = {Formal mathematics statement curriculum learning},
+  booktitle = {International Conference on Learning Representations (ICLR)},
+  year      = {2023}
+}
+
+@inproceedings{han22,
+  author    = {Han, Jesse Michael and Rute, Jason and Wu, Yuhuai and Ayers, Edward W. and Polu, Stanislas},
+  title     = {Proof artifact co-training for theorem proving with language models},
+  booktitle = {International Conference on Learning Representations (ICLR)},
+  year      = {2022}
+}
+
+@inproceedings{lample22,
+  author    = {Lample, Guillaume and Lachaux, Marie-Anne and Lavril, Thibaut and Martinet, Xavier and Hayat, Amaury and Ebner, Gabriel and Rodriguez, Aur{\'e}lien and Lacroix, Timoth{\'e}e},
+  title     = {{HyperTree} proof search for neural theorem proving},
+  booktitle = {Advances in Neural Information Processing Systems (NeurIPS)},
+  volume    = {35},
+  year      = {2022}
+}
+
+@inproceedings{jiang23,
+  author    = {Jiang, Albert Q. and Welleck, Sean and Zhou, Jin Peng and Li, Wenda and Liu, Jiacheng and Jamnik, Mateja and Lacroix, Timoth{\'e}e and Wu, Yuhuai and Lample, Guillaume},
+  title     = {Draft, sketch, and prove: guiding formal theorem provers with informal proofs},
+  booktitle = {International Conference on Learning Representations (ICLR)},
+  year      = {2023}
+}
+
+@inproceedings{yang23,
+  author    = {Yang, Kaiyu and Swope, Aidan M. and Gu, Alex and Chalamala, Rahul and Song, Peiyang and Yu, Shixing and Godil, Saad and Prenger, Ryan and Anandkumar, Anima},
+  title     = {{LeanDojo}: theorem proving with retrieval-augmented language models},
+  booktitle = {Advances in Neural Information Processing Systems (NeurIPS), Datasets and Benchmarks Track},
+  volume    = {36},
+  year      = {2023}
+}
+
+@misc{xin24,
+  author       = {Xin, Huajian and Guo, Daya and Shao, Zhihong and others},
+  title        = {{DeepSeek-Prover}: advancing theorem proving in {LLMs} through large-scale synthetic data},
+  howpublished = {arXiv:2405.14333},
+  year         = {2024}
+}
+
+@misc{xin25,
+  author       = {Xin, Huajian and Ren, Z. Z. and Song, Junxiao and others},
+  title        = {{DeepSeek-Prover-V1.5}: harnessing proof assistant feedback for reinforcement learning and {Monte-Carlo} tree search},
+  howpublished = {arXiv:2408.08152},
+  year         = {2024}
+}
+
+@misc{ren25,
+  author       = {Ren, Z. Z. and Shao, Zhihong and Song, Junxiao and others},
+  title        = {{DeepSeek-Prover-V2}: advancing formal mathematical reasoning via reinforcement learning for subgoal decomposition},
+  howpublished = {arXiv:2504.21801},
+  year         = {2025}
+}
+
+@misc{lin25,
+  author       = {Lin, Yong and Tang, Shange and Lyu, Bohan and others},
+  title        = {{Goedel-Prover}: a frontier model for open-source automated theorem proving},
+  howpublished = {arXiv:2502.07640},
+  year         = {2025}
+}
+
+@inproceedings{zheng22,
+  author    = {Zheng, Kunhao and Han, Jesse Michael and Polu, Stanislas},
+  title     = {{MiniF2F}: a cross-system benchmark for formal {Olympiad}-level mathematics},
+  booktitle = {International Conference on Learning Representations (ICLR)},
+  year      = {2022}
+}
+
+@article{trinh24,
+  author    = {Trinh, Trieu H. and Wu, Yuhuai and Le, Quoc V. and He, He and Luong, Thang},
+  title     = {Solving olympiad geometry without human demonstrations},
+  journal   = {Nature},
+  volume    = {625},
+  pages     = {476--482},
+  year      = {2024},
+  doi       = {10.1038/s41586-023-06747-5}
+}
+
+@article{hubert25,
+  author    = {Hubert, Thomas and Mehta, Rishi and Sartran, Laurent and others},
+  title     = {Olympiad-level formal mathematical reasoning with reinforcement learning},
+  journal   = {Nature},
+  year      = {2025},
+  doi       = {10.1038/s41586-025-09833-y}
+}
+
+@inproceedings{huang19,
+  author    = {Huang, Daniel and Dhariwal, Prafulla and Song, Dawn and Sutskever, Ilya},
+  title     = {{GamePad}: a learning environment for theorem proving},
+  booktitle = {International Conference on Learning Representations (ICLR)},
+  year      = {2019}
+}
+
+@inproceedings{bansal19,
+  author    = {Bansal, Kshitij and Loos, Sarah M. and Rabe, Markus N. and Szegedy, Christian and Wilcox, Stewart},
+  title     = {{HOList}: an environment for machine learning of higher-order logic theorem proving},
+  booktitle = {International Conference on Machine Learning (ICML)},
+  series    = {Proceedings of Machine Learning Research},
+  volume    = {97},
+  pages     = {454--463},
+  year      = {2019}
+}
+
+@inproceedings{yang19,
+  author    = {Yang, Kaiyu and Deng, Jia},
+  title     = {Learning to prove theorems via interacting with proof assistants},
+  booktitle = {International Conference on Machine Learning (ICML)},
+  series    = {Proceedings of Machine Learning Research},
+  volume    = {97},
+  pages     = {6984--6994},
+  year      = {2019}
+}
+
+@inproceedings{kaliszyk18,
+  author    = {Kaliszyk, Cezary and Urban, Josef and Michalewski, Henryk and Ol{\v{s}}{\'a}k, Miroslav},
+  title     = {Reinforcement learning of theorem proving},
+  booktitle = {Advances in Neural Information Processing Systems (NeurIPS)},
+  volume    = {31},
+  year      = {2018}
+}
+
+@inproceedings{wu21,
+  author    = {Wu, Yuhuai and Jiang, Albert Q. and Ba, Jimmy and Grosse, Roger},
+  title     = {{INT}: an inequality benchmark for evaluating generalization in theorem proving},
+  booktitle = {International Conference on Learning Representations (ICLR)},
+  year      = {2021}
+}
+
+@inproceedings{andrychowicz17,
+  author    = {Andrychowicz, Marcin and Wolski, Filip and Ray, Alex and Schneider, Jonas and Fong, Rachel and Welinder, Peter and McGrew, Bob and Tobin, Josh and Abbeel, Pieter and Zaremba, Wojciech},
+  title     = {Hindsight experience replay},
+  booktitle = {Advances in Neural Information Processing Systems (NeurIPS)},
+  volume    = {30},
+  year      = {2017}
+}
+
+@misc{brockman16,
+  author       = {Brockman, Greg and Cheung, Vicki and Pettersson, Ludwig and Schneider, Jonas and Schulman, John and Tang, Jie and Zaremba, Wojciech},
+  title        = {{OpenAI} {Gym}},
+  howpublished = {arXiv:1606.01540},
+  year         = {2016}
+}
+
+@misc{towers24,
+  author       = {Towers, Mark and Kwiatkowski, Ariel and Terry, Jordan and others},
+  title        = {Gymnasium: a standard interface for reinforcement learning environments},
+  howpublished = {arXiv:2407.17032},
+  year         = {2024}
+}
+
+@inproceedings{wu22,
+  author    = {Wu, Yuhuai and Jiang, Albert Q. and Li, Wenda and Rabe, Markus N. and Staats, Charles and Jamnik, Mateja and Szegedy, Christian},
+  title     = {Autoformalization with large language models},
+  booktitle = {Advances in Neural Information Processing Systems (NeurIPS)},
+  volume    = {35},
+  year      = {2022}
+}
+
+@misc{aniva24,
+  author       = {Aniva, Leni and Sun, Chuyue and Miranda, Brando and Barrett, Clark and Koyejo, Sanmi},
+  title        = {Pantograph: a machine-to-machine interaction interface for advanced theorem proving, high level reasoning, and data extraction in {Lean} 4},
+  howpublished = {arXiv:2410.16429},
+  year         = {2024}
+}
+
+@misc{leangym,
+  author       = {{OpenAI}},
+  title        = {lean-gym: a {Lean} 3 interface to interact with proof states},
+  howpublished = {GitHub repository, \url{https://github.com/openai/lean-gym}},
+  year         = {2022}
+}
+
+@article{poesia23,
+  author    = {Poesia, Gabriel and Goodman, Noah D.},
+  title     = {{Peano}: learning formal mathematical reasoning},
+  journal   = {Philosophical Transactions of the Royal Society A},
+  year      = {2023},
+  note      = {arXiv:2211.15864}
+}
+
+@misc{poesia24,
+  author       = {Poesia, Gabriel and Broman, David and Haber, Nick and Goodman, Noah D.},
+  title        = {Learning formal mathematics from intrinsic motivation},
+  howpublished = {arXiv:2407.00695},
+  year         = {2024}
+}
+
+@misc{dossantos25,
+  author       = {Dos Santos, Marco and others},
+  title        = {Kimina {Lean} {Server}: a high-performance {Lean} server for large-scale verification},
+  howpublished = {arXiv:2504.21230},
+  year         = {2025}
+}
+
+@misc{rocq,
+  author       = {{The Rocq Development Team}},
+  title        = {The {Rocq} prover (formerly {Coq})},
+  howpublished = {\url{https://rocq-prover.org}},
+  year         = {2025}
+}

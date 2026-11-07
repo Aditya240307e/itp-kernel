@@ -1,0 +1,3 @@
+{'mask': (1024,), 'rows': (1024, 4), 'tokens': (512,)}
+first question: kind | 14 legal options
+decisions: 50 | actions taken: 2 | refused: 2 | solved: False

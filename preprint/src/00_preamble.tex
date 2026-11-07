@@ -1,0 +1,144 @@
+% ITP: technical report.  Source of preprint/itp_preprint.tex (flattened by preprint/build.py).
+% The numbers between BEGIN/END GENERATED come from preprint/measurements/*.json via preprint/make_numbers.py.
+\documentclass[10pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{mathpazo}
+\usepackage{courier}
+\linespread{1.04}
+\usepackage[protrusion=true,expansion=true]{microtype}
+\usepackage[a4paper,left=1.12in,right=1.12in,top=1.1in,bottom=1.15in]{geometry}
+\usepackage{amsmath,amssymb,amsthm,mathtools,stmaryrd}
+\usepackage{mathpartir}
+\usepackage{booktabs,array,multirow,tabularx,makecell,longtable}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,fit,calc,shapes.geometric,backgrounds}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.17}
+\usepackage{listings}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage[font=small,labelfont=bf,labelsep=period]{caption}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage[hidelinks,pdfusetitle,bookmarksnumbered]{hyperref}
+\usepackage[capitalise,noabbrev]{cleveref}
+
+\hypersetup{pdftitle={ITP: A Dependently Typed Proof Assistant with an Integrated Environment for Learning to Prove},
+  pdfsubject={Technical report},
+  pdfkeywords={interactive theorem proving; dependent type theory; proof checking; pattern unification; reinforcement learning environment}}
+
+% ---------------------------------------------------------------------------------------------------- who
+\newcommand{\authorname}{Aditya Ekbote}
+\newcommand{\authoraffil}{MIT World Peace University}
+\newcommand{\reporturl}{[repository URL]}
+\newcommand{\reportdoi}{[DOI]}
+\newcommand{\artifactlicense}{[licence]}
+% the report carries no date: none on the title page, none in the metadata of the PDF (and no time-based file id, so the same sources give the same bytes)
+\pdfinfoomitdate=1 \pdftrailerid{}
+
+% ---------------------------------------------------------------------------------------------------- colours (a colour-blind-safe pair, validated for contrast and separation)
+\definecolor{cblue}{HTML}{2A78D6}
+\definecolor{corange}{HTML}{EB6834}
+\definecolor{ink}{HTML}{222222}
+\definecolor{muted}{HTML}{6B6B66}
+\definecolor{rulegrey}{HTML}{BDBDB8}
+\definecolor{trusted}{HTML}{FBE5DC}
+\definecolor{untrusted}{HTML}{E3EEF9}
+\definecolor{second}{HTML}{ECECE6}
+
+% ---------------------------------------------------------------------------------------------------- theorem-like environments
+\theoremstyle{plain}
+\newtheorem{proposition}{Proposition}
+\newtheorem{lemma}[proposition]{Lemma}
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}
+\newtheorem{invariant}{Invariant}
+\theoremstyle{remark}
+\newtheorem{remark}{Remark}
+\newtheorem{example}{Example}
+
+% ---------------------------------------------------------------------------------------------------- notation of the calculus
+\newcommand{\Type}{\mathsf{Type}}
+\newcommand{\Prop}{\mathsf{Prop}}
+\newcommand{\Pit}[3]{\Pi(#1\!:\!#2).\,#3}
+\newcommand{\lam}[3]{\lambda(#1\!:\!#2).\,#3}
+\newcommand{\letin}[4]{\mathsf{let}\;#1\!:\!#2\mathrel{:=}#3\;\mathsf{in}\;#4}
+\newcommand{\fixx}[4]{\mathsf{fix}_{#1}\;#2\!:\!#3.\;#4}
+\newcommand{\matchx}[3]{\mathsf{match}\;#1\;\mathsf{return}\;#2\;\mathsf{with}\;#3}
+\newcommand{\meta}[1]{{?}#1}
+\newcommand{\imax}{\mathrm{imax}}
+\newcommand{\conv}{\equiv}
+\newcommand{\red}{\leadsto}
+\newcommand{\subst}[3]{#1[#2\,{:=}\,#3]}
+\newcommand{\vs}[1]{\overline{#1}}            % a vector of terms
+\newcommand{\sem}[2]{\llbracket #1 \rrbracket_{#2}}
+\newcommand{\ctor}[1]{\mathsf{#1}}
+\newcommand{\Fam}[1]{\mathsf{#1}}
+\newcommand{\glob}[1]{\mathsf{#1}}
+\newcommand{\Quot}{\glob{Quot}}
+\newcommand{\FV}{\mathrm{FV}}
+\newcommand{\dom}{\mathrm{dom}}
+\newcommand{\pf}[1]{\textsc{#1}}
+\newcommand{\tvdash}{\vdash}
+\newcommand{\Nat}{\mathbb{N}}
+\newcommand{\Z}{\mathbb{Z}}
+\newcommand{\Q}{\mathbb{Q}}
+\newcommand{\code}[1]{\texttt{#1}}
+\newcommand{\ITP}{\textsc{ITP}}
+
+% ---- additions used by the theory section
+\newcommand{\Sg}{\Sigma}
+\newcommand{\nf}{\mathrm{nf}}
+\newcommand{\ev}{\mathsf{eval}}
+\newcommand{\qu}{\mathsf{quote}}
+\newcommand{\whnf}{\mathsf{whnf}}
+\newcommand{\Eqf}{\Fam{Eq}}
+\newcommand{\sy}[1]{\mathsf{#1}}                 % a keyword of the metalanguage
+\newcommand{\ssmaller}{\mathsf{Sm}}
+\newcommand{\tsp}{\;}
+\newcommand{\Unify}{\textsc{Unify}}
+\newcommand{\Solve}{\textsc{Solve}}
+\newcommand{\Drain}{\textsc{Drain}}
+\newcommand{\isPattern}{\textsc{IsPattern}}
+
+% ---------------------------------------------------------------------------------------------------- listings
+\lstdefinestyle{itp}{
+  language=Python, basicstyle=\ttfamily\footnotesize, keywordstyle=\bfseries, commentstyle=\itshape\color{muted}, stringstyle=\color{ink},
+  columns=fullflexible, keepspaces=true, showstringspaces=false, frame=leftline, framerule=0.6pt, rulecolor=\color{rulegrey}, xleftmargin=1.1em, framexleftmargin=0.5em,
+  aboveskip=0.7em, belowskip=0.5em, breaklines=true, breakatwhitespace=false, postbreak=\mbox{\textcolor{muted}{$\hookrightarrow$}\space}, tabsize=2,
+  morekeywords={lambda,as,with,assert}, upquote=false}
+\lstdefinestyle{out}{basicstyle=\ttfamily\footnotesize\color{ink}, columns=fullflexible, keepspaces=true, frame=none, xleftmargin=1.1em, aboveskip=0.2em, belowskip=0.6em, breaklines=true, showstringspaces=false}
+\lstset{style=itp}
+\newcommand{\lstfile}[3][]{\lstinputlisting[style=itp,#1,caption={#2},label={#3}]}
+
+% ---------------------------------------------------------------------------------------------------- algorithms
+\algrenewcommand\algorithmicrequire{\textbf{Input:}}
+\algrenewcommand\algorithmicensure{\textbf{Output:}}
+\floatname{algorithm}{Algorithm}
+\algnewcommand{\LineComment}[1]{\State \(\triangleright\) \textit{#1}}
+
+% ---------------------------------------------------------------------------------------------------- tables, boxes
+\renewcommand{\arraystretch}{1.12}
+\newcommand{\tabfont}{\small}
+\emergencystretch=1.5em
+\setlist{nosep,leftmargin=*,itemsep=0.25em}
+\setlength{\parindent}{1.2em}
+\setlength{\parskip}{0pt}
+\raggedbottom
+
+\crefname{figure}{Figure}{Figures}
+\crefname{table}{Table}{Tables}
+\crefname{section}{Section}{Sections}
+\crefname{lstlisting}{Listing}{Listings}
+\crefname{algorithm}{Algorithm}{Algorithms}
+\crefname{definition}{Definition}{Definitions}
+\crefname{proposition}{Proposition}{Propositions}
+\crefname{invariant}{Invariant}{Invariants}
+
+% BEGIN GENERATED
+% END GENERATED
+
+\begin{document}

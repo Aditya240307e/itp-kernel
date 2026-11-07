@@ -1,0 +1,10 @@
+seed 3, N=1500 terms (Zero is ctor 0: True) | 0.6s
+coverage (node kinds in generated closed terms): {'app': 6510, 'const': 16630, 'lam': 7487, 'match': 1615, 'pi': 330, 'stuck_match_in_nf': 387, 'var': 4042}
+  norm       checked   1500 | disagreements 0
+  norm_open  checked   1500 | disagreements 0
+  conv       checked   3000 | disagreements 0
+  typing     checked   1500 | disagreements 0
+  typing_open checked   1500 | disagreements 0
+  reject     checked    500 | disagreements 0
+proof corpus (real Fix/Match terms from reference tactics): 39 normalisations, 38 Fix nodes in the proofs, 26 with a stuck Fix/Match | disagreements 0
+timing  normalise: ref 5 ms vs hybrid 3 ms (ratio 0.69x) | typing: ref check 18 ms vs hybrid infer 9 ms (ratio 0.53x)

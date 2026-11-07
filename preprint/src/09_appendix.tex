@@ -1,0 +1,110 @@
+\appendix
+
+\section{Two deviations of the kernel}\label{app:deviations}
+
+The two deviations below were found while the rules of \cref{sec:theory} were written down from the code, by reading it and by probing it; no gate found either.
+The second checker shares part of the first omission (it does not compare the binder types of a motive either, though it does require the motive to end in a sort) and does not examine the admission of a family at all (\cref{sec:indep}).
+The kernel at commit \mCommit{} is unchanged.
+Each deviation has a listing in the supplementary material that reproduces it (\code{preprint/listings/dev\_motive.py} and \code{dev\_positivity.py}); \Cref{lst:dev-motive,lst:dev-pos} show them with the output of the run for this report.
+
+\subsection{D1: the motive of a match is checked for its shape}\label{app:d1}
+
+The usual rule for $\matchx{s}{M}{\vs b}$ with $s : I\,\vs a$ requires $M : \Pi(\vs y{:}\vs Y)(z{:}I\,\vs y).\,S$, where $\vs Y$ are the index types of $I$ at the parameters of $s$ and $S$ is a sort.
+The kernel's check of an explicit motive (\code{verify\_motive\_shape}) infers the type of $M$, evaluates it, and checks that it is a chain of $|\vs a|+1$ products.
+It does not compare the binder types with $\vs Y$ and $I\,\vs y$, and it does not require that what follows the last product is a sort (the message of its error speaks of a chain ``ending in a sort'', but the code reads the level of the sort only when the value is one, and otherwise goes on).
+
+\lstfile[firstline=3]{Deviation D1: three motives, two of which the kernel does not refuse.}{lst:dev-motive}{listings/dev_motive.py}
+\lstinputlisting[style=out]{listings/dev_motive.out}
+
+In case (a) the motive abstracts over a second data type and is applied, in the types of the branches, to terms of \code{Nat}; the kernel infers a type, the checked entry point accepts the declaration, and the independent checker accepts it too: it checks the number of products and that the codomain is a sort, and does not compare the binder types either.
+In case (b) the codomain of the motive is a term and not a sort; the kernel infers a type for the match, and the checked entry point refuses the declaration because that type is not a type.
+Nothing of (b) remains for the independent checker to re-check, and its source states the condition on the sort that the kernel's shape check lacks.
+Case (c), a motive with no binder, is refused.
+
+\paragraph{Exposure.}
+The function form of \code{match} of the authoring layer builds the motive's binder from the type of the scrutinee, and cannot produce (a); an indexed family needs the explicit form, and so does any code that builds terms directly.
+The actions of the environment cannot say a \code{match} (\cref{sec:env}).
+We have not scanned the matches of the shipped terms for ill-formed motives, and we do not know whether (a) can be exploited to derive a contradiction.
+A motive that analyses its argument would be applied to terms of the wrong type, and the untyped evaluator would reduce such an application by the shape of the term.
+\paragraph{Repair.}
+Compare each binder type with the expected one by conversion, and require the codomain to be a sort, in \code{verify\_motive\_shape}; add the cases of the listing to the gates.
+
+\subsection{D2: strict positivity does not look in the indices}\label{app:d2}
+
+Condition A5 of \cref{sec:ind} examines the types of the fields: a field type is accepted if the family does not occur in it, or if it is a product whose domain does not contain the family and whose codomain is accepted, or if its head is the family.
+Nothing is examined inside the arguments of that head, and nothing inside the result indices of the constructor.
+The usual conditions for indexed families exclude the family from both \citep{dybjer94,paulin93}.
+
+\lstfile[firstline=3]{Deviation D2: a negative occurrence in the index of a recursive field, and in a result index.}{lst:dev-pos}{listings/dev_positivity.py}
+\lstinputlisting[style=out]{listings/dev_positivity.out}
+
+The family \code{Q} of \cref{lst:dev-pos} has a field of type $\Fam{Q}\,(\Fam{Q}\,A\to\sy{False})$, in which $\Fam{Q}$ occurs to the left of an arrow inside an index; \code{R} has $\Fam{R}\,A\to\sy{False}$ as a result index.
+Both are accepted; the control, with the family to the left of an arrow in a field, is refused.
+The independent checker re-checks the declarations of the constants and finds nothing, because it does not re-check the admission of inductive families (\cref{sec:indep}).
+
+\paragraph{Exposure.}
+We read back every inductive family of the world of the bank through the kernel's term view (\code{measure\_deviations.py}): \dtwoFamilies{} families with \dtwoCtors{} constructors, of which \dtwoRecFams{} have a recursive field.
+None has the family in an index of a recursive field, in a result index, or anywhere else that condition A5 rejects, so the shipped libraries and the statements of the bank are not affected.
+The scan flags the two families of \cref{lst:dev-pos} and none of the families of the natural-number library, which it checks before it reads the bank.
+The environment cannot declare a family.
+We do not know whether either family can be exploited to derive a contradiction, and we have not tried to prove that neither can.
+\paragraph{Repair.}
+Reject an occurrence of the family in the arguments of a recursive occurrence and in the result indices, in the admission of the family; make the independent checker re-check admission from the stated condition.
+
+\section{The reference proofs checked}\label{app:check}
+
+\Cref{tab:check} lists the \chkSampled{} reference proofs of the bank that \cref{fig:trust} plots, sampled evenly by length: the number of actions, the size of the proof term counted as a tree, the time of the kernel's check against the statement, the time of the independent checker in a child process with a cap of \chkCapS\,s and \chkCapMB\,MB, the ratio of the two times, and the memory the checker allocated beyond the world it inherited.
+
+\begin{table}[h]
+\centering\tabfont
+\begin{tabular}{@{}lrrrrrr@{}}
+\toprule
+problem & actions & term nodes & kernel (ms) & indep. (ms) & ratio & MB\\
+\midrule
+\checkRows
+\bottomrule
+\end{tabular}
+\caption{The sample of reference proofs behind \cref{fig:trust}.
+  The times are those of one run on the machine of \cref{sec:measure}.}
+\label{tab:check}
+\end{table}
+
+\section{Probes by kind of action}\label{app:probes}
+
+\Cref{tab:probes} gives the latency of probes by the kind of action, for the eleven most frequent of the \probeKindsTotal{} kinds that the blind search and the random policy of \cref{sec:measure} tried, with the number of probes that ended \code{ok}, \code{refused} and \code{fuel}.
+A blind search and a random policy try actions in proportions that a trained policy would not, so the table shows what each kind of probe can cost and not how often it would be asked.
+
+\begin{table}[h]
+\centering\tabfont
+\begin{tabular}{@{}lrrrrr@{}}
+\toprule
+kind & probes & median (ms) & 90th (ms) & 99th (ms) & ok / refused / fuel\\
+\midrule
+\probeKindRows
+\bottomrule
+\end{tabular}
+\caption{Probes by kind of action, from the runs of \cref{tab:latency}.}
+\label{tab:probes}
+\end{table}
+
+\section{The gates}\label{app:gates}
+
+\Cref{tab:gateindex} lists the \gatesAll{} gates with the time each took in the run for this report, on the machine of \cref{sec:measure}, two gates at a time; the machine also did other work of the report while the gates ran, so the times are indicative.
+The description is the first clause of the one in \code{tests/README.md}.
+\fullGatesSentence
+
+{\tabfont\setlength{\tabcolsep}{4pt}
+\begin{longtable}{@{}>{\raggedright\arraybackslash}p{1.15cm}>{\raggedright\arraybackslash}p{3.7cm}r>{\raggedright\arraybackslash}p{7.1cm}@{}}
+\caption{The gates, the time of each in the run for this report, and what it protects.}\label{tab:gateindex}\\
+\toprule
+gate & script & s & protects\\
+\midrule
+\endfirsthead
+\toprule
+gate & script & s & protects\\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+\gateIndexRows
+\end{longtable}}

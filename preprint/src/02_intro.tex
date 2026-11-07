@@ -1,0 +1,54 @@
+\section{Introduction}\label{sec:intro}
+
+Machine learning for theorem proving asks a proof assistant to play two roles at once.
+It must be a \emph{judge}: when a learned policy, a search procedure or a language model proposes a proof, the verdict has to be one that the proposer cannot influence, because the verdict is the training signal.
+And it must be an \emph{environment}: a program that a learning loop calls a very large number of times, that presents a proof state as data, that can try an action and take it back, and that answers the same question the same way on every run.
+The two roles pull in different directions.
+A judge is valued for being small, stable, and independent of the cleverness around it; an environment is valued for speed, for introspection, and for the convenience of the interface it offers.
+
+A common arrangement is to attach the learning system to a general-purpose proof assistant from the outside.
+The assistant runs as a separate process; a thin interface (a read--eval--print loop, a server, a set of bindings) exposes proof states and tactics; the learner sends text and receives text \citep{yang19,huang19,bansal19,leangym,yang23,aniva24,dossantos25}.
+This arrangement is sound, and the field's results have been obtained with it.
+It also means that the environment inherits the properties of the assistant it wraps (its start-up cost, the cost of serialising a state, the granularity of its interface), and that what the learner can do in one step is whatever the assistant's surface syntax lets it say.
+A second line of work builds a small formal system for the purpose, so that the system and its environment are designed together \citep{wu21,poesia23,poesia24}; the price is that the system is a fragment, not a general-purpose assistant.
+
+\ITP\ is a proof assistant and an environment designed together and run as one program.
+Its type theory is of the Calculus-of-Inductive-Constructions family \citep{coquand88cc,coquand90ind,paulin93}: enough to state and prove the mathematics of the competition-level and undergraduate problems we have formalised, and a good deal less than the full calculi of Lean or Rocq \citep{carneiro19,demoura21,rocq}.
+Its architecture follows from three decisions.
+
+\begin{enumerate}[label=\textbf{(\roman*)},leftmargin=3em]
+\item \textbf{One door.}
+  A declaration enters the global environment only through a checked entry point of the kernel, which type-checks the proof term against the statement in the empty context.
+  The tactic engine, the decision procedures and the whole of the environment are on the other side of that door: they are untrusted programs that construct terms, and a bug in any of them can lose a proof but, so long as the kernel is correct, cannot make a false statement provable (\cref{sec:trust}).
+\item \textbf{Certificates, not oracles.}
+  The automation produces evidence that the kernel can check cheaply (a chain of ring-lemma applications; a nonnegative combination of hypotheses whose sum is a negative constant) rather than a verdict to be believed.
+  A second checker, written from the specification and built differently, re-checks the results (\cref{sec:certificates,sec:indep}).
+\item \textbf{State is a value, work is a budget.}
+  Terms are hash-consed; a kernel state can be checkpointed and rewound in time proportional to what was allocated since; every function that can run long spends from a deterministic work budget and fails closed.
+  An action can therefore be \emph{probed} (tried, observed, undone) before it is taken, and the same probe gives the same answer on every machine (\cref{sec:impl}).
+\end{enumerate}
+
+The environment (\cref{sec:env}) is built on these.
+A goal is a record of hash-consed terms; the legal actions of a goal are listed as a finite menu (or said, token by token, with a typed term builder when they carry terms); each action is probed before it is taken; an attempt that stops half way still yields theorems (hindsight); and the whole is exposed through the Gymnasium interface \citep{towers24,brockman16} with observations as arrays of token identifiers and no text anywhere.
+
+\paragraph{Contributions.}
+This report makes the following contributions; none of them is a claim of priority.
+\begin{itemize}
+\item A \emph{specification of the calculus as implemented}, with the typing rules, the reduction and conversion relations, the admission conditions for inductive families, recursion and quotients, definitional proof irrelevance, and the algorithms that decide them, among them the pattern unification of metavariables after Miller \citep{miller91} (\cref{sec:theory}).
+\item A \emph{trust architecture} in which all automation is untrusted and every result passes one checked entry point, with a second checker for the results and a test apparatus aimed at the kernel (\cref{sec:trust,sec:impl}).
+\item An \emph{in-process proof environment}: goals as data, finite menus of legal actions, probes on a restorable state, hindsight, a portable action format, and a Gymnasium interface, together with a bank of \bankProblems{} problems of which \proofsProved{} have kernel-checked reference proofs, and libraries of \libGlobals{} declarations (\cref{sec:env}).
+\item \emph{Measurements} of what checking costs and how fast the environment is, on a two-core machine, and an account of what the system does not do (\cref{sec:why,sec:limits}).
+\end{itemize}
+
+\paragraph{What this report is not.}
+It reports no results of learning: no model has been trained on the environment, and nothing here says how well a learner would do.
+It does not prove the system sound; the evidence is a test apparatus, described in \cref{sec:testing}, and the two checkers share one specification.
+It does not compare the speed of \ITP\ with that of other systems: such numbers would be of different tasks on different hardware, and we give none.
+Where it contrasts design choices with those of other systems (\cref{sec:why}), it does so qualitatively.
+
+\paragraph{Outline.}
+\Cref{sec:theory} specifies the calculus and the algorithms that decide it.
+\Cref{sec:impl} describes the implementation: term representation, evaluation, memoisation, resource control, the Python layers, the libraries, the independent checker and the testing.
+\Cref{sec:usage} shows how the system is used, with listings that were run to produce the output printed.
+\Cref{sec:why} explains what the design buys for learning and how it differs from other systems, with measurements.
+\Cref{sec:limits} lists the limitations, and \cref{sec:conclusion} concludes.

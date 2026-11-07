@@ -1,0 +1,6 @@
+oracle strict fragment    unattributed failures: 0 (completed 41, verified 41)
+oracle full distribution  unattributed failures: 0 (completed 26, verified 26)
+oracle parameters ON, full distribution, NO exemptions unattributed failures: 0 (completed 202, verified 202)
+oracle parameters ON + index generalisation by equations unattributed failures: 0 (completed 208, verified 208)
+oracle legacy + index generalisation by equations unattributed failures: 0 (completed 27, verified 27)
+ORACLE GATE: PASS

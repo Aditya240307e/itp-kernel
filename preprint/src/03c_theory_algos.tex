@@ -1,0 +1,182 @@
+\subsection{Metavariables and higher-order pattern unification}\label{sec:miller}
+
+Tactics and the elaborator work with partially built terms.
+A goal is a metavariable $\meta m$ with a type and the context in which it was created; \code{apply} introduces a metavariable for each argument of a lemma that the goal does not determine; \code{exact} and \code{rewrite} leave constraints for terms that are not yet known.
+Resolving such constraints needs higher-order unification, which is undecidable in general \citep{huet75}.
+The kernel restricts it, as every production elaborator does, to the fragment of Miller's \emph{patterns} \citep{miller91,nipkow93}, which has unique most general solutions, and defers everything else.
+
+\paragraph{State.}
+Metavariables live in a metavariable context: each has a type and, once assigned, a solution, a closed term.
+Assignment is recorded on a trail, so a context can be checkpointed and rewound in time proportional to what was assigned since.
+The elaboration state also holds a list of \emph{pending} constraints, each a pair of terms with the context in which it was deferred.
+A term in which a solved metavariable occurs is read through the solution: a solved metavariable at the head of a neutral term is replaced by its solution before the term is compared.
+
+\begin{definition}[Pattern]\label{def:pattern}
+A neutral term is a \emph{Miller pattern} if its head is a metavariable $\meta m$ and its spine consists of applications to \emph{distinct bound variables of the context}, each a bare variable and not itself applied.
+In particular a pattern has no case-analysis frame in its spine.
+\end{definition}
+
+For a pattern $\meta m\,x_1\cdots x_k$ and a term $t$ with $\meta m\notin t$ and $\FV(t)\subseteq\{x_1,\dots,x_k\}$, the term $\lambda x_1\cdots x_k.\,t$ is the most general solution of $\meta m\,x_1\cdots x_k \conv t$ \citep{miller91}.
+Because $\meta m$ is replaced by a closed abstraction, the solution is well scoped wherever $\meta m$ occurs.
+In a dependent calculus the telescope of binders needs types, and \textsc{Solve} (\cref{alg:solve}) takes them from the types of the spine variables, with two additional checks for the dependency that the simply typed setting does not have.
+
+\begin{algorithm}[t]
+\caption{\Solve$(m,\vs x,t)$: assign the pattern $\meta m\,\vs x \conv t$ in a context $\Gamma$ of size $n$}
+\label{alg:solve}
+\begin{algorithmic}[1]
+\Require a metavariable $m$ unassigned; distinct context variables $\vs x = x_{l_1},\dots,x_{l_k}$ with types $D_1,\dots,D_k$ taken from $\Gamma$; a term $t$ (read back from a value)
+\Ensure the assignment of $m$, or a failure
+\If{$m$ occurs in $t$} \Return failure \Comment{occurs check}
+\EndIf
+\State $S \gets \FV(t)\ \cup\ \bigcup_{i}\FV(D_i)$
+\If{$S\not\subseteq\{x_{l_1},\dots,x_{l_k}\}$} \Return failure \Comment{scope: the solution may depend only on the spine, and so may the types of the spine}
+\EndIf
+\State let $y_1,\dots,y_k$ be fresh context variables beyond $\Gamma$, $\varrho = [x_{l_i}\mapsto y_i]$
+\For{$i = 1,\dots,k$}
+   \State $D_i' \gets \varrho(D_i)$
+   \If{$D_i'$ mentions $y_i,\dots,y_k$} \Return failure \Comment{the spine must be in dependency order}
+   \EndIf
+\EndFor
+\State assign $m \gets \lambda(y_1{:}D_1')\cdots(y_k{:}D_k').\ \varrho(t)$ \Comment{closed over the fresh telescope}
+\State \Return success
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}[t]
+\caption{\Unify$(a,b)$ in a context $\Gamma$ of size $n$, on values; the pending list and the metavariable context are state}
+\label{alg:unify}
+\begin{algorithmic}[1]
+\State $a \gets \sy{resolve}(a)$, $b \gets \sy{resolve}(b)$ \Comment{replace a solved metavariable at the head by its solution}
+\If{$a$ and $b$ are meta-headed and $\qu_n(a) = \qu_n(b)$} \Return success \Comment{$\meta m\,\vs x \conv \meta m\,\vs x$}
+\EndIf
+\If{$a$ is a pattern $\meta m\,\vs x$} \Return \Solve$(m,\vs x,\qu_n(b))$ \Comment{the left side is tried first}
+\EndIf
+\If{$b$ is a pattern $\meta m\,\vs x$} \Return \Solve$(m,\vs x,\qu_n(a))$
+\EndIf
+\If{$a$ or $b$ is meta-headed} \State push $(\qu_n(a),\qu_n(b),\Gamma)$ onto \textit{pending}; \Return success \Comment{deferred, not decided}
+\EndIf
+\State compare $a$ and $b$ by shape:
+\Statex \hspace{1.5em}\textbullet\ two sorts: equal levels;
+\Statex \hspace{1.5em}\textbullet\ two closures, or two products: \Unify\ the domains, then the bodies applied to a fresh neutral term, in $\Gamma$ extended by the domain;
+\Statex \hspace{1.5em}\textbullet\ a closure against a neutral term or a fixpoint: apply the other side to a fresh neutral term ($\eta$) and \Unify\ the bodies;
+\Statex \hspace{1.5em}\textbullet\ two constructor values: same constructor, \Unify\ the fields pairwise;
+\Statex \hspace{1.5em}\textbullet\ two neutral terms: same head and spine length, \Unify\ application frames pairwise; stuck case frames must have the same motive and branches convertible in their environments; on an uncertain failure compare read-backs;
+\Statex \hspace{1.5em}\textbullet\ anything else: failure.
+\If{the comparison failed} \State roll back the metavariables and pending constraints it touched; try \textsc{PI} (\cref{sec:prop}) \EndIf
+\end{algorithmic}
+\end{algorithm}
+
+\paragraph{Unification.}
+\Cref{alg:unify} is the unifier.
+It extends the conversion of \cref{sec:conv} with the two pattern cases.
+Two solved-or-unsolved applications of the same metavariable to the same arguments are equal (the reference kernel of \cref{sec:testing} failed on $\meta m\,\vs x\conv\meta m\,\vs x$ because its occurs check fired on the problem itself).
+When both sides are patterns the left one is solved.
+A meta-headed problem that is not a pattern ($\meta m\,(g\,x)\conv c$, or $\meta m\,x\,x\conv c$ with a repeated variable) is neither solved nor failed: it is put on the pending list.
+
+\paragraph{Draining.}
+After a unification that may have solved a metavariable, the elaborator re-attempts every pending constraint in the context in which it was deferred, and repeats until a pass makes no progress (the number of pending constraints does not decrease) or the list is empty.
+A constraint that has become a pattern, or whose heads have been solved, is then decided.
+\emph{Acceptance} of an elaboration requires that the pending list is empty: a tactic whose proof state is not fully resolved cannot be accepted, and a term whose constraints are not all decided cannot be admitted.
+This gate is not negotiable, because a deferred constraint is a promise that something will be compared, and a state that holds a promise it never keeps looks as if it had been checked.
+
+\paragraph{What the algorithm is, and is not.}
+\Cref{alg:unify} is the pattern fragment of the textbook algorithm with the following departures, which make it weaker than a full implementation; none of them can cause an ill-typed term to be admitted, since the final term is checked in full.
+\begin{itemize}
+\item \emph{No pruning.} A metavariable $\meta n$ inside $t$ that is applied to variables outside the spine of $\meta m$ is not restricted to the variables of the spine: the scope check fails instead.
+  Systems with pruning \citep{abel11,ziliani15} solve more problems.
+\item \emph{No type check of the solution.} \Solve\ checks scope and dependency order and does not check that the solution has the type of $\meta m$.
+  The solution is type-correct whenever the problem was, because metavariables are created with the type of their context and every unification is of terms of one type; but the unifier does not prove this, and the elaboration of \code{apply} re-checks each solved argument metavariable on a scratch copy (finding F25 in \cref{sec:testing}).
+  What is admitted is the \emph{final} term, which is checked in full.
+\item \emph{Patterns by construction.} The metavariable of a goal is applied to every variable of its context, hence is a pattern; the restriction to patterns bites only on the metavariables of implicit arguments.
+\item \emph{Deferral instead of search.} There is no backtracking over alternative solutions (no search for imitation and projection instances \citep{huet75}); a problem that is not a pattern waits for other assignments or remains pending and refuses acceptance.
+\end{itemize}
+
+\begin{example}
+In a context $x{:}\Nat,\,y{:}\Nat$ the problem $\meta m\,x\,y \conv \Fam{add}\,y\,x$ is a pattern problem: $S=\{x,y\}$, the dependency order is trivial, and the assignment is $\meta m := \lam{x}{\Nat}{\lam{y}{\Nat}{\Fam{add}\,y\,x}}$.
+The problem $\meta m\,(\ctor{Succ}\,x)\conv c$ is deferred.
+The problem $\meta m\,x\,x \conv c$, with a repeated variable, is deferred as well, and is decided only if $\meta m$ is assigned by another constraint.
+\end{example}
+
+\paragraph{Termination and backtracking.}
+We do not argue termination of unification from a measure; it is enforced by the work budget of \cref{sec:impl}, which makes every call end in success, in failure, or in a budget error that fails closed.
+A metavariable is assigned at most once between a checkpoint and the rewind that follows it, and every tactic runs in a transaction that rewinds the metavariable context and the pending list on any exception, so that a failed attempt leaves no assignment behind.
+
+\subsection{The trust boundary}\label{sec:trust}
+
+Admission to the global environment is the only operation that changes what is true.
+\begin{definition}[Checked entry points]\label{def:entry}
+The global environment is extended by $\Sg \to \Sg,\,c : A \mathrel{:=} v$ only when
+\[
+\inferrule*[right=\pf{Declare}]{c\notin\dom(\Sg) \\ \Sg;\cdot\vdash A : \Type_i \\ \Sg;\cdot\vdash v : A \\ A, v \text{ contain no metavariable and no unfinished global}}
+{\Sg \;\longrightarrow\; \Sg,\ c : A \mathrel{:=} v}
+\]
+and by the three other checked operations: \texttt{finish\_inductive} (admission conditions \textbf{A1}--\textbf{A6}), \texttt{finish\_recursive\_function\_checked} (the body checked against its type under the guard), and \texttt{declare\_quot} (the preconditions of \cref{sec:quot}).
+\end{definition}
+The check of \textsc{Declare} is made in the \emph{empty} context against a closed statement.
+Everything on the other side of this door (the tactic engine, the decision procedures, the elaborator and its unifier, the environment, the search procedures and the learner) is untrusted: it constructs candidate terms, and its only power over the environment is to submit them.
+A bug in any of it can fail to find a proof, or make a candidate that the kernel then refuses; it cannot extend the environment with an unchecked declaration.
+
+The unchecked variants (\texttt{declare\_unchecked}, \texttt{finish\_inductive\_unchecked}) exist, for axioms and so that the tests can build ill-formed environments on purpose.
+In the code we ship, the only call to one of them is the declaration of an axiom, and the libraries declare exactly one axiom, excluded middle, in the number-theory library.
+The function \texttt{audit} reports, for a theorem, the axioms and quotient constants that it reaches through the types and values of the definitions it uses, in the manner of Lean's \texttt{\#print axioms}; a theorem that reaches none depends only on declarations that entered by a checked entry point, provided the discipline holds.
+The module that exposes the kernel to Python does expose the unchecked variants; the boundary is therefore a discipline of the layers above the kernel, backed by the second checker (\cref{sec:indep}), which re-checks the value of every definition in the exported environment, whichever path installed it.
+It does not re-check the admission of inductive families.
+
+\subsection{Certificate calculi}\label{sec:certificates}
+
+The decision procedures are \emph{certifying}: each produces a proof term, built from lemmas of the libraries, that the kernel checks like any other.
+They are untrusted in the sense of \cref{sec:trust}: a wrong search produces a failure or a refused term, never a theorem.
+Each is described by the certificate that it searches for and the lemma chain that turns it into a term.
+
+\paragraph{Ring normalisation.}
+The tactic \code{ring} decides equality in the commutative semirings of the unary naturals $\Fam{Nat}$ and the binary naturals $\Fam{N}$ and in the commutative ring of the integers $\Fam{Z}$ of the libraries, by normalising both sides to a canonical polynomial and building, at each step, the application of a ring lemma that justifies it \citep{gregoire05,mathlib20}.
+The normal form follows Mathlib's:
+\[
+\text{poly} \;::=\; m_1 + (m_2 + (\cdots + (m_k + 0)))
+\qquad
+\text{mono} \;::=\; x_1^{e_1}\cdot(x_2^{e_2}\cdot(\cdots\cdot(x_j^{e_j}\cdot c)))
+\]
+with monomials in strictly decreasing order, atoms in increasing index order, exponents $e\ge1$ numerals and the coefficient $c$ a numeral last.
+The order on monomials is the lexicographic order on exponent vectors, with the first atom most significant; it is total and compatible with multiplication, which is what lets a product of a monomial and a polynomial stay sorted without merging.
+Numerals are the canonical numerals of the number system, and arithmetic on them is checked by the kernel's evaluation (in time proportional to the number of bits for binary numerals).
+A power by a numeral uses repeated squaring, so $(a+b)^{20}$ takes five multiplications.
+In a ring, subtraction is multiplication by the numeral $-1$, and monomials whose coefficients cancel leave the sum.
+If the normal forms differ, the tactic fails and reports both.
+
+\paragraph{Linear arithmetic by Farkas certificates.}
+The tactic \code{linarith} reads each hypothesis as a fact $0\le p_i$ with $p_i$ a polynomial over $\Z$ ($x\le y$ becomes $0\le y-x$, $x<y$ becomes $0\le y-(x+1)$, an equality becomes two facts, a negated inequality is read as the reverse one), and negates the goal.
+It searches for integers $m_i\ge0$ and $\kappa\ge1$ such that
+\[
+\sum_i m_i\,p_i \;\equiv\; -\kappa \qquad\text{as polynomials},
+\]
+every non-constant monomial cancelling, with a monomial that is not linear treated as an atom.
+The proof term is then: $0\le\sum_i m_i p_i$ by the lemmas \texttt{Z.mul\_nonneg} and \texttt{Z.add\_nonneg}; $\sum_i m_ip_i=-\kappa$ by \code{ring}; and the absurdity of $0\le-\kappa$ by \texttt{Z.not\_nonneg\_neg}.
+By Farkas' lemma, for a system of affine non-strict inequalities over $\mathbb Q$ such a certificate exists if and only if the system has no solution, so the procedure is complete for such systems.
+It is incomplete over $\Z$: the facts $0\le 2x-1$ and $0\le 1-2x$ have no solution in the integers and no certificate, since the procedure has no cutting planes, and the strengthening $x<y\Rightarrow x+1\le y$ recovers only part of integer reasoning.
+The search is a linear program (feasibility of $\sum_i m_ip_i=-1$ with $m\ge0$ and a row per non-constant monomial), solved by an integer-preserving simplex method with Bland's rule \citep{bland77} in exact arithmetic; for large problems a floating-point linear-programming solver (HiGHS through SciPy \citep{huangfu18,scipy20}) first guesses the support, which the exact simplex then re-solves, so that floating-point arithmetic decides nothing.
+
+\paragraph{Nonlinear arithmetic.}
+\code{nlinarith} adds, before the search, the squares $0\le t^2$ of the subterms $t\cdot t$ and $t^2$ occurring in the hypotheses and the products $0\le p_ip_j$ of every pair of facts (at most $600$), and then searches as above.
+The certificate is of the form $\sum_i\lambda_ip_i+\sum_{i\le j}\mu_{ij}p_ip_j+\sum_k\nu_kt_k^2\equiv-\kappa$, a degree-two certificate in the style of the Positivstellensatz \citep{harrison07}.
+It is a heuristic, in the sense that the choice of products is a heuristic; any certificate it finds is checked.
+
+\paragraph{Linear combinations of equations.}
+\code{linear\_combination} closes an equation $l=r$ from hypotheses $l_i=r_i$ and given coefficients $c_i$ when $l-r=\sum_ic_i(l_i-r_i)$ as a polynomial identity.
+The proof applies the congruence lemmas of the ring to obtain $\sum_ic_il_i=\sum_ic_ir_i$, proves $l+\sum_ic_ir_i=r+\sum_ic_il_i$ by \code{ring} (rearranged so that no subtraction is needed), and cancels the common summand.
+
+\subsection{Metatheory: what is and is not established}\label{sec:meta}
+
+We have not proved subject reduction, strong normalisation, consistency or canonicity for the calculus as implemented, and we have not mechanised any part of its metatheory.
+For the pure core, a dependent product with an impredicative bottom universe, a universe hierarchy without cumulativity, and the usual conversion, these results are known in the literature on the Calculus of Constructions and its extensions \citep{coquand88cc,coquand90meta,barendregt92}, and for inductive types under strict positivity and structural recursion in that on the Calculus of Inductive Constructions \citep{coquand90ind,paulin93,gimenez94}.
+The kernel's calculus differs from those in features whose metatheory is not covered by such a reference, and each of these is a place where the implementation could be wrong in a way that no result we can cite excludes:
+\begin{itemize}
+\item the index forcing of \cref{sec:ind}, which changes the expected type of a branch;
+\item definitional proof irrelevance decided by the unifier and not by an untyped conversion (\cref{sec:prop}), with a depth bound;
+\item the strict-positivity check, which does not look in the indices (D2 in \cref{app:deviations});
+\item the shape-only check of a motive (D1);
+\item the eager one-layer unfolding of a fixpoint at any argument, against the specification's unfolding at a constructor (\cref{sec:conv});
+\item the incompleteness and non-transitivity of conversion on stuck case analyses (\cref{sec:limits}), which can only reject and cannot accept an equation that evaluation does not justify.
+\end{itemize}
+Verified checkers exist for neighbouring calculi (MetaCoq for the kernel of Rocq, Lean4Lean for that of Lean \citep{sozeau20,carneiro24}); nothing of that kind exists here.
+The evidence that the implementation is sound is therefore a test apparatus: a second checker written from the specification, differential and randomised testing against a frozen reference kernel, mutation testing of the kernel and of the tools, sanitiser runs, and a findings log (\cref{sec:testing}).
+Such evidence finds bugs and, as the case of D1 and D2 shows, it also marks its own limits: both checkers share one specification, so a flaw in the specification itself is invisible to the comparison.

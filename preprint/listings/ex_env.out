@@ -1,0 +1,8 @@
+a0 : Nat
+|- twice a0 = a0 + a0
+17 actions: {'CASES': 1, 'INDUCT': 1, 'APPLY': 12, 'REWRITE': 2, 'RING': 1}
+refused: the action RING(0) does not apply | goals open: 1 | steps taken: 0
+h1 : Nat
+h2 : twice h1 = h1 + h1
+|- Succ (Succ (twice h1)) = Succ (h1 + Succ h1)
+search: found a proof | probes used: 798

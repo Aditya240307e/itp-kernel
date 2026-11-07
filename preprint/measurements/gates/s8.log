@@ -1,0 +1,29 @@
+independent re-check of the 31 globals of the kernel (value : type, every type is a type): 0 rejected
+   proof true_intro     kernel accepts True | independent checker accepts True 
+   proof false_elim     kernel accepts True | independent checker accepts True 
+   proof and_comm       kernel accepts True | independent checker accepts True 
+   proof or_comm        kernel accepts True | independent checker accepts True 
+   proof not_not_intro  kernel accepts True | independent checker accepts True 
+   proof iff_refl       kernel accepts True | independent checker accepts True 
+   proof ex_elim        kernel accepts True | independent checker accepts True 
+   wrong and_comm: identity                           independent checker accepts False (type mismatch)
+   wrong false_elim: returns the proof of False as P  independent checker accepts False (type mismatch)
+   wrong not_not_intro: returns p for False           independent checker accepts False (type mismatch)
+   wrong Ex from a True                               independent checker accepts False (type mismatch)
+   wrong Or: inr given an A                           independent checker accepts False (type mismatch)
+   wrong And: both components a                       independent checker accepts False (type mismatch)
+   guard corpus: structural: f (S k) = S (f k)                                  expected True  kernel True  independent True 
+   guard corpus: self call on the SAME argument: f n                            expected False kernel False independent False
+   guard corpus: self call on S k (not smaller): f (S k)                        expected False kernel False independent False
+   guard corpus: nested match on a smaller variable: f j                        expected True  kernel True  independent True 
+   guard corpus: recursion on the WRONG argument                                expected False kernel False independent False
+   guard corpus: add: f k' m                                                    expected True  kernel True  independent True 
+   guard corpus: call under a match that is not on the parameter                expected False kernel False independent False
+   definitions the KERNEL rejects when re-declared (legacy mode): [] | the independent checker rejects: []
+legacy mode: 12 tactic proofs (derived globals included: 35 globals); valid proofs rejected by either side: 0; definitions rejected: 0
+   mutants: 1082, verdicts agree 1082 (both accept 32, both reject 1050); kernel ACCEPTS / independent REJECTS: 0; independent ACCEPTS / kernel REJECTS: 0
+   definitions the KERNEL rejects when re-declared (parameter mode): ['cong', 'le_trans', 'transport'] | the independent checker rejects: ['cong', 'le_trans', 'transport']
+parameter mode: 21 tactic proofs (derived globals included: 36 globals); valid proofs rejected by either side: 0; definitions rejected: 3
+   mutants: 1961, verdicts agree 1961 (both accept 105, both reject 1856); kernel ACCEPTS / independent REJECTS: 0; independent ACCEPTS / kernel REJECTS: 0
+elapsed 1.1s
+S8 INDEP GATE: PASS

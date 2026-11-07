@@ -1,0 +1,342 @@
+{
+ "code_clean": true,
+ "commit": "f840710dd0b2a28482638ea351d528235f3e8411",
+ "date": "2026-11-04",
+ "gates": {
+  "harness": {
+   "cmd": "python3 tests/support/harness.py 1500 3",
+   "exit": 0,
+   "parsed": {
+    "comparisons": {
+     "conv": 3000,
+     "norm": 1500,
+     "norm_open": 1500,
+     "reject": 500,
+     "typing": 1500,
+     "typing_open": 1500
+    },
+    "corpus_disagreements": 0,
+    "corpus_fix": 38,
+    "corpus_normalisations": 39,
+    "corpus_stuck": 26,
+    "disagreements": 0,
+    "seed": 3,
+    "terms": 1500
+   },
+   "pass": true,
+   "seconds": 0.69
+  },
+  "oracle": {
+   "cmd": "python3 tests/kernel/oracle_gate.py ",
+   "exit": 0,
+   "parsed": {
+    "completed": 504,
+    "distributions": [
+     {
+      "completed": 41,
+      "name": "strict fragment",
+      "unattributed": 0,
+      "verified": 41
+     },
+     {
+      "completed": 26,
+      "name": "full distribution",
+      "unattributed": 0,
+      "verified": 26
+     },
+     {
+      "completed": 202,
+      "name": "parameters ON, full distribution, NO exemptions",
+      "unattributed": 0,
+      "verified": 202
+     },
+     {
+      "completed": 208,
+      "name": "parameters ON + index generalisation by equations",
+      "unattributed": 0,
+      "verified": 208
+     },
+     {
+      "completed": 27,
+      "name": "legacy + index generalisation by equations",
+      "unattributed": 0,
+      "verified": 27
+     }
+    ],
+    "unattributed": 0,
+    "verified": 504
+   },
+   "pass": true,
+   "seconds": 19.11
+  },
+  "s15": {
+   "cmd": "python3 tests/kernel/s15_classical_tests.py 300",
+   "exit": 0,
+   "parsed": {
+    "attempts": 2100,
+    "completed": 0,
+    "false_statements": 7,
+    "power_attempts": 1200,
+    "power_completed": 21,
+    "power_verified": 21
+   },
+   "pass": true,
+   "seconds": 0.23
+  },
+  "s16": {
+   "cmd": "python3 tests/kernel/s16_quot_tests.py ",
+   "exit": 0,
+   "parsed": {
+    "attempts": 4200,
+    "completed": 0,
+    "false_statements": 7,
+    "power_attempts": 3000,
+    "power_completed": 67,
+    "power_verified": 67,
+    "true_statements": 5
+   },
+   "pass": true,
+   "seconds": 0.88
+  },
+  "s19": {
+   "cmd": "python3 tests/kernel/s19_boundary_tests.py ",
+   "exit": 0,
+   "parsed": {
+    "cases": 188,
+    "failed": 0,
+    "fuzz_calls": 60000,
+    "fuzz_calls_per_seed": 15000,
+    "fuzz_seeds": 4,
+    "passed": 188
+   },
+   "pass": true,
+   "seconds": 2.99
+  },
+  "s2": {
+   "cmd": "python3 tests/kernel/s2_tests.py 1500",
+   "exit": 0,
+   "parsed": {
+    "admission_cases": 12,
+    "corpus_accepted": 12,
+    "corpus_false_rejected": 12,
+    "corpus_fix_nodes": 31,
+    "corpus_proofs": 12,
+    "dep_accepted": 1066,
+    "dep_checked": 1503,
+    "dep_disagreements": 0,
+    "guard_cases": 6,
+    "ill_typed_disagreements": 0,
+    "ill_typed_rejected": 750,
+    "library_globals_redeclared": 16,
+    "match_disagreements": 0,
+    "match_terms": 1500
+   },
+   "pass": true,
+   "seconds": 0.43
+  },
+  "s40": {
+   "cmd": "python3 tests/environment/s40_actions_tests.py ",
+   "exit": 0,
+   "parsed": {
+    "checks": 666
+   },
+   "pass": true,
+   "seconds": 73.84
+  },
+  "s8": {
+   "cmd": "python3 tests/kernel/s8_indep_tests.py 100",
+   "exit": 0,
+   "parsed": {
+    "both_accept": 137,
+    "both_reject": 2906,
+    "mutants": 3043,
+    "runs": [
+     {
+      "agree": 1082,
+      "both_accept": 32,
+      "both_reject": 1050,
+      "i_acc_k_rej": 0,
+      "k_acc_i_rej": 0,
+      "mutants": 1082
+     },
+     {
+      "agree": 1961,
+      "both_accept": 105,
+      "both_reject": 1856,
+      "i_acc_k_rej": 0,
+      "k_acc_i_rej": 0,
+      "mutants": 1961
+     }
+    ]
+   },
+   "pass": true,
+   "seconds": 1.19
+  }
+ },
+ "sanitizers": {
+  "build_flags": "-fsanitize=address,undefined -fno-omit-frame-pointer -O1 -g",
+  "default_set": 38,
+  "gates": [
+   {
+    "gate": "s2_tests.py 1500",
+    "pass": true,
+    "seconds": 1.7
+   },
+   {
+    "gate": "s16_quot_tests.py",
+    "pass": true,
+    "seconds": 4.5
+   },
+   {
+    "gate": "s17_irrelevance_tests.py",
+    "pass": true,
+    "seconds": 8.6
+   },
+   {
+    "gate": "s20_reservation_tests.py",
+    "pass": true,
+    "seconds": 1.1
+   },
+   {
+    "gate": "s21_view_tests.py",
+    "pass": true,
+    "seconds": 2.0
+   },
+   {
+    "gate": "s32_synconv_tests.py",
+    "pass": true,
+    "seconds": 12.8
+   },
+   {
+    "gate": "s33_convmemo_tests.py",
+    "pass": true,
+    "seconds": 42.5
+   },
+   {
+    "gate": "s35_matchcheck_tests.py",
+    "pass": true,
+    "seconds": 39.9
+   },
+   {
+    "gate": "s39_failfast_tests.py",
+    "pass": true,
+    "seconds": 9.3
+   },
+   {
+    "gate": "s28_headunfold_tests.py",
+    "pass": true,
+    "seconds": 0.1
+   },
+   {
+    "gate": "s29_apply_pi_goal_tests.py",
+    "pass": true,
+    "seconds": 0.2
+   },
+   {
+    "gate": "harness.py 1500 3",
+    "pass": true,
+    "seconds": 2.5
+   },
+   {
+    "gate": "s3_tests.py 600",
+    "pass": true,
+    "seconds": 4.9
+   },
+   {
+    "gate": "s4_tests.py 800",
+    "pass": true,
+    "seconds": 6.3
+   },
+   {
+    "gate": "s5_tests.py 1200 3",
+    "pass": true,
+    "seconds": 8.2
+   },
+   {
+    "gate": "s5_probe_tests.py 500 7",
+    "pass": true,
+    "seconds": 10.1
+   },
+   {
+    "gate": "s6_logic_tests.py",
+    "pass": true,
+    "seconds": 0.6
+   },
+   {
+    "gate": "s6_f6_tests.py",
+    "pass": true,
+    "seconds": 0.2
+   },
+   {
+    "gate": "s7_param_tests.py 150 600",
+    "pass": true,
+    "seconds": 7.3
+   },
+   {
+    "gate": "s8_indep_tests.py 100",
+    "pass": true,
+    "seconds": 2.5
+   },
+   {
+    "gate": "s9_strong_tests.py",
+    "pass": true,
+    "seconds": 0.3
+   },
+   {
+    "gate": "s10_noconf_tests.py",
+    "pass": true,
+    "seconds": 0.5
+   },
+   {
+    "gate": "s11_eqgen_tests.py",
+    "pass": true,
+    "seconds": 1.8
+   },
+   {
+    "gate": "s12_probe_eq_tests.py 150",
+    "pass": true,
+    "seconds": 19.1
+   },
+   {
+    "gate": "s13_prop_tests.py",
+    "pass": true,
+    "seconds": 0.2
+   },
+   {
+    "gate": "s14_prop_world_tests.py 600",
+    "pass": true,
+    "seconds": 11.9
+   },
+   {
+    "gate": "s15_classical_tests.py 300",
+    "pass": true,
+    "seconds": 1.2
+   },
+   {
+    "gate": "s18_deep_tests.py",
+    "pass": true,
+    "seconds": 282.5
+   },
+   {
+    "gate": "oracle_gate.py",
+    "pass": true,
+    "seconds": 109.2
+   }
+  ],
+  "left_out_by_the_tool": [
+   "s26_memo_tests.py",
+   "s19_boundary_tests.py",
+   "s24_bin_tests.py",
+   "s25_nring_tests.py",
+   "s30_zlib_tests.py",
+   "s31_linarith_tests.py",
+   "s34_nt_tests.py",
+   "s40_actions_tests.py",
+   "s37_atoms_tests.py",
+   "s27_fuel_tests.py",
+   "s50_proofs_tests.py"
+  ],
+  "options": "ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1",
+  "seconds": 305
+ }
+}

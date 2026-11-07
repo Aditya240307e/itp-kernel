@@ -1,0 +1,6 @@
+(a) motive over B2: the kernel infers Nat -> Nat
+    declared: accepted
+(b) motive into Zero: the kernel infers False -> Zero
+    declared: refused (Pi codomain must be a type)
+(c) motive Nat: refused (ill-typed term: explicit motive_id is not shaped like a valid motive -- expected a Pi chain of (index count + 1) arguments, ending in a sort)
+independent checker: 133 globals re-checked, problems: []

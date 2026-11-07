@@ -1,0 +1,10 @@
+classical world: 36 globals; trusted axioms ('em', 'propext', 'funext', 'choice'); independent re-check of every global (axiom types included): 0 rejected
+   axioms present: ['em', 'propext', 'funext', 'choice']
+   contrapositive: (~Q -> ~P) -> P -> Q (by_contra)           kernel True  independent True  
+   double negation introduction (constructive)                kernel True  independent True  
+   excluded middle for a proposition about numbers            kernel True  independent True  
+   apply choice on a Prop goal (a universe mismatch) is refused with a clear message: True
+   soundness canary (classical axioms available): 2100 random proof attempts on 7 FALSE statements, 0 completed, verified proof of a false statement: None
+   canary POWER (the same generator on 4 TRUE classical statements): 1200 attempts, 21 completed, 21 verified
+elapsed 0s
+S15 CLASSICAL GATE: PASS
