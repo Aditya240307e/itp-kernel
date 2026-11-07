@@ -111,6 +111,8 @@
   aboveskip=0.7em, belowskip=0.5em, breaklines=true, breakatwhitespace=false, postbreak=\mbox{\textcolor{muted}{$\hookrightarrow$}\space}, tabsize=2,
   morekeywords={lambda,as,with,assert}, upquote=false}
 \lstdefinestyle{out}{basicstyle=\ttfamily\footnotesize\color{ink}, columns=fullflexible, keepspaces=true, frame=none, xleftmargin=1.1em, aboveskip=0.2em, belowskip=0.6em, breaklines=true, showstringspaces=false}
+\lstdefinelanguage{Lean}{morekeywords={axiom,theorem,inductive,where,fun,by,have,cases,with,exact,intro,Prop,Type},sensitive=true,
+  morecomment=[l]{--},morecomment=[s]{/-}{-/}}
 \lstset{style=itp}
 \newcommand{\lstfile}[3][]{\lstinputlisting[style=itp,#1,caption={#2},label={#3}]}
 
@@ -578,7 +580,7 @@ The kernel, written in C++23, implements the calculus: a universe hierarchy with
 Tactics, decision procedures (a ring normaliser, linear and nonlinear arithmetic by Farkas-style certificates) and proof search are untrusted programs that build terms; every finished term is re-checked by the kernel, and a second checker, written separately from the specification, re-checks the results.
 The environment makes a goal into data, lists the legal actions, probes each action on a restorable kernel state before taking it, keeps what an unfinished attempt did prove, and is exposed through the Gymnasium interface, all in one process and with deterministic budgets.
 This report specifies the calculus and the algorithms that decide it, including the pattern unification of metavariables; describes the implementation and its testing; and measures it on a two-core machine: a library of \libGlobals{} declarations is built in \libBuildA\,s and re-checked by the kernel in \kerRecheckA\,s, and a tactic probe has a median latency of \probeMed\,ms.
-It states what is not done: soundness is tested, not proved; the calculus has no cumulativity, universe polymorphism or mutual inductives; and no learning results are reported.
+It states what is not done: soundness is tested, not proved, and a known gap in the admission of inductive families gives a proof of \code{False} once excluded middle and propositional extensionality are added to a world (\cref{app:deviations}); the calculus has no cumulativity, universe polymorphism or mutual inductives; and no learning results are reported.
 \end{abstract}
 
 \noindent\textbf{Keywords:} interactive theorem proving; dependent type theory; proof checking; higher-order pattern unification; reinforcement learning environments; machine learning for theorem proving.
@@ -1182,7 +1184,7 @@ The kernel's calculus differs from those in features whose metatheory is not cov
 \begin{itemize}
 \item the index forcing of \cref{sec:ind}, which changes the expected type of a branch;
 \item definitional proof irrelevance decided by the unifier and not by an untyped conversion (\cref{sec:prop}), with a depth bound;
-\item the strict-positivity check, which does not look in the indices (D2 in \cref{app:deviations});
+\item the strict-positivity check, which does not look in the indices (D2 in \cref{app:deviations}, where a family that it admits yields a proof of $\sy{False}$ with two classical axioms);
 \item the shape-only check of a motive (D1);
 \item the eager one-layer unfolding of a fixpoint at any argument, against the specification's unfolding at a constructor (\cref{sec:conv});
 \item the incompleteness and non-transitivity of conversion on stuck case analyses (\cref{sec:limits}), which can only reject and cannot accept an equation that evaluation does not justify.
@@ -1929,15 +1931,18 @@ The libraries (\libGlobals{} declarations, \cref{tab:libs}) cover the naturals, 
 
 \paragraph{Metatheory.}
 Subject reduction, strong normalisation and consistency are not proved for the calculus as implemented, and no part of its metatheory is mechanised (\cref{sec:meta}).
-The two deviations of \cref{app:deviations} are places where the implementation is weaker than the specification it was written against; we do not know whether either can be exploited to derive a contradiction, and we have not tried to prove that neither can.
-Neither is reachable from the environment, whose actions can neither declare a family nor say a \code{match}; both are reachable from the Python interface of the kernel, which is what a library author uses.
+The two deviations of \cref{app:deviations} are places where the implementation is weaker than the specification it was written against.
+The second can be exploited: in a world with excluded middle and propositional extensionality as axioms, a family that the kernel admits yields a proof of $\sy{False}$, which the kernel and the independent checker both accept (\cref{lst:dev-exploit}).
+We know of no exploit of the first, and we have not proved that there is none.
+Neither deviation is repaired in the version of the repository that holds this report.
+Neither is reachable from the environment, whose actions can neither declare a family nor say a \code{match}; both are reachable from the Python interface of the kernel, which is what a library author uses, and the exploit also needs an axiom that no shipped library assumes.
 
 \subsection{Trust and testing}
 
 \paragraph{Soundness is tested, not proved.}
 The trusted base is the kernel (\locKernelHeader{} lines of header and \locBindings{} of bindings) and the entry points that guard it, the C++ compiler and the Python interpreter that call it.
 The evidence that it is sound is the apparatus of \cref{sec:testing}, which finds defects and cannot show their absence.
-Its second checker (\locchecker{} lines) is a re-implementation from the same specification by the same author, so it does not catch a flaw in the specification or a misreading that both share, and it does not re-check the admission of inductive families (D2 of \cref{app:deviations}).
+Its second checker (\locchecker{} lines) is a re-implementation from the same specification by the same author, so it does not catch a flaw in the specification or a misreading that both share, and it does not re-check the admission of inductive families (D2 of \cref{app:deviations}), which is why it accepts the proof of $\sy{False}$ of \cref{lst:dev-exploit}.
 The mutants are written by the author of the code and measure the tests against the faults that the author can imagine, and the \mutEquiv{} equivalent mutants are the author's judgement.
 
 \paragraph{The independent checker is slow.}
@@ -1947,6 +1952,7 @@ It is a witness for a finished proof, not a component of a loop.
 
 \paragraph{What was and was not run for this report.}
 The gates, the sanitizer run, the library and environment measurements, and the listings were run at the commit of the report on one machine: Linux, x86-64, two virtual cores, \mCompiler.
+The three listings of \cref{app:d2} that prove $\sy{False}$ and check the proof in Lean were added afterwards and run on a kernel with the same digest; the two in Lean were run with Lean 4.15.0.
 The campaign of falsification by fuzzing (\code{make soundness}), a single pass of the whole mutation catalogue against the final commit, the gates run with the sharing tables of the kernel bypassed (\code{ITP\_VERIFY\_MEMO=1}), the long gates of the bank under the sanitizers, the leak detector of the sanitizer, and other platforms and compilers were not run; the repository contains the commands for each.
 The measurements of cost are of this machine.
 The counts and digests are properties of the code, and the times are not.
@@ -2010,13 +2016,14 @@ What the evidence supports is modest and concrete.
 A probe of an action costs a median of \probeMed\,ms and a decision of the Gymnasium interface \decMed\,ms on one core of a two-core machine; the kernel checks the median reference proof of the bank in \chkKernelMedianMs\,ms, so that the verdict can be had for every finished proof, and the independent checker confirms it about \chkRatioMedian{} times more slowly, as a witness.
 The soundness of the kernel is tested, not proved, by a frozen reference kernel run in lockstep, a second checker, canaries, a fuzzer, \mutTotal{} mutants, sanitizers and a log of \findNumbers{} findings.
 The testing also reached its own limits: writing the rules down for this report turned up two places where the kernel checks less than the usual conditions on a motive and on the positivity of a family (\cref{app:deviations}); the second checker, written from the same specification, shares the first omission in part and does not examine the second.
+The second omission can be exploited: with excluded middle and propositional extensionality added to a world, a family that the kernel admits gives a proof of $\sy{False}$ that both checkers accept (\cref{app:d2}).
 
 What the evidence does not show is whether a learner profits.
 The report has no learning experiment, and its claims about the design are claims about an interface: a verdict the proposer cannot influence, states that can be restored, actions that are well formed by construction, a cost that is a function of the task, and failures that yield theorems.
 Whether these properties help is an empirical question that needs a fixed protocol, an untrained control, and a budget measured in the unit that the environment provides; the environment is meant to make that experiment cheap to run and its outcome checkable.
 
 \paragraph{Future work.}
-The two deviations of \cref{app:deviations} should be repaired in the kernel, with a gate for each, and the independent checker should re-check the admission of inductive families.
+The two deviations of \cref{app:deviations} are not repaired in this version and should be, in the kernel, with a gate for each (for the second, the proof of $\sy{False}$ of \cref{lst:dev-exploit} must fail at the declaration of \code{R}), and the independent checker should re-check the admission of inductive families.
 The remaining gaps of the calculus, universe polymorphism, mutual and nested families and a real-number library, bound the mathematics that the bank can contain; the bank itself needs a second reader of its statements and proofs for its hard tier.
 A faster implementation of the policy interface would move the throughput of a decision toward that of the kernel.
 Part of the metatheory, starting with the guard and the forcing of indices, could be mechanised.
@@ -2026,7 +2033,7 @@ And the environment should be used: to train and to compare learners on the bank
 
 The code, the dataset of the problem bank, the sources of this report and the scripts that produced its numbers are in one repository at commit \mCommit{} (\reporturl); a snapshot is archived with the report (\reportdoi), under the licence \artifactlicense.
 The directory \code{preprint/} of the repository holds the sources of the report (\code{src/}), the bibliography, the measurement scripts, the listings and their outputs, and the raw measurements as JSON and logs; \code{python3 -I preprint/build.py} regenerates every macro that holds a number, and then the PDF, from them.
-The scripts and their costs on the machine of \cref{sec:measure} are: \code{measure.py}, the library chain, its re-check by the kernel and by the independent checker, and the micro-benchmarks (about three minutes); \code{measure\_check.py}, the cost of trusting a sample of reference proofs (about ten minutes, 2\,GB); \code{src/python/experiments/exp\_bench.py}, the latency and the throughput of the environment (a few minutes after the world is built); \code{measure\_assembler.py}, the round trip of the policy interface; \code{measure\_gates.py}, the gates named in \cref{tab:testing} and the sanitizer run; and \code{run\_listings.py}, the listings of \cref{sec:usage}.
+The scripts and their costs on the machine of \cref{sec:measure} are: \code{measure.py}, the library chain, its re-check by the kernel and by the independent checker, and the micro-benchmarks (about three minutes); \code{measure\_check.py}, the cost of trusting a sample of reference proofs (about ten minutes, 2\,GB); \code{src/python/experiments/exp\_bench.py}, the latency and the throughput of the environment (a few minutes after the world is built); \code{measure\_assembler.py}, the round trip of the policy interface; \code{measure\_gates.py}, the gates named in \cref{tab:testing} and the sanitizer run; and \code{run\_listings.py}, the listings of \cref{sec:usage} and \cref{app:deviations} (those in Lean need a Lean~4).
 The code, the dataset and the world are identified by digests so that a rerun can be compared with ours: the digest of the directory of the kernel's sources (\code{src/c++/hybrid}) is \code{\kernelDigest}, that of the names and types of the \libGlobals{} globals of the library world is \code{\worldDigestShort\ldots}, and that of the outcomes of the benchmark tasks is \code{\detDigest}.
 The counts of this report (lines, declarations, mutants, findings, problems, proofs) are read from the files of the repository and do not depend on the machine; the times do.
 
@@ -2036,8 +2043,9 @@ The counts of this report (lines, declarations, mutants, findings, problems, pro
 
 The two deviations below were found while the rules of \cref{sec:theory} were written down from the code, by reading it and by probing it; no gate found either.
 The second checker shares part of the first omission (it does not compare the binder types of a motive either, though it does require the motive to end in a sort) and does not examine the admission of a family at all (\cref{sec:indep}).
-The kernel at commit \mCommit{} is unchanged.
-Each deviation has a listing in the supplementary material that reproduces it (\code{preprint/listings/dev\_motive.py} and \code{dev\_positivity.py}); \Cref{lst:dev-motive,lst:dev-pos} show them with the output of the run for this report.
+The second deviation can be exploited: once excluded middle and propositional extensionality are added to a world, a family that the kernel accepts yields a proof of $\sy{False}$, which the kernel and the second checker both accept (\cref{app:d2}).
+Neither deviation is repaired in the version of the repository that holds this report: the sources of its kernel are those of commit \mCommit{}, the commit of the measurements (digest \code{\kernelDigest}).
+Each deviation has a listing in the supplementary material that reproduces it (\code{preprint/listings/dev\_motive.py} and \code{dev\_positivity.py}), and the exploit has three more, one in the system and two in Lean (\code{dev\_exploit.py}, \code{dev\_lean\_decl.lean} and \code{dev\_lean\_false.lean}); \Cref{lst:dev-motive,lst:dev-pos,lst:dev-exploit,lst:dev-lean-decl,lst:dev-lean-false} show them with the output of a run on that kernel.
 
 \subsection{D1: the motive of a match is checked for its shape}\label{app:d1}
 
@@ -2074,14 +2082,41 @@ The family \code{Q} of \cref{lst:dev-pos} has a field of type $\Fam{Q}\,(\Fam{Q}
 Both are accepted; the control, with the family to the left of an arrow in a field, is refused.
 The independent checker re-checks the declarations of the constants and finds nothing, because it does not re-check the admission of inductive families (\cref{sec:indep}).
 
+\paragraph{An exploit.}
+The family \code{R} yields a proof of $\sy{False}$ once two standard classical axioms are added to the world: excluded middle, $\forall P{:}\Prop.\;P\lor\lnot P$, and propositional extensionality, $\forall P\,Q{:}\Prop.\;(P\leftrightarrow Q)\to P=Q$.
+Write $E\,x$ for $\Fam{R}\,x\to\sy{False}$.
+The constructor gives $\Fam{R}\,(E\,B)$ for every proposition $B$, and, since it is the only constructor, the elimination of an inhabitant of $\Fam{R}\,x$ into a proposition gives $\exists B.\;E\,B=x$ (\code{R\_inv}).
+So $\Fam{R}\,x$ is inhabited exactly when $x$ is a value of $E$; hence $E\,x$ is refuted when $x$ is a value of $E$ (\code{K1}) and holds when it is not (\code{K3}), and neither lemma uses an axiom.
+With the two axioms every proposition is equal to $\sy{True}$ or to $\sy{False}$, so $E$ has at most two values, and each of the cases for $E\,\sy{False}$ and $E\,\sy{True}$ contradicts ``$E\,x$ holds exactly when $x$ is not a value of $E$''.
+\Cref{lst:dev-exploit} carries this out through the checked entry point of the kernel, in the base library of the repository extended by the two axioms and the family; it ends with \code{boom : False}.
+The audit of \code{boom}, the counterpart of the \code{\#print axioms} of Lean, lists the two axioms and no others, and the independent checker re-checks every declaration of the world, \code{boom} included, and finds no problem, since it does not look at the admission of \code{R}.
+
+\lstfile[firstline=3]{Deviation D2 exploited: a proof of \texttt{False} from \texttt{R}, excluded middle and propositional extensionality.}{lst:dev-exploit}{listings/dev_exploit.py}
+\lstinputlisting[style=out]{listings/dev_exploit.out}
+
+The fault is in the rules of \code{R}, and not in the encoding of the proof or in the axioms.
+The kernel of Lean 4.15.0, which applies the usual positivity condition, refuses \code{R}, and \code{Q} and the control as well (\cref{lst:dev-lean-decl}).
+If the constructor of \code{R} and the elimination into propositions that its declaration would give are postulated as axioms, Lean proves $\sy{False}$ from \code{Classical.propComplete}, the statement that every proposition is equal to $\sy{True}$ or to $\sy{False}$ (\cref{lst:dev-lean-false}; both Lean listings use the core library only).
+
+\lstfile[language=Lean]{Lean 4.15.0 and the three families of \cref{lst:dev-pos}: its kernel refuses all of them.}{lst:dev-lean-decl}{listings/dev_lean_decl.lean}
+\lstinputlisting[style=out]{listings/dev_lean_decl.out}
+
+\lstfile[language=Lean]{Lean 4.15.0 with the rules of \texttt{R} as axioms: \texttt{False} follows from \texttt{Classical.propComplete}.}{lst:dev-lean-false}{listings/dev_lean_false.lean}
+\lstinputlisting[style=out]{listings/dev_lean_false.out}
+
+The axioms are needed for this proof.
+Together they say that $\Prop$ has two elements, $\sy{True}$ and $\sy{False}$, and in a model that interprets $\Prop$ by two truth values \code{R} has no interpretation: $E$ would be a map of $\{0,1\}$ to itself with $E\,x=1$ exactly when $x$ is not in its image, and none of the four such maps is.
+Both axioms are standard (Lean's core library has them, excluded middle through its axiom of choice, and the standard library of Coq offers them), and the library of this repository assumes the first.
+We do not know whether the calculus with \code{R} and without the axioms is consistent, and we know of no exploit of \code{Q}.
+
 \paragraph{Exposure.}
 We read back every inductive family of the world of the bank through the kernel's term view (\code{measure\_deviations.py}): \dtwoFamilies{} families with \dtwoCtors{} constructors, of which \dtwoRecFams{} have a recursive field.
 None has the family in an index of a recursive field, in a result index, or anywhere else that condition A5 rejects, so the shipped libraries and the statements of the bank are not affected.
 The scan flags the two families of \cref{lst:dev-pos} and none of the families of the natural-number library, which it checks before it reads the bank.
-The environment cannot declare a family.
-We do not know whether either family can be exploited to derive a contradiction, and we have not tried to prove that neither can.
+The environment can declare neither a family nor an axiom, and the shipped libraries assume excluded middle and not propositional extensionality, so the exploit is open to the author of a library, through the Python interface of the kernel, and to no one else; the libraries, the proofs of the bank and the measurements of this report do not depend on the gap.
 \paragraph{Repair.}
-Reject an occurrence of the family in the arguments of a recursive occurrence and in the result indices, in the admission of the family; make the independent checker re-check admission from the stated condition.
+Reject an occurrence of the family in the arguments of a recursive occurrence and in the result indices, in the admission of the family; make the independent checker re-check admission from the stated condition; add the exploit to the gates, with the declaration of \code{R} now refused.
+This repair is not applied in this version.
 
 \section{The reference proofs checked}\label{app:check}
 

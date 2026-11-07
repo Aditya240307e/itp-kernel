@@ -4,7 +4,7 @@
 
 The report is built from the files in this directory. Every number it quotes is either *measured* (read from `measurements/` by `make_numbers.py`) or *counted* in the repository at the commit that the report names (lines of code, mutants, findings, problems, proofs, digests). Nothing is typed in by hand, so the text cannot drift from the evidence, and the build refuses to mix measurements made at different commits.
 
-The numbers describe commit `f840710`. The commits after it add this directory, list it in the main `README.md`, and let the layout gate S45 (`tests/repo/s45_layout_tests.py`) accept it at the top level; nothing else changes.
+The numbers describe commit `f840710`. The commits after it add this directory, list it in the main `README.md`, and let the layout gate S45 (`tests/repo/s45_layout_tests.py`) accept it at the top level. The last of them adds to Appendix A the proof of `False` that the second deviation allows once excluded middle and propositional extensionality are added (`listings/dev_exploit.py`) and its cross-check in Lean (`listings/dev_lean_decl.lean`, `listings/dev_lean_false.lean`); the kernel is not changed by any of them (the digest of its sources is that of the measurements), and neither deviation is repaired.
 
 | path | what it is |
 |---|---|
@@ -13,12 +13,12 @@ The numbers describe commit `f840710`. The commits after it add this directory, 
 | `src/` | the report, one file per section (`00_preamble.tex` ... `99_end.tex`) |
 | `references.bib` | the bibliography |
 | `generated_numbers.tex` | the macros that hold every number, written by `make_numbers.py` (do not edit) |
-| `listings/` | the programs printed in the report (`ex_*.py`, `dev_*.py`) and the output of each (`.out`) |
+| `listings/` | the programs printed in the report (`ex_*.py`, `dev_*.py`, and the two Lean files `dev_lean_*.lean`) and the output of each (`.out`) |
 | `measurements/` | the raw measurements: JSON, and the logs they were parsed from (`bench/` the environment benchmark, `gates/` the logs of the gates that `measure_gates.py` reads) |
 | `build.py` | numbers, then one flattened `itp_preprint.tex`, then the PDF |
 | `make_numbers.py` | `measurements/` and the repository, then `generated_numbers.tex` |
 | `measure.py`, `measure_check.py`, `measure_deviations.py`, `measure_assembler.py`, `measure_gates.py` | the measurement scripts |
-| `run_listings.py` | runs the listings and checks their output files |
+| `run_listings.py` | runs the listings and checks their output files (the Lean files need a Lean 4 on the `PATH` or named by `$LEAN`; the report used Lean 4.15.0 with the core library only, and without a Lean they are skipped) |
 
 `itp_preprint.tex` and `itp_preprint.pdf` are what `build.py` writes; they are kept here so that the report can be read without building it. The PDF carries no date or time (neither on the title page nor in its metadata), so building it again from the same files with the same TeX Live gives the same file.
 

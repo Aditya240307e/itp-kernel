@@ -4,8 +4,9 @@
 
 The two deviations below were found while the rules of \cref{sec:theory} were written down from the code, by reading it and by probing it; no gate found either.
 The second checker shares part of the first omission (it does not compare the binder types of a motive either, though it does require the motive to end in a sort) and does not examine the admission of a family at all (\cref{sec:indep}).
-The kernel at commit \mCommit{} is unchanged.
-Each deviation has a listing in the supplementary material that reproduces it (\code{preprint/listings/dev\_motive.py} and \code{dev\_positivity.py}); \Cref{lst:dev-motive,lst:dev-pos} show them with the output of the run for this report.
+The second deviation can be exploited: once excluded middle and propositional extensionality are added to a world, a family that the kernel accepts yields a proof of $\sy{False}$, which the kernel and the second checker both accept (\cref{app:d2}).
+Neither deviation is repaired in the version of the repository that holds this report: the sources of its kernel are those of commit \mCommit{}, the commit of the measurements (digest \code{\kernelDigest}).
+Each deviation has a listing in the supplementary material that reproduces it (\code{preprint/listings/dev\_motive.py} and \code{dev\_positivity.py}), and the exploit has three more, one in the system and two in Lean (\code{dev\_exploit.py}, \code{dev\_lean\_decl.lean} and \code{dev\_lean\_false.lean}); \Cref{lst:dev-motive,lst:dev-pos,lst:dev-exploit,lst:dev-lean-decl,lst:dev-lean-false} show them with the output of a run on that kernel.
 
 \subsection{D1: the motive of a match is checked for its shape}\label{app:d1}
 
@@ -42,14 +43,41 @@ The family \code{Q} of \cref{lst:dev-pos} has a field of type $\Fam{Q}\,(\Fam{Q}
 Both are accepted; the control, with the family to the left of an arrow in a field, is refused.
 The independent checker re-checks the declarations of the constants and finds nothing, because it does not re-check the admission of inductive families (\cref{sec:indep}).
 
+\paragraph{An exploit.}
+The family \code{R} yields a proof of $\sy{False}$ once two standard classical axioms are added to the world: excluded middle, $\forall P{:}\Prop.\;P\lor\lnot P$, and propositional extensionality, $\forall P\,Q{:}\Prop.\;(P\leftrightarrow Q)\to P=Q$.
+Write $E\,x$ for $\Fam{R}\,x\to\sy{False}$.
+The constructor gives $\Fam{R}\,(E\,B)$ for every proposition $B$, and, since it is the only constructor, the elimination of an inhabitant of $\Fam{R}\,x$ into a proposition gives $\exists B.\;E\,B=x$ (\code{R\_inv}).
+So $\Fam{R}\,x$ is inhabited exactly when $x$ is a value of $E$; hence $E\,x$ is refuted when $x$ is a value of $E$ (\code{K1}) and holds when it is not (\code{K3}), and neither lemma uses an axiom.
+With the two axioms every proposition is equal to $\sy{True}$ or to $\sy{False}$, so $E$ has at most two values, and each of the cases for $E\,\sy{False}$ and $E\,\sy{True}$ contradicts ``$E\,x$ holds exactly when $x$ is not a value of $E$''.
+\Cref{lst:dev-exploit} carries this out through the checked entry point of the kernel, in the base library of the repository extended by the two axioms and the family; it ends with \code{boom : False}.
+The audit of \code{boom}, the counterpart of the \code{\#print axioms} of Lean, lists the two axioms and no others, and the independent checker re-checks every declaration of the world, \code{boom} included, and finds no problem, since it does not look at the admission of \code{R}.
+
+\lstfile[firstline=3]{Deviation D2 exploited: a proof of \texttt{False} from \texttt{R}, excluded middle and propositional extensionality.}{lst:dev-exploit}{listings/dev_exploit.py}
+\lstinputlisting[style=out]{listings/dev_exploit.out}
+
+The fault is in the rules of \code{R}, and not in the encoding of the proof or in the axioms.
+The kernel of Lean 4.15.0, which applies the usual positivity condition, refuses \code{R}, and \code{Q} and the control as well (\cref{lst:dev-lean-decl}).
+If the constructor of \code{R} and the elimination into propositions that its declaration would give are postulated as axioms, Lean proves $\sy{False}$ from \code{Classical.propComplete}, the statement that every proposition is equal to $\sy{True}$ or to $\sy{False}$ (\cref{lst:dev-lean-false}; both Lean listings use the core library only).
+
+\lstfile[language=Lean]{Lean 4.15.0 and the three families of \cref{lst:dev-pos}: its kernel refuses all of them.}{lst:dev-lean-decl}{listings/dev_lean_decl.lean}
+\lstinputlisting[style=out]{listings/dev_lean_decl.out}
+
+\lstfile[language=Lean]{Lean 4.15.0 with the rules of \texttt{R} as axioms: \texttt{False} follows from \texttt{Classical.propComplete}.}{lst:dev-lean-false}{listings/dev_lean_false.lean}
+\lstinputlisting[style=out]{listings/dev_lean_false.out}
+
+The axioms are needed for this proof.
+Together they say that $\Prop$ has two elements, $\sy{True}$ and $\sy{False}$, and in a model that interprets $\Prop$ by two truth values \code{R} has no interpretation: $E$ would be a map of $\{0,1\}$ to itself with $E\,x=1$ exactly when $x$ is not in its image, and none of the four such maps is.
+Both axioms are standard (Lean's core library has them, excluded middle through its axiom of choice, and the standard library of Coq offers them), and the library of this repository assumes the first.
+We do not know whether the calculus with \code{R} and without the axioms is consistent, and we know of no exploit of \code{Q}.
+
 \paragraph{Exposure.}
 We read back every inductive family of the world of the bank through the kernel's term view (\code{measure\_deviations.py}): \dtwoFamilies{} families with \dtwoCtors{} constructors, of which \dtwoRecFams{} have a recursive field.
 None has the family in an index of a recursive field, in a result index, or anywhere else that condition A5 rejects, so the shipped libraries and the statements of the bank are not affected.
 The scan flags the two families of \cref{lst:dev-pos} and none of the families of the natural-number library, which it checks before it reads the bank.
-The environment cannot declare a family.
-We do not know whether either family can be exploited to derive a contradiction, and we have not tried to prove that neither can.
+The environment can declare neither a family nor an axiom, and the shipped libraries assume excluded middle and not propositional extensionality, so the exploit is open to the author of a library, through the Python interface of the kernel, and to no one else; the libraries, the proofs of the bank and the measurements of this report do not depend on the gap.
 \paragraph{Repair.}
-Reject an occurrence of the family in the arguments of a recursive occurrence and in the result indices, in the admission of the family; make the independent checker re-check admission from the stated condition.
+Reject an occurrence of the family in the arguments of a recursive occurrence and in the result indices, in the admission of the family; make the independent checker re-check admission from the stated condition; add the exploit to the gates, with the declaration of \code{R} now refused.
+This repair is not applied in this version.
 
 \section{The reference proofs checked}\label{app:check}
 

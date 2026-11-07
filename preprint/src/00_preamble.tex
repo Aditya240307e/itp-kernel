@@ -111,6 +111,8 @@
   aboveskip=0.7em, belowskip=0.5em, breaklines=true, breakatwhitespace=false, postbreak=\mbox{\textcolor{muted}{$\hookrightarrow$}\space}, tabsize=2,
   morekeywords={lambda,as,with,assert}, upquote=false}
 \lstdefinestyle{out}{basicstyle=\ttfamily\footnotesize\color{ink}, columns=fullflexible, keepspaces=true, frame=none, xleftmargin=1.1em, aboveskip=0.2em, belowskip=0.6em, breaklines=true, showstringspaces=false}
+\lstdefinelanguage{Lean}{morekeywords={axiom,theorem,inductive,where,fun,by,have,cases,with,exact,intro,Prop,Type},sensitive=true,
+  morecomment=[l]{--},morecomment=[s]{/-}{-/}}
 \lstset{style=itp}
 \newcommand{\lstfile}[3][]{\lstinputlisting[style=itp,#1,caption={#2},label={#3}]}
 
