@@ -1,7 +1,7 @@
 {
  "code_clean": true,
- "commit": "f840710dd0b2a28482638ea351d528235f3e8411",
- "date": "2026-11-04",
+ "commit": "2c71442408ae2faba0e8a8701e78c2d332e69831",
+ "date": "2026-11-08",
  "gates": {
   "harness": {
    "cmd": "python3 tests/support/harness.py 1500 3",
@@ -24,7 +24,7 @@
     "terms": 1500
    },
    "pass": true,
-   "seconds": 0.69
+   "seconds": 0.59
   },
   "oracle": {
    "cmd": "python3 tests/kernel/oracle_gate.py ",
@@ -67,7 +67,7 @@
     "verified": 504
    },
    "pass": true,
-   "seconds": 19.11
+   "seconds": 14.67
   },
   "s15": {
    "cmd": "python3 tests/kernel/s15_classical_tests.py 300",
@@ -81,7 +81,7 @@
     "power_verified": 21
    },
    "pass": true,
-   "seconds": 0.23
+   "seconds": 0.24
   },
   "s16": {
    "cmd": "python3 tests/kernel/s16_quot_tests.py ",
@@ -96,7 +96,7 @@
     "true_statements": 5
    },
    "pass": true,
-   "seconds": 0.88
+   "seconds": 0.71
   },
   "s19": {
    "cmd": "python3 tests/kernel/s19_boundary_tests.py ",
@@ -110,13 +110,14 @@
     "passed": 188
    },
    "pass": true,
-   "seconds": 2.99
+   "seconds": 2.5
   },
   "s2": {
    "cmd": "python3 tests/kernel/s2_tests.py 1500",
    "exit": 0,
    "parsed": {
-    "admission_cases": 12,
+    "admission_cases": 13,
+    "admission_departures": 3,
     "corpus_accepted": 12,
     "corpus_false_rejected": 12,
     "corpus_fix_nodes": 31,
@@ -132,7 +133,7 @@
     "match_terms": 1500
    },
    "pass": true,
-   "seconds": 0.43
+   "seconds": 0.38
   },
   "s40": {
    "cmd": "python3 tests/environment/s40_actions_tests.py ",
@@ -141,28 +142,28 @@
     "checks": 666
    },
    "pass": true,
-   "seconds": 73.84
+   "seconds": 59.34
   },
   "s8": {
    "cmd": "python3 tests/kernel/s8_indep_tests.py 100",
    "exit": 0,
    "parsed": {
-    "both_accept": 137,
-    "both_reject": 2906,
+    "both_accept": 26,
+    "both_reject": 3017,
     "mutants": 3043,
     "runs": [
      {
       "agree": 1082,
-      "both_accept": 32,
-      "both_reject": 1050,
+      "both_accept": 8,
+      "both_reject": 1074,
       "i_acc_k_rej": 0,
       "k_acc_i_rej": 0,
       "mutants": 1082
      },
      {
       "agree": 1961,
-      "both_accept": 105,
-      "both_reject": 1856,
+      "both_accept": 18,
+      "both_reject": 1943,
       "i_acc_k_rej": 0,
       "k_acc_i_rej": 0,
       "mutants": 1961
@@ -170,8 +171,21 @@
     ]
    },
    "pass": true,
-   "seconds": 1.19
+   "seconds": 0.92
   }
+ },
+ "rerun": {
+  "changed": [
+   "tests/learner/s51_suite_tests.py"
+  ],
+  "first_commit": "28572799cefa3198edce89f59233d5198bee6b7a",
+  "fix_commit": "2c71442408ae2faba0e8a8701e78c2d332e69831",
+  "gates": [
+   "s51_suite_tests.py"
+  ],
+  "scripts": [
+   "tests/learner/s51_suite_tests.py"
+  ]
  },
  "sanitizers": {
   "build_flags": "-fsanitize=address,undefined -fno-omit-frame-pointer -O1 -g",
@@ -185,42 +199,42 @@
    {
     "gate": "s16_quot_tests.py",
     "pass": true,
-    "seconds": 4.5
+    "seconds": 3.2
    },
    {
     "gate": "s17_irrelevance_tests.py",
     "pass": true,
-    "seconds": 8.6
+    "seconds": 6.2
    },
    {
     "gate": "s20_reservation_tests.py",
     "pass": true,
-    "seconds": 1.1
+    "seconds": 0.9
    },
    {
     "gate": "s21_view_tests.py",
     "pass": true,
-    "seconds": 2.0
+    "seconds": 1.5
    },
    {
     "gate": "s32_synconv_tests.py",
     "pass": true,
-    "seconds": 12.8
+    "seconds": 9.7
    },
    {
     "gate": "s33_convmemo_tests.py",
     "pass": true,
-    "seconds": 42.5
+    "seconds": 24.3
    },
    {
     "gate": "s35_matchcheck_tests.py",
     "pass": true,
-    "seconds": 39.9
+    "seconds": 36.5
    },
    {
     "gate": "s39_failfast_tests.py",
     "pass": true,
-    "seconds": 9.3
+    "seconds": 7.2
    },
    {
     "gate": "s28_headunfold_tests.py",
@@ -230,37 +244,37 @@
    {
     "gate": "s29_apply_pi_goal_tests.py",
     "pass": true,
-    "seconds": 0.2
+    "seconds": 0.1
    },
    {
     "gate": "harness.py 1500 3",
     "pass": true,
-    "seconds": 2.5
+    "seconds": 2.3
    },
    {
     "gate": "s3_tests.py 600",
     "pass": true,
-    "seconds": 4.9
+    "seconds": 3.6
    },
    {
     "gate": "s4_tests.py 800",
     "pass": true,
-    "seconds": 6.3
+    "seconds": 4.4
    },
    {
     "gate": "s5_tests.py 1200 3",
     "pass": true,
-    "seconds": 8.2
+    "seconds": 6.4
    },
    {
     "gate": "s5_probe_tests.py 500 7",
     "pass": true,
-    "seconds": 10.1
+    "seconds": 7.9
    },
    {
     "gate": "s6_logic_tests.py",
     "pass": true,
-    "seconds": 0.6
+    "seconds": 0.5
    },
    {
     "gate": "s6_f6_tests.py",
@@ -270,32 +284,32 @@
    {
     "gate": "s7_param_tests.py 150 600",
     "pass": true,
-    "seconds": 7.3
+    "seconds": 6.3
    },
    {
     "gate": "s8_indep_tests.py 100",
     "pass": true,
-    "seconds": 2.5
+    "seconds": 2.4
    },
    {
     "gate": "s9_strong_tests.py",
     "pass": true,
-    "seconds": 0.3
+    "seconds": 0.2
    },
    {
     "gate": "s10_noconf_tests.py",
     "pass": true,
-    "seconds": 0.5
+    "seconds": 0.4
    },
    {
     "gate": "s11_eqgen_tests.py",
     "pass": true,
-    "seconds": 1.8
+    "seconds": 1.5
    },
    {
     "gate": "s12_probe_eq_tests.py 150",
     "pass": true,
-    "seconds": 19.1
+    "seconds": 15.5
    },
    {
     "gate": "s13_prop_tests.py",
@@ -305,22 +319,22 @@
    {
     "gate": "s14_prop_world_tests.py 600",
     "pass": true,
-    "seconds": 11.9
+    "seconds": 10.6
    },
    {
     "gate": "s15_classical_tests.py 300",
     "pass": true,
-    "seconds": 1.2
+    "seconds": 1.0
    },
    {
     "gate": "s18_deep_tests.py",
     "pass": true,
-    "seconds": 282.5
+    "seconds": 198.2
    },
    {
     "gate": "oracle_gate.py",
     "pass": true,
-    "seconds": 109.2
+    "seconds": 97.8
    }
   ],
   "left_out_by_the_tool": [
@@ -337,6 +351,6 @@
    "s50_proofs_tests.py"
   ],
   "options": "ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1",
-  "seconds": 305
+  "seconds": 249
  }
 }

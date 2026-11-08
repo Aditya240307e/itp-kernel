@@ -6,5 +6,7 @@ classical world: 36 globals; trusted axioms ('em', 'propext', 'funext', 'choice'
    apply choice on a Prop goal (a universe mismatch) is refused with a clear message: True
    soundness canary (classical axioms available): 2100 random proof attempts on 7 FALSE statements, 0 completed, verified proof of a false statement: None
    canary POWER (the same generator on 4 TRUE classical statements): 1200 attempts, 21 completed, 21 verified
+   C. the family R (R : Prop -> Type, mkr : forall A, R (R A -> False)) through the CHECKED entry: refused (constructor 'mkr' fails strict positivity -- the inductive being defined appears in a resu)
+      through the UNCHECKED entry the kernel proves False from ['LEM', 'propext']; the independent checker re-checks 53 globals and rejects 1: [('mkr', "admission: the family 'R' occurs in a result index of constructor 'mkr'")]
 elapsed 0s
 S15 CLASSICAL GATE: PASS

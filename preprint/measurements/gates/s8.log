@@ -19,11 +19,27 @@ independent re-check of the 31 globals of the kernel (value : type, every type i
    guard corpus: recursion on the WRONG argument                                expected False kernel False independent False
    guard corpus: add: f k' m                                                    expected True  kernel True  independent True 
    guard corpus: call under a match that is not on the parameter                expected False kernel False independent False
+   admission corpus: U_paradox: mk : Type0 -> U                           kernel reject independent reject admission: field 0 of constructor 'mk' lives in universe 1, larger than the family's 0
+   admission corpus: field Nat -> Type0 in a Type0 inductive              kernel reject independent reject admission: field 0 of constructor 'mk' lives in universe 1, larger than the family's 0
+   admission corpus: field whose type is a value                          kernel reject independent reject not a type: expected a sort
+   admission corpus: unbound variable in a field type                     kernel reject independent n/a    not representable even unchecked: ill-scoped term (constructor field type): it has an unbound 
+   admission corpus: constructor omits a required index                   kernel reject independent reject malformed constructor: its result is not its family applied to exactly 1 arguments
+   admission corpus: too many indices                                     kernel reject independent reject malformed constructor: its result is not its family applied to exactly 1 arguments
+   admission corpus: index of the wrong type                              kernel reject independent reject type mismatch
+   admission corpus: declared type is a value                             kernel reject independent reject not a type: expected a sort
+   admission corpus: strict positivity violated                           kernel reject independent reject admission: the family 'Ty' does not occur strictly positively in field 0 of constructor 'm
+   admission corpus: small impredicative field                            kernel accept independent accept 
+   admission corpus: large parameter-like field                           kernel accept independent accept 
+   admission corpus: Vec-style indexed family                             kernel accept independent accept 
+   admission corpus: F92: the family in an index of a recursive field     kernel reject independent reject admission: the family 'Ty' does not occur strictly positively in field 1 of constructor 'm
+   admission corpus: F92: ... under a product                             kernel reject independent reject admission: the family 'Ty' does not occur strictly positively in field 1 of constructor 'm
+   admission corpus: F92: the family in a result index                    kernel reject independent reject admission: the family 'Ty' occurs in a result index of constructor 'mkr'
+   admission corpus: infinitely branching with an index (control)         kernel accept independent accept 
    definitions the KERNEL rejects when re-declared (legacy mode): [] | the independent checker rejects: []
 legacy mode: 12 tactic proofs (derived globals included: 35 globals); valid proofs rejected by either side: 0; definitions rejected: 0
-   mutants: 1082, verdicts agree 1082 (both accept 32, both reject 1050); kernel ACCEPTS / independent REJECTS: 0; independent ACCEPTS / kernel REJECTS: 0
+   mutants: 1082, verdicts agree 1082 (both accept 8, both reject 1074); kernel ACCEPTS / independent REJECTS: 0; independent ACCEPTS / kernel REJECTS: 0
    definitions the KERNEL rejects when re-declared (parameter mode): ['cong', 'le_trans', 'transport'] | the independent checker rejects: ['cong', 'le_trans', 'transport']
 parameter mode: 21 tactic proofs (derived globals included: 36 globals); valid proofs rejected by either side: 0; definitions rejected: 3
-   mutants: 1961, verdicts agree 1961 (both accept 105, both reject 1856); kernel ACCEPTS / independent REJECTS: 0; independent ACCEPTS / kernel REJECTS: 0
-elapsed 1.1s
+   mutants: 1961, verdicts agree 1961 (both accept 18, both reject 1943); kernel ACCEPTS / independent REJECTS: 0; independent ACCEPTS / kernel REJECTS: 0
+elapsed 0.8s
 S8 INDEP GATE: PASS

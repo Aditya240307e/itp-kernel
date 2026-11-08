@@ -120,7 +120,7 @@ The unchecked variants (\texttt{declare\_unchecked}, \texttt{finish\_inductive\_
 In the code we ship, the only call to one of them is the declaration of an axiom, and the libraries declare exactly one axiom, excluded middle, in the number-theory library.
 The function \texttt{audit} reports, for a theorem, the axioms and quotient constants that it reaches through the types and values of the definitions it uses, in the manner of Lean's \texttt{\#print axioms}; a theorem that reaches none depends only on declarations that entered by a checked entry point, provided the discipline holds.
 The module that exposes the kernel to Python does expose the unchecked variants; the boundary is therefore a discipline of the layers above the kernel, backed by the second checker (\cref{sec:indep}), which re-checks the value of every definition in the exported environment, whichever path installed it.
-It does not re-check the admission of inductive families.
+It re-checks the admission of every inductive family too, from the types of its constructors alone, so that a family which entered by an unchecked path is found.
 
 \subsection{Certificate calculi}\label{sec:certificates}
 
@@ -172,11 +172,10 @@ The kernel's calculus differs from those in features whose metatheory is not cov
 \begin{itemize}
 \item the index forcing of \cref{sec:ind}, which changes the expected type of a branch;
 \item definitional proof irrelevance decided by the unifier and not by an untyped conversion (\cref{sec:prop}), with a depth bound;
-\item the strict-positivity check, which does not look in the indices (D2 in \cref{app:deviations}, where a family that it admits yields a proof of $\sy{False}$ with two classical axioms);
-\item the shape-only check of a motive (D1);
+\item the check of the motive of a case analysis, which asks that the types written with it are types and does not compare its binder types with those of the elimination principle (\cref{sec:ind});
 \item the eager one-layer unfolding of a fixpoint at any argument, against the specification's unfolding at a constructor (\cref{sec:conv});
 \item the incompleteness and non-transitivity of conversion on stuck case analyses (\cref{sec:limits}), which can only reject and cannot accept an equation that evaluation does not justify.
 \end{itemize}
 Verified checkers exist for neighbouring calculi (MetaCoq for the kernel of Rocq, Lean4Lean for that of Lean \citep{sozeau20,carneiro24}); nothing of that kind exists here.
 The evidence that the implementation is sound is therefore a test apparatus: a second checker written from the specification, differential and randomised testing against a frozen reference kernel, mutation testing of the kernel and of the tools, sanitiser runs, and a findings log (\cref{sec:testing}).
-Such evidence finds bugs and, as the case of D1 and D2 shows, it also marks its own limits: both checkers share one specification, so a flaw in the specification itself is invisible to the comparison.
+Such evidence finds bugs and it also marks its own limits: both checkers share one specification, so a flaw in the specification itself is invisible to the comparison.

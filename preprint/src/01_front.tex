@@ -1,5 +1,5 @@
 \title{\textbf{\ITP: A Dependently Typed Proof Assistant\\ with an Integrated Environment for Learning to Prove}\\[0.4em]
-\large Technical report, version 1}
+\large Technical report, version 2}
 \author{\authorname\\ \small \authoraffil}
 \date{}
 \maketitle
@@ -13,7 +13,7 @@ The kernel, written in C++23, implements the calculus: a universe hierarchy with
 Tactics, decision procedures (a ring normaliser, linear and nonlinear arithmetic by Farkas-style certificates) and proof search are untrusted programs that build terms; every finished term is re-checked by the kernel, and a second checker, written separately from the specification, re-checks the results.
 The environment makes a goal into data, lists the legal actions, probes each action on a restorable kernel state before taking it, keeps what an unfinished attempt did prove, and is exposed through the Gymnasium interface, all in one process and with deterministic budgets.
 This report specifies the calculus and the algorithms that decide it, including the pattern unification of metavariables; describes the implementation and its testing; and measures it on a two-core machine: a library of \libGlobals{} declarations is built in \libBuildA\,s and re-checked by the kernel in \kerRecheckA\,s, and a tactic probe has a median latency of \probeMed\,ms.
-It states what is not done: soundness is tested, not proved, and a known gap in the admission of inductive families gives a proof of \code{False} once excluded middle and propositional extensionality are added to a world (\cref{app:deviations}); the calculus has no cumulativity, universe polymorphism or mutual inductives; and no learning results are reported.
+It states what is not done: soundness is tested, not proved; the calculus has no cumulativity, universe polymorphism or mutual inductives; and no learning results are reported.
 \end{abstract}
 
 \noindent\textbf{Keywords:} interactive theorem proving; dependent type theory; proof checking; higher-order pattern unification; reinforcement learning environments; machine learning for theorem proving.

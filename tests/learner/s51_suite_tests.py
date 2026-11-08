@@ -1993,7 +1993,8 @@ def sec_O(c):
         head = open(XS.FINDINGS_PATH).readline()
         top = int(__import__('re').search(r'F1-F(\d+)', head).group(1))
         expect(rprobs == [] and rfs['problems'] == [] and rfs['findings'] == top and len(rows) == len({r['id'] for r in rows}), 'O13 every row of docs/FINDINGS.md has exactly one tag and every tag a row (%d findings, the title says F1-F%d): %r' % (rfs['findings'], top, (rprobs + rfs['problems'])[:3]))
-        expect(rfs['accepts'] == ['F19', 'F21', 'F26'] and 'F26' in rfs['trusted'] and rtags['F26']['layers'] == ['kernel', 'checker'] and rtags['F26']['effect'] == 'accepts', 'O14 the findings that accepted what they must refuse are F19 (the baseline), F21 and F26 (the opaque type that proved anything): %r' % (rfs['accepts'],))
+        expect(rfs['accepts'] == ['F19', 'F21', 'F26', 'F92', 'F93'] and 'F26' in rfs['trusted'] and all(rtags[f]['layers'] == ['kernel', 'checker'] and rtags[f]['effect'] == 'accepts' for f in ('F26', 'F92', 'F93')),
+               'O14 the findings that accepted what they must refuse are F19 (the baseline), F21, F26 (the opaque type that proved anything), F92 (a family with itself in an index) and F93 (the motive of a match): %r' % (rfs['accepts'],))
         # (4) the gates
         g = XS.gates_summary(F['gates'], 'TREE')
         expect(g['total'] == 4 and g['passed'] == 4 and g['failed'] == [] and list(g['groups']) == ['kernel', 'problems', 'repo'] and g['groups']['kernel'] == {'gates': 2, 'passed': 2, 'seconds': 90.0} and abs(g['seconds'] - 186.0) < 1e-9 and g['stale'] == 0, 'O15 gates: totals, groups in the order of the system, seconds')

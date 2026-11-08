@@ -231,7 +231,7 @@ G = {k: v['parsed'] for k, v in gj['gates'].items()}
 for k, v in gj['gates'].items(): assert v['pass'], k
 g = G['s2']
 M('lockMatchTerms', thousands(g['match_terms'])); M('lockIllTyped', thousands(g['ill_typed_rejected'])); M('lockDepChecked', thousands(g['dep_checked'])); M('lockDepAccepted', thousands(g['dep_accepted']))
-M('lockAdmission', g['admission_cases']); M('lockGuard', g['guard_cases']); M('lockCorpusProofs', g['corpus_proofs']); M('lockCorpusFalse', g['corpus_false_rejected']); M('lockGlobals', g['library_globals_redeclared'])
+M('lockAdmission', g['admission_cases']); M('lockDepartures', g['admission_departures']); M('lockGuard', g['guard_cases']); M('lockCorpusProofs', g['corpus_proofs']); M('lockCorpusFalse', g['corpus_false_rejected']); M('lockGlobals', g['library_globals_redeclared'])
 g = G['harness']
 M('harnessTerms', thousands(g['terms'])); M('harnessComparisons', thousands(sum(g['comparisons'].values()))); M('harnessCorpusNorm', g['corpus_normalisations'])
 g = G['oracle']
@@ -284,7 +284,7 @@ frows = []
 for line in open(os.path.join(ROOT, 'docs', 'FINDINGS.md')).read().split('\n'):
     if line.startswith('| F'): frows.append([c.strip() for c in line.strip().strip('|').split('|')])
 nums = sorted({int(re.match(r'F(\d+)', r[0]).group(1)) for r in frows})
-assert nums == list(range(1, 92)), 'the findings are not F1..F91'
+assert nums == list(range(1, 94)), 'the findings are not F1..F93'
 stat = collections.Counter()
 for r in frows:
     st = re.sub(r'\*', '', r[2]).lower()
@@ -335,13 +335,8 @@ def placeholder(*names):
     for n in names: M(n, '\\textbf{??}')
 
 
-dv = maybe_load('deviations.json')
-if dv:
-    assert dv['machine']['commit'] == mach['commit'], 'the positivity scan was run at a different commit than the measurements'
-    assert not dv['family_in_index_of_recursive_field'] and not dv['family_in_result_index'] and not dv['family_elsewhere_in_a_field'], 'a shipped family falls under deviation D2: the text of the appendix is wrong'
-    assert all(dv['control'][n] == (n in ('Q', 'R')) for n in dv['control']), 'the controls of the positivity scan failed'
-    M('dtwoFamilies', dv['families']); M('dtwoCtors', dv['constructors']); M('dtwoRecFams', dv['families_with_a_recursive_field']); M('dtwoGlobals', dv['globals'])
-else: placeholder('dtwoFamilies', 'dtwoCtors', 'dtwoRecFams', 'dtwoGlobals')
+# the digest of the code: every file below src/, tests/ and mutants/ but caches, built files and documents, and the manifest of the dataset (tools/check_numbers.py --tree)
+M('codeDigest', subprocess.run([sys.executable, '-I', os.path.join(ROOT, 'tools', 'check_numbers.py'), '--tree'], capture_output=True, text=True, check=True, cwd=ROOT).stdout.strip())
 
 asm = maybe_load('assembler.json')
 if asm:
@@ -358,13 +353,21 @@ else: placeholder('asmProofs', 'asmActions', 'asmSaid', 'asmMissing', 'asmErrors
 ga = os.path.join(MEAS, 'gates_all.jsonl')
 if os.path.exists(ga):
     recs = [json.loads(l) for l in open(ga) if l.strip()]
-    clean = os.path.join(MEAS, 'gates_s45_clean.jsonl')
-    s45_note = ''
-    if os.path.exists(clean):
-        c_ = [json.loads(l) for l in open(clean) if l.strip()]
-        assert len(c_) == 1 and c_[0]['gate'].startswith('s45'), 'gates_s45_clean.jsonl: one record, of the layout gate'
-        recs = [c_[0] if r_['gate'].startswith('s45') else r_ for r_ in recs]; s45_note = ' (in the run of all the gates the layout gate S45 objected to the untracked directory of this report, as its record in the log shows; the record kept for it here is that of a run of S45 alone, with the directory moved aside)'
     assert len(recs) == 54, 'the run holds %d gates, not 54' % len(recs)
+    # a gate that failed in the run of all of them and was run again alone (measurements/gates_rerun.jsonl): the record kept for it is that of the second run, and the report says so.
+    # measure_gates.py recorded, where the history exists, the commit of the first run, the commit that corrected the gate, and the files below src/, tests/ and mutants/ that changed in between;
+    # what is checked here is that the gate failed in the first run and that those files are the scripts of the gates that were run again and no others.
+    rerun_note = ''
+    rr = os.path.join(MEAS, 'gates_rerun.jsonl')
+    if os.path.exists(rr):
+        again = [json.loads(l) for l in open(rr) if l.strip()]
+        rf_ = gj.get('rerun'); assert rf_, 'gates_rerun.jsonl exists but gates.json holds no "rerun" (run measure_gates.py again)'
+        assert [r_['gate'] for r_ in again] == ['s51_suite_tests.py'] == rf_['gates'], 'gates_rerun.jsonl: one record, of the gate S51'
+        assert all(any(r_['gate'] == a_['gate'] and not r_['ok'] for r_ in recs) and a_['ok'] for a_ in again), 'gates_rerun.jsonl: the gate must fail in the run of all of them and pass in the second run'
+        assert rf_['changed'] == rf_['scripts'] == ['tests/learner/s51_suite_tests.py'], 'since the run of all the gates the files below src/, tests/ and mutants/ that changed are %s, not only the scripts of the gates run again' % rf_['changed']
+        recs = [next(a_ for a_ in again if a_['gate'] == r_['gate']) if r_['gate'] in {b_['gate'] for b_ in again} else r_ for r_ in recs]
+        rerun_note = (' The run of all of them was made at commit %s. In it the gate S51 failed one of its checks: the check pinned the list of the findings that had accepted what they must refuse, and the list did not yet name F92 and F93, the two findings of this version, which belong to it on purpose (the log of that run shows the failure).'
+                      ' The check was corrected in commit %s, the only change to \\code{src/}, \\code{tests/} and \\code{mutants/} between the two commits, and S51 was then run again alone, at the commit of the other measurements of this report; the record of the table for S51 is that of the second run.') % (rf_['first_commit'][:7], rf_['fix_commit'][:7])
     npass = sum(1 for r_ in recs if r_['ok'])
     M('fullGatesPassed', npass); M('fullGatesSeconds', thousands(round(sum(r_['seconds'] for r_ in recs))))
     lg_ = os.path.join(MEAS, 'gates_all.log'); mw_ = re.search(r'(\d+)/(\d+) gates passed in (\d+)s', open(lg_).read()) if os.path.exists(lg_) else None
@@ -389,8 +392,9 @@ if os.path.exists(ga):
         assert r_['gate'] in desc, 'no description of gate %s in tests/README.md' % r_['gate']
         rows.append('%s & \\code{%s/\\allowbreak{}%s} & %s & %s \\\\' % (gate_id(r_['gate']), r_['group'].split('/')[-1], tex_escape(r_['gate']).replace('\\_', '\\_\\allowbreak{}'), ('%.0f' % r_['seconds']) if r_['seconds'] >= 1 else '<1', tex_escape(short(desc[r_['gate']]))))
     M('gateIndexRows', '\n'.join(rows))
-    if npass == 54: M('fullGatesSentence', 'All %d gates pass at commit %s%s. The log of the run, one record per gate, is in the supplementary material.' % (npass, mach['commit'][:7], s45_note))
-    else: M('fullGatesSentence', '%d of the %d gates pass at commit %s%s; the others are listed with their verdicts in the supplementary material.' % (npass, len(recs), mach['commit'][:7], s45_note))
+    if npass == 54 and rerun_note: M('fullGatesSentence', 'All %d gates pass.%s The logs, one record per gate, are in the supplementary material.' % (npass, rerun_note))
+    elif npass == 54: M('fullGatesSentence', 'All %d gates pass at commit %s. The log of the run, one record per gate, is in the supplementary material.' % (npass, mach['commit'][:7]))
+    else: M('fullGatesSentence', '%d of the %d gates pass at commit %s; the others are listed with their verdicts in the supplementary material.' % (npass, len(recs), mach['commit'][:7]))
 else:
     MISSING.append('gates_all.jsonl'); placeholder('fullGatesPassed', 'fullGatesSeconds', 'fullGatesWallMin', 'gateIndexRows', 'fullGatesSentence')
 

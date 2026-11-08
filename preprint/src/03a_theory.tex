@@ -1,7 +1,7 @@
 \section{Theory: the calculus and the algorithms that decide it}\label{sec:theory}
 
 This section specifies the type theory that the kernel implements and the algorithms that decide it.
-It is a specification of an implementation, not the presentation of a new type theory: every rule below corresponds to code in the kernel (\cref{sec:impl}) or in the independent checker (\cref{sec:indep}), and where the implementation does something other than the textbook rule we say so; the cases are collected in \cref{app:deviations}.
+It is a specification of an implementation, not the presentation of a new type theory: every rule below corresponds to code in the kernel (\cref{sec:impl}) or in the independent checker (\cref{sec:indep}), and where the implementation does something other than the textbook rule we say so; the cases are collected in \cref{sec:meta}.
 The calculus belongs to the Calculus-of-Inductive-Constructions family \citep{coquand88cc,coquand90ind,paulin93}.
 Its nearest relatives are the kernel calculi of Lean and Rocq \citep{carneiro19,rocq,sozeau20}; the respects in which it is smaller are listed in \cref{sec:limits}.
 
@@ -115,9 +115,11 @@ Neither step is trusted: the term that results is checked in full, with the moti
 \\
 \inferrule*[right=\pf{Match}]{
   \Gamma \vdash s : I\,\vs{a} \qquad
-  \Gamma \vdash M : \Pi(\vs{y}{:}\vs{Y})(z{:}Z).\,S \qquad |\vs y| = |\vs a| \\
-  \Gamma \vdash b_c : \sy{Br}(I,c,\vs{a},M)\ \ (1\le c\le n) \qquad
-  \sy{Elim}(I,S)}
+  \Gamma \vdash M : \Pi(\vs{y}{:}\vs{Y})(z{:}Z).\,S \qquad |\vs y| = |\vs a| \qquad S \text{ a sort} \\
+  \Gamma \vdash M\,\vs{a}\,s : S \qquad
+  \sy{Elim}(I,S) \\
+  \Gamma \vdash \sy{Br}(I,c,\vs{a},M) : \Type_{j_c} \qquad
+  \Gamma \vdash b_c : \sy{Br}(I,c,\vs{a},M)\ \ (1\le c\le n)}
  {\Gamma \vdash \matchx{s}{M}{b_1,\dots,b_n} : M\,\vs{a}\,s}
 \end{mathpar}
 \caption{Typing rules, part two.

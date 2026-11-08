@@ -1,526 +1,526 @@
 {
  "machine": {
-  "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+  "cpu": "Intel(R) Xeon(R) Processor @ 2.30GHz",
   "cores": 2,
   "cores_usable": 2,
-  "memory_gb": 7.84,
-  "os": "Linux-6.18.44-fc-v233-x86_64-with-glibc2.39",
+  "memory_gb": 7.83,
+  "os": "Linux-6.18.44-fc-v310-x86_64-with-glibc2.39",
   "python": "3.13.16",
   "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
-  "commit": "f840710dd0b2a28482638ea351d528235f3e8411",
+  "commit": "2c71442408ae2faba0e8a8701e78c2d332e69831",
   "tree_clean_outside_preprint": true,
   "loadavg_start": [
-   0.35,
-   0.33,
-   0.14
+   0.97,
+   1.08,
+   1.22
   ],
   "loadavg_end": [
-   0.84,
-   0.5,
-   0.22
+   0.99,
+   1.06,
+   1.19
   ],
-  "peak_rss_mb_total": 711.37109375
+  "peak_rss_mb_total": 712.84375
  },
  "build": {
-  "seconds": 3.8276400969998576,
+  "seconds": 2.7382939070002976,
   "globals": 555,
-  "peak_rss_mb": 69.33984375,
-  "rss_mb": 69.4609375,
+  "peak_rss_mb": 69.6171875,
+  "rss_mb": 69.76171875,
   "stages": [
    {
     "module": "lnl_base",
     "stage": "declare_types",
     "depth": 0,
-    "seconds": 0.0007190950000222074,
+    "seconds": 0.00039631800063943956,
     "added": 20,
     "total": 20,
-    "rss_mb": 17.828125
+    "rss_mb": 17.8671875
    },
    {
     "module": "lnl_base",
     "stage": "declare_add",
     "depth": 0,
-    "seconds": 0.00016930600008890906,
+    "seconds": 9.8479999905976e-05,
     "added": 1,
     "total": 21,
-    "rss_mb": 17.85546875
+    "rss_mb": 17.89453125
    },
    {
     "module": "lnl_base",
     "stage": "equality_lemmas",
     "depth": 0,
-    "seconds": 0.00284214799989968,
+    "seconds": 0.0016895270000532037,
     "added": 5,
     "total": 26,
-    "rss_mb": 18.05078125
+    "rss_mb": 18.0859375
    },
    {
     "module": "lnl_base",
     "stage": "logic_lemmas",
     "depth": 0,
-    "seconds": 0.003024081999910777,
+    "seconds": 0.0016374030001315987,
     "added": 14,
     "total": 40,
-    "rss_mb": 18.25
+    "rss_mb": 18.2890625
    },
    {
     "module": "nat_lib",
     "stage": "declare_arith",
     "depth": 0,
-    "seconds": 0.0003148840000903874,
+    "seconds": 0.00015779400018800516,
     "added": 4,
     "total": 44,
-    "rss_mb": 18.25
+    "rss_mb": 18.2890625
    },
    {
     "module": "nat_lib",
     "stage": "succ_lemmas",
     "depth": 0,
-    "seconds": 0.000585601000011593,
+    "seconds": 0.00028570700033014873,
     "added": 7,
     "total": 51,
-    "rss_mb": 18.25
+    "rss_mb": 18.296875
    },
    {
     "module": "nat_lib",
     "stage": "add_lemmas",
     "depth": 0,
-    "seconds": 0.006313363999879584,
+    "seconds": 0.003362603000823583,
     "added": 11,
     "total": 62,
-    "rss_mb": 18.4375
+    "rss_mb": 18.49609375
    },
    {
     "module": "nat_lib",
     "stage": "mul_lemmas",
     "depth": 0,
-    "seconds": 0.00958072399998855,
+    "seconds": 0.005010191000110353,
     "added": 12,
     "total": 74,
-    "rss_mb": 18.75390625
+    "rss_mb": 18.80859375
    },
    {
     "module": "nat_lib",
     "stage": "pow_lemmas",
     "depth": 0,
-    "seconds": 0.006271180999874559,
+    "seconds": 0.0032260079997286084,
     "added": 8,
     "total": 82,
-    "rss_mb": 18.80078125
+    "rss_mb": 18.84375
    },
    {
     "module": "nat_lib",
     "stage": "arith_lemmas",
     "depth": 0,
-    "seconds": 0.011210877999928925,
+    "seconds": 0.005953657000645762,
     "added": 4,
     "total": 86,
-    "rss_mb": 19.4609375
+    "rss_mb": 19.51171875
    },
    {
     "module": "nat_lib",
     "stage": "order_lemmas",
     "depth": 0,
-    "seconds": 0.018309086000044772,
+    "seconds": 0.01032710599974962,
     "added": 22,
     "total": 108,
-    "rss_mb": 19.85546875
+    "rss_mb": 19.90625
    },
    {
     "module": "ring_lib",
     "stage": "ring_lemma_set (N)",
     "depth": 1,
-    "seconds": 0.011309051000125692,
+    "seconds": 0.008291336000183946,
     "added": 21,
     "total": 129,
-    "rss_mb": 20.17578125
+    "rss_mb": 20.24609375
    },
    {
     "module": "nat_lib",
     "stage": "ring_lemmas",
     "depth": 0,
-    "seconds": 0.011403130999951827,
+    "seconds": 0.008397554000111995,
     "added": 21,
     "total": 129,
-    "rss_mb": 20.17578125
+    "rss_mb": 20.24609375
    },
    {
     "module": "bin_lib",
     "stage": "declare_binary",
     "depth": 0,
-    "seconds": 0.0008216740000079881,
+    "seconds": 0.0006814019998273579,
     "added": 20,
     "total": 149,
-    "rss_mb": 20.17578125
+    "rss_mb": 20.25
    },
    {
     "module": "bin_lib",
     "stage": "pos_lemmas",
     "depth": 0,
-    "seconds": 0.020196196999904714,
+    "seconds": 0.015845043999433983,
     "added": 6,
     "total": 155,
-    "rss_mb": 20.7109375
+    "rss_mb": 20.8125
    },
    {
     "module": "bin_lib",
     "stage": "n_lemmas",
     "depth": 0,
-    "seconds": 0.00586352799996348,
+    "seconds": 0.004875161000200023,
     "added": 11,
     "total": 166,
-    "rss_mb": 20.859375
+    "rss_mb": 20.9609375
    },
    {
     "module": "bin_lib",
     "stage": "n_library",
     "depth": 0,
-    "seconds": 0.12009608999983357,
+    "seconds": 0.07713637100005144,
     "added": 43,
     "total": 209,
-    "rss_mb": 21.87890625
+    "rss_mb": 21.9609375
    },
    {
     "module": "bin_lib",
     "stage": "n_order",
     "depth": 0,
-    "seconds": 0.03459453499999654,
+    "seconds": 0.02563175500017678,
     "added": 22,
     "total": 231,
-    "rss_mb": 22.54296875
+    "rss_mb": 22.65625
    },
    {
     "module": "ring_lib",
     "stage": "ring_lemma_set (N)",
     "depth": 0,
-    "seconds": 0.010887430999900971,
+    "seconds": 0.008451460999822302,
     "added": 21,
     "total": 252,
-    "rss_mb": 22.87109375
+    "rss_mb": 22.953125
    },
    {
     "module": "quot_lib",
     "stage": "declare_quotients",
     "depth": 0,
-    "seconds": 0.0005894579999221605,
+    "seconds": 0.00039140200078691123,
     "added": 6,
     "total": 258,
-    "rss_mb": 22.9140625
+    "rss_mb": 23.0
    },
    {
     "module": "quot_lib",
     "stage": "declare_prod",
     "depth": 0,
-    "seconds": 0.00032018100000641425,
+    "seconds": 0.0003031979995284928,
     "added": 4,
     "total": 262,
-    "rss_mb": 22.9140625
+    "rss_mb": 23.00390625
    },
    {
     "module": "quot_lib",
     "stage": "quot_lift2",
     "depth": 0,
-    "seconds": 0.0011195790000328998,
+    "seconds": 0.0008071780002865125,
     "added": 2,
     "total": 264,
-    "rss_mb": 22.9296875
+    "rss_mb": 23.015625
    },
    {
     "module": "int_lib",
     "stage": "bool_lib",
     "depth": 0,
-    "seconds": 0.00688366200006385,
+    "seconds": 0.005920983000578417,
     "added": 13,
     "total": 277,
-    "rss_mb": 23.30078125
+    "rss_mb": 23.3828125
    },
    {
     "module": "int_lib",
     "stage": "int_core",
     "depth": 0,
-    "seconds": 0.007807285000126285,
+    "seconds": 0.0064505119999012095,
     "added": 9,
     "total": 286,
-    "rss_mb": 23.40234375
+    "rss_mb": 23.67578125
    },
    {
     "module": "int_lib",
     "stage": "int_ops",
     "depth": 0,
-    "seconds": 0.1585076180001579,
+    "seconds": 0.1297032490001584,
     "added": 38,
     "total": 324,
-    "rss_mb": 27.19921875
+    "rss_mb": 27.328125
    },
    {
     "module": "int_lib",
     "stage": "int_pow",
     "depth": 0,
-    "seconds": 0.004462321999881169,
+    "seconds": 0.003973136000240629,
     "added": 10,
     "total": 334,
-    "rss_mb": 27.2421875
+    "rss_mb": 27.3671875
    },
    {
     "module": "int_lib",
     "stage": "int_nat",
     "depth": 0,
-    "seconds": 0.007796543999802452,
+    "seconds": 0.006497449000562483,
     "added": 11,
     "total": 345,
-    "rss_mb": 27.296875
+    "rss_mb": 27.41796875
    },
    {
     "module": "ring_lib",
     "stage": "ring_lemma_set (N)",
     "depth": 1,
-    "seconds": 0.012690419000136899,
+    "seconds": 0.010558066999692528,
     "added": 23,
     "total": 368,
-    "rss_mb": 27.49609375
+    "rss_mb": 27.85546875
    },
    {
     "module": "int_lib",
     "stage": "int_ring",
     "depth": 0,
-    "seconds": 0.012776294000104826,
+    "seconds": 0.010656595999535057,
     "added": 23,
     "total": 368,
-    "rss_mb": 27.49609375
+    "rss_mb": 27.85546875
    },
    {
     "module": "int_lib",
     "stage": "int_order",
     "depth": 0,
-    "seconds": 0.02757773400003316,
+    "seconds": 0.02161239899942302,
     "added": 14,
     "total": 382,
-    "rss_mb": 28.6015625
+    "rss_mb": 28.6796875
    },
    {
     "module": "int_lib",
     "stage": "int_order2",
     "depth": 0,
-    "seconds": 0.015419972000017879,
+    "seconds": 0.012680799000008847,
     "added": 15,
     "total": 397,
-    "rss_mb": 28.73046875
+    "rss_mb": 28.81640625
    },
    {
     "module": "int_lib",
     "stage": "int_order3",
     "depth": 0,
-    "seconds": 0.012287381000078312,
+    "seconds": 0.010443854000186548,
     "added": 11,
     "total": 408,
-    "rss_mb": 28.88671875
+    "rss_mb": 29.46875
    },
    {
     "module": "int_lib",
     "stage": "int_order4",
     "depth": 0,
-    "seconds": 0.06620147299986456,
+    "seconds": 0.05162670700065064,
     "added": 26,
     "total": 434,
-    "rss_mb": 30.375
+    "rss_mb": 30.45703125
    },
    {
     "module": "nt_lib",
     "stage": "nt_induction",
     "depth": 0,
-    "seconds": 0.0569629490000807,
+    "seconds": 0.030852183000206423,
     "added": 3,
     "total": 437,
-    "rss_mb": 31.703125
+    "rss_mb": 31.78125
    },
    {
     "module": "nt_lib",
     "stage": "nt_dvd",
     "depth": 0,
-    "seconds": 0.11941086499996345,
+    "seconds": 0.09352537599988864,
     "added": 23,
     "total": 460,
-    "rss_mb": 32.78125
+    "rss_mb": 32.98046875
    },
    {
     "module": "nt_lib",
     "stage": "nt_divmod",
     "depth": 0,
-    "seconds": 0.09962870699996529,
+    "seconds": 0.07001558100000693,
     "added": 2,
     "total": 462,
-    "rss_mb": 35.9609375
+    "rss_mb": 36.1875
    },
    {
     "module": "nt_lib",
     "stage": "nt_classical",
     "depth": 0,
-    "seconds": 0.0022573399999146204,
+    "seconds": 0.0018449520002832287,
     "added": 6,
     "total": 468,
-    "rss_mb": 35.9921875
+    "rss_mb": 36.22265625
    },
    {
     "module": "nt_lib",
     "stage": "nt_gcd",
     "depth": 0,
-    "seconds": 0.12743026299995108,
+    "seconds": 0.08993145299973548,
     "added": 11,
     "total": 479,
-    "rss_mb": 39.11328125
+    "rss_mb": 39.2421875
    },
    {
     "module": "nt_lib",
     "stage": "nt_prime",
     "depth": 0,
-    "seconds": 0.06311650599991481,
+    "seconds": 0.049786994999521994,
     "added": 6,
     "total": 485,
-    "rss_mb": 39.7265625
+    "rss_mb": 39.9140625
    },
    {
     "module": "ext_lib",
     "stage": "nt_facts",
     "depth": 0,
-    "seconds": 1.2761519840000801,
+    "seconds": 0.970065137000347,
     "added": 11,
     "total": 496,
-    "rss_mb": 54.859375
+    "rss_mb": 55.24609375
    },
    {
     "module": "ext_lib",
     "stage": "sums",
     "depth": 0,
-    "seconds": 0.10092637100001411,
+    "seconds": 0.06828551600028732,
     "added": 20,
     "total": 516,
-    "rss_mb": 55.16015625
+    "rss_mb": 55.54296875
    },
    {
     "module": "ext_lib",
     "stage": "prods",
     "depth": 0,
-    "seconds": 0.025855753000087134,
+    "seconds": 0.019265822000306798,
     "added": 15,
     "total": 531,
-    "rss_mb": 55.26171875
+    "rss_mb": 55.640625
    },
    {
     "module": "ext_lib",
     "stage": "pows",
     "depth": 0,
-    "seconds": 0.07844892899993283,
+    "seconds": 0.039433558999917295,
     "added": 9,
     "total": 540,
-    "rss_mb": 55.47265625
+    "rss_mb": 55.859375
    },
    {
     "module": "ext_lib",
     "stage": "squares",
     "depth": 0,
-    "seconds": 0.11722307800005183,
+    "seconds": 0.07931177499995101,
     "added": 3,
     "total": 543,
-    "rss_mb": 56.00390625
+    "rss_mb": 56.38671875
    },
    {
     "module": "ext_lib",
     "stage": "primes",
     "depth": 0,
-    "seconds": 0.643502122999962,
+    "seconds": 0.4780109439998341,
     "added": 6,
     "total": 549,
-    "rss_mb": 60.92578125
+    "rss_mb": 61.296875
    },
    {
     "module": "imo_lib",
     "stage": "imo_1959_p1",
     "depth": 0,
-    "seconds": 0.003990172999920105,
+    "seconds": 0.0030358080002770294,
     "added": 1,
     "total": 550,
-    "rss_mb": 60.9375
+    "rss_mb": 61.30859375
    },
    {
     "module": "imo_lib",
     "stage": "sqrt2",
     "depth": 0,
-    "seconds": 0.0741444389998378,
+    "seconds": 0.06007178199979535,
     "added": 2,
     "total": 552,
-    "rss_mb": 61.14453125
+    "rss_mb": 61.51171875
    },
    {
     "module": "imo_lib",
     "stage": "imo_2019_p1",
     "depth": 0,
-    "seconds": 0.44917279299988877,
+    "seconds": 0.2465967369998907,
     "added": 3,
     "total": 555,
-    "rss_mb": 69.4609375
+    "rss_mb": 69.76171875
    }
   ],
   "groups": [
    {
     "group": "logic and equality (lnl_base)",
     "module": "lnl_base",
-    "seconds": 0.006754630999921574,
+    "seconds": 0.003821728000730218,
     "added": 40,
     "total_after": 40
    },
    {
     "group": "unary naturals (nat_lib)",
     "module": "nat_lib",
-    "seconds": 0.0639888489997702,
+    "seconds": 0.036720620001688076,
     "added": 89,
     "total_after": 129
    },
    {
     "group": "binary naturals (bin_lib)",
     "module": "bin_lib",
-    "seconds": 0.1815720239997063,
+    "seconds": 0.12416973299968959,
     "added": 102,
     "total_after": 231
    },
    {
     "group": "ring lemmas over N (ring_lib)",
     "module": "ring_lib",
-    "seconds": 0.010887430999900971,
+    "seconds": 0.008451460999822302,
     "added": 21,
     "total_after": 252
    },
    {
     "group": "quotients (quot_lib)",
     "module": "quot_lib",
-    "seconds": 0.0020292179999614746,
+    "seconds": 0.0015017780006019166,
     "added": 12,
     "total_after": 264
    },
    {
     "group": "integers (int_lib)",
     "module": "int_lib",
-    "seconds": 0.3197202850001304,
+    "seconds": 0.25956568400124524,
     "added": 170,
     "total_after": 434
    },
    {
     "group": "number theory (nt_lib)",
     "module": "nt_lib",
-    "seconds": 0.46880662999978995,
+    "seconds": 0.3359565399996427,
     "added": 51,
     "total_after": 485
    },
    {
     "group": "library extension (ext_lib)",
     "module": "ext_lib",
-    "seconds": 2.242108238000128,
+    "seconds": 1.6543727530006436,
     "added": 64,
     "total_after": 549
    },
    {
     "group": "olympiad problems (imo_lib)",
     "module": "imo_lib",
-    "seconds": 0.5273074049996467,
+    "seconds": 0.3097043269999631,
     "added": 6,
     "total_after": 555
    }
@@ -552,10 +552,10 @@
   },
   "pools": [
    222,
-   560627,
-   165045,
+   565095,
+   165179,
    0,
-   74893,
+   76806,
    3,
    555,
    2991,
@@ -570,13 +570,13 @@
  },
  "kernel_stats": {
   "typing_memo (hits, misses, ?)": [
-   89691,
-   106411,
-   41183
+   90288,
+   111750,
+   42076
   ],
   "quick_conversion (tried, settled)": [
-   17972,
-   6723
+   18061,
+   6799
   ],
   "extraction (fast, slow)": [
    256,
@@ -587,79 +587,79 @@
  },
  "kernel": {
   "declarations": 516,
-  "seconds": 0.45360171399852334,
+  "seconds": 0.3360315800000535,
   "rejected": [],
   "slowest": [
    {
     "name": "three_dvd_sum_squares",
-    "seconds": 0.0611
-   },
-   {
-    "name": "five_dvd_fifth_power",
-    "seconds": 0.038
+    "seconds": 0.0443
    },
    {
     "name": "imo2019_p1_fwd",
-    "seconds": 0.036
+    "seconds": 0.0286
+   },
+   {
+    "name": "five_dvd_fifth_power",
+    "seconds": 0.0281
    },
    {
     "name": "cube_minus_n_div6",
-    "seconds": 0.0299
-   },
-   {
-    "name": "imo2019_p1_bwd",
-    "seconds": 0.0172
+    "seconds": 0.0224
    },
    {
     "name": "cube_mod_nine",
-    "seconds": 0.0147
+    "seconds": 0.0106
    },
    {
-    "name": "Z.even_or_odd",
-    "seconds": 0.0133
+    "name": "sqrt2_irrational",
+    "seconds": 0.0095
    },
    {
     "name": "Z.sqrt2_aux",
-    "seconds": 0.0123
+    "seconds": 0.0082
+   },
+   {
+    "name": "imo2019_p1_bwd",
+    "seconds": 0.0079
    }
   ],
-  "median_ms": 0.05889499993827485
+  "median_ms": 0.05887800034543034
  },
  "independent": {
   "globals": 555,
-  "load_seconds": 5.100925493999966,
-  "check_seconds": 75.8480727000001,
+  "load_seconds": 4.504367003999505,
+  "check_seconds": 62.650760835000256,
   "rejected": []
  },
  "micro": {
   "ffi_call_baseline": {
-   "median_us": 0.03816738500063366,
-   "min_us": 0.03781877499932307,
-   "max_us": 0.04098477999946226
+   "median_us": 0.03283544499936397,
+   "min_us": 0.03207508500054246,
+   "max_us": 0.03403669499675743
   },
   "checkpoint_rewind_empty": {
-   "median_us": 0.1465265349997935,
-   "min_us": 0.14368220000051224,
-   "max_us": 0.18702718999975332
+   "median_us": 0.12170905499715445,
+   "min_us": 0.1156922600011967,
+   "max_us": 0.16758024499722524
   },
   "rewind_after_allocating": {
    "nodes_built_about": 6000,
-   "build_us_per_node_median": 0.613077833349962,
-   "rewind_us_median": 15.407000091727241,
-   "rewind_ns_per_node_median": 2.567833348621207
+   "build_us_per_node_median": 0.5247168332971341,
+   "rewind_us_median": 25.768999876163434,
+   "rewind_ns_per_node_median": 4.294833312693906
   },
   "binary_product_by_reduction": [
    {
     "bits_a": 317,
     "bits_b": 337,
     "product_decided_equal": true,
-    "seconds_median": 0.044330418000072314
+    "seconds_median": 0.03011818399954791
    },
    {
     "bits_a": 793,
     "bits_b": 843,
     "product_decided_equal": true,
-    "seconds_median": 0.27634366400002364
+    "seconds_median": 0.22638481699959812
    }
   ]
  }

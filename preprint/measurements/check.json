@@ -9,25 +9,25 @@
  },
  "independent_setup": {
   "globals": 274,
-  "seconds": 1.35
+  "seconds": 1.03
  },
  "machine": {
-  "commit": "f840710dd0b2a28482638ea351d528235f3e8411",
+  "commit": "2c71442408ae2faba0e8a8701e78c2d332e69831",
   "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
   "cores": 2,
   "cores_usable": 2,
-  "cpu": "Intel(R) Xeon(R) Processor @ 2.10GHz",
+  "cpu": "Intel(R) Xeon(R) Processor @ 2.30GHz",
   "loadavg_start": [
-   0.3,
-   0.69,
-   0.68
+   0.92,
+   1.0,
+   1.12
   ],
-  "memory_gb": 7.84,
-  "os": "Linux-6.18.44-fc-v233-x86_64-with-glibc2.39",
+  "memory_gb": 7.83,
+  "os": "Linux-6.18.44-fc-v310-x86_64-with-glibc2.39",
   "python": "3.13.16",
   "tree_clean_outside_preprint": true
  },
- "peak_rss_mb": 1330.3,
+ "peak_rss_mb": 1328.2,
  "proofs": {
   "actions_max": 466,
   "actions_median": 11,
@@ -54,13 +54,13 @@
    "independent": {
     "accepted": true,
     "message": "OK",
-    "rss_delta_mb": 57.00390625,
-    "seconds": 2.8270929280001837,
+    "rss_delta_mb": 56.22265625,
+    "seconds": 2.186505272999966,
     "status": "ok"
    },
-   "kernel_check_s": 0.020542782999655174,
+   "kernel_check_s": 0.016894518000299286,
    "name": "aime1986_p4",
-   "replay_s": 0.05296152999972037,
+   "replay_s": 0.04481635100000858,
    "term_tree_nodes": 124359
   },
   {
@@ -68,13 +68,13 @@
    "independent": {
     "accepted": true,
     "message": "OK",
-    "rss_delta_mb": 1.03125,
-    "seconds": 0.11253711500012287,
+    "rss_delta_mb": 1.02734375,
+    "seconds": 0.09336367600008089,
     "status": "ok"
    },
-   "kernel_check_s": 0.0013034769999649143,
+   "kernel_check_s": 0.0011322269992888323,
    "name": "ident_diff_squares",
-   "replay_s": 0.003562256999884994,
+   "replay_s": 0.0032637829999657697,
    "term_tree_nodes": 4665
   },
   {
@@ -82,13 +82,13 @@
    "independent": {
     "accepted": true,
     "message": "OK",
-    "rss_delta_mb": 1.84375,
-    "seconds": 0.20047213199995895,
+    "rss_delta_mb": 1.265625,
+    "seconds": 0.14517546400020365,
     "status": "ok"
    },
-   "kernel_check_s": 0.0026950930000566586,
+   "kernel_check_s": 0.0022790499997427105,
    "name": "ineq_am_gm_two",
-   "replay_s": 0.007264352000220242,
+   "replay_s": 0.006561350000083621,
    "term_tree_nodes": 9911
   },
   {
@@ -96,13 +96,13 @@
    "independent": {
     "accepted": true,
     "message": "OK",
-    "rss_delta_mb": 3.58203125,
-    "seconds": 0.30179647399972964,
+    "rss_delta_mb": 3.58984375,
+    "seconds": 0.2345684669999173,
     "status": "ok"
    },
-   "kernel_check_s": 0.00429010899961213,
+   "kernel_check_s": 0.004429235999850789,
    "name": "amc_ineq_01",
-   "replay_s": 0.011095312999714224,
+   "replay_s": 0.010386058000221965,
    "term_tree_nodes": 16887
   },
   {
@@ -110,13 +110,13 @@
    "independent": {
     "accepted": true,
     "message": "OK",
-    "rss_delta_mb": 10.48828125,
-    "seconds": 0.5561977990000742,
+    "rss_delta_mb": 10.56640625,
+    "seconds": 0.45673676600017643,
     "status": "ok"
    },
-   "kernel_check_s": 0.00839828000016496,
+   "kernel_check_s": 0.006926808000571327,
    "name": "ineq_three_squares",
-   "replay_s": 0.022326190000057977,
+   "replay_s": 0.018402296000203933,
    "term_tree_nodes": 34311
   },
   {
@@ -124,13 +124,13 @@
    "independent": {
     "accepted": true,
     "message": "OK",
-    "rss_delta_mb": 6.88671875,
-    "seconds": 0.45610831899966797,
+    "rss_delta_mb": 6.89453125,
+    "seconds": 0.2883736069998122,
     "status": "ok"
    },
-   "kernel_check_s": 0.006094348999795329,
+   "kernel_check_s": 0.005122810000102618,
    "name": "amc_ineq_05",
-   "replay_s": 0.015351321999787615,
+   "replay_s": 0.01280666300044686,
    "term_tree_nodes": 20353
   },
   {
@@ -138,13 +138,13 @@
    "independent": {
     "accepted": true,
     "message": "OK",
-    "rss_delta_mb": 1.84375,
-    "seconds": 0.15038764500013713,
+    "rss_delta_mb": 1.21875,
+    "seconds": 0.09979867000038212,
     "status": "ok"
    },
-   "kernel_check_s": 0.0026286260003871575,
+   "kernel_check_s": 0.002360400000725349,
    "name": "amc_ind_02",
-   "replay_s": 0.012454463000267424,
+   "replay_s": 0.011115832000541559,
    "term_tree_nodes": 9223
   },
   {
@@ -152,13 +152,13 @@
    "independent": {
     "accepted": true,
     "message": "OK",
-    "rss_delta_mb": 14.73046875,
-    "seconds": 0.9222542279999288,
+    "rss_delta_mb": 14.84765625,
+    "seconds": 0.7364200659994822,
     "status": "ok"
    },
-   "kernel_check_s": 0.01686464900012652,
+   "kernel_check_s": 0.014506164000522404,
    "name": "amc_seq_01",
-   "replay_s": 0.03733054400026958,
+   "replay_s": 0.03235403800044878,
    "term_tree_nodes": 44151
   },
   {
@@ -166,13 +166,13 @@
    "independent": {
     "accepted": true,
     "message": "OK",
-    "rss_delta_mb": 81.37890625,
-    "seconds": 2.9729774630000065,
+    "rss_delta_mb": 81.47265625,
+    "seconds": 2.8798795029997564,
     "status": "ok"
    },
-   "kernel_check_s": 0.05959989899974971,
+   "kernel_check_s": 0.051080715999887616,
    "name": "aime1990_p15",
-   "replay_s": 0.10602800199967533,
+   "replay_s": 0.08972218100007012,
    "term_tree_nodes": 96811
   },
   {
@@ -180,13 +180,13 @@
    "independent": {
     "accepted": true,
     "message": "OK",
-    "rss_delta_mb": 16.75390625,
-    "seconds": 1.1903177200001664,
+    "rss_delta_mb": 16.72265625,
+    "seconds": 1.029838569000276,
     "status": "ok"
    },
-   "kernel_check_s": 0.02238889999989624,
+   "kernel_check_s": 0.01940168300006917,
    "name": "no_f_f_succ",
-   "replay_s": 0.04791944699991291,
+   "replay_s": 0.04324432199973671,
    "term_tree_nodes": 57427
   },
   {
@@ -194,13 +194,13 @@
    "independent": {
     "accepted": true,
     "message": "OK",
-    "rss_delta_mb": 35.37890625,
-    "seconds": 1.2647013570003764,
+    "rss_delta_mb": 35.34765625,
+    "seconds": 1.1262732320001305,
     "status": "ok"
    },
-   "kernel_check_s": 0.02642106600023908,
+   "kernel_check_s": 0.02318174399988493,
    "name": "pell_infinitely_many",
-   "replay_s": 0.07407590100001471,
+   "replay_s": 0.06259430499994778,
    "term_tree_nodes": 51945
   },
   {
@@ -208,13 +208,13 @@
    "independent": {
     "accepted": true,
     "message": "OK",
-    "rss_delta_mb": 83.99609375,
-    "seconds": 3.3023872079998,
+    "rss_delta_mb": 84.72265625,
+    "seconds": 3.385230312999738,
     "status": "ok"
    },
-   "kernel_check_s": 0.07575961900010952,
+   "kernel_check_s": 0.05835161000049993,
    "name": "amc_seq_02",
-   "replay_s": 0.15655806999984634,
+   "replay_s": 0.11438031499983481,
    "term_tree_nodes": 157199
   },
   {
@@ -222,13 +222,13 @@
    "independent": {
     "accepted": true,
     "message": "OK",
-    "rss_delta_mb": 24.50390625,
-    "seconds": 1.5044316220000837,
+    "rss_delta_mb": 24.59765625,
+    "seconds": 1.4156661419992815,
     "status": "ok"
    },
-   "kernel_check_s": 0.03759930100022757,
+   "kernel_check_s": 0.03340005400059454,
    "name": "imo1977_p6",
-   "replay_s": 0.09176534199968955,
+   "replay_s": 0.07587416999922425,
    "term_tree_nodes": 57243
   },
   {
@@ -237,12 +237,12 @@
     "accepted": true,
     "message": "OK",
     "rss_delta_mb": 395.26171875,
-    "seconds": 17.46928360999982,
+    "seconds": 16.206240855999567,
     "status": "ok"
    },
-   "kernel_check_s": 0.1587476350000543,
+   "kernel_check_s": 0.13744258099995932,
    "name": "imo1964_p2",
-   "replay_s": 0.31616286599955856,
+   "replay_s": 0.2670142400002078,
    "term_tree_nodes": 486741
   },
   {
@@ -250,25 +250,25 @@
    "independent": {
     "accepted": true,
     "message": "OK",
-    "rss_delta_mb": 1256.78515625,
-    "seconds": 53.64808437700003,
+    "rss_delta_mb": 1256.91015625,
+    "seconds": 45.5845597940006,
     "status": "ok"
    },
-   "kernel_check_s": 1.4484436650000134,
+   "kernel_check_s": 1.3209352210005818,
    "name": "amc_prime_01",
-   "replay_s": 2.5473089820002315,
+   "replay_s": 2.0384655479992944,
    "term_tree_nodes": 448062
   },
   {
    "actions": 466,
    "independent": {
-    "rss_delta_mb": 2504.73828125,
-    "seconds": 98.5358781660002,
+    "rss_delta_mb": 2501.66796875,
+    "seconds": 83.5827117810004,
     "status": "memory"
    },
-   "kernel_check_s": 6.4292928079999,
+   "kernel_check_s": 6.291080598000008,
    "name": "aime2002ii_p3",
-   "replay_s": 8.408991112999956,
+   "replay_s": 7.812236878000476,
    "term_tree_nodes": 1444581
   }
  ],
@@ -278,37 +278,37 @@
   "independent_memory": 1,
   "independent_ok": 15,
   "independent_rss_delta_mb": {
-   "max": 1256.78515625,
-   "median": 16.75390625,
-   "min": 1.03125,
+   "max": 1256.91015625,
+   "median": 16.72265625,
+   "min": 1.02734375,
    "n": 15,
    "p90": 395.26171875,
-   "total": 1991.46875
+   "total": 1990.66796875
   },
   "independent_s": {
-   "max": 53.64808437700003,
-   "median": 1.1903177200001664,
-   "min": 0.11253711500012287,
+   "max": 45.5845597940006,
+   "median": 1.029838569000276,
+   "min": 0.09336367600008089,
    "n": 15,
-   "p90": 17.46928360999982,
-   "total": 86.87902999700009
+   "p90": 16.206240855999567,
+   "total": 75.86863039799937
   },
   "independent_timeout": 0,
   "kernel_check_s": {
-   "max": 6.4292928079999,
-   "median": 0.021465841499775706,
-   "min": 0.0013034769999649143,
+   "max": 6.291080598000008,
+   "median": 0.018148100500184228,
+   "min": 0.0011322269992888323,
    "n": 16,
-   "p90": 1.4484436650000134,
-   "total": 8.321070258999953
+   "p90": 1.3209352210005818,
+   "total": 7.988525420002588
   },
   "replay_s": {
-   "max": 8.408991112999956,
-   "median": 0.05044048849981664,
-   "min": 0.003562256999884994,
+   "max": 7.812236878000476,
+   "median": 0.044030336499872647,
+   "min": 0.0032637829999657697,
    "n": 16,
-   "p90": 2.5473089820002315,
-   "total": 11.911155693998808
+   "p90": 2.0384655479992944,
+   "total": 10.643238330000713
   },
   "replayed": 16,
   "sampled": 16
@@ -318,7 +318,7 @@
   "kernel_checked_entry_points": {
    "declare_checked": {
     "calls": 681,
-    "seconds": 7.892
+    "seconds": 6.695
    },
    "finish_inductive": {
     "calls": 12,
@@ -326,15 +326,15 @@
    },
    "finish_recursive_function_checked": {
     "calls": 24,
-    "seconds": 0.0
+    "seconds": 0.001
    }
   },
-  "kernel_seconds": 7.892,
-  "kernel_share": 0.10771090892744004,
-  "peak_rss_mb": 1299.5,
+  "kernel_seconds": 6.696,
+  "kernel_share": 0.09548914793840846,
+  "peak_rss_mb": 1300.8,
   "problems": 268,
   "python": "3.13.16",
-  "rss_mb": 1299.5,
-  "seconds": 73.27
+  "rss_mb": 1300.8,
+  "seconds": 70.12
  }
 }

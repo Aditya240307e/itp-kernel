@@ -3,5 +3,5 @@
    B. fuzz seed 2: 15000 calls, no crash, no hang
    B. fuzz seed 3: 15000 calls, no crash, no hang
    B. fuzz seed 4: 15000 calls, no crash, no hang
-   (3 s)
+   (2 s)
 S19 BOUNDARY GATE: PASS

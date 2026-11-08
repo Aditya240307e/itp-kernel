@@ -123,7 +123,7 @@ The architecture localises what must be right.
 Only the kernel can accept a false statement; the independent checker is a witness whose disagreement is information; everything else can lose a proof but not make one.
 The tests are accordingly aimed at the kernel and at the boundary around it, and the rest of the apparatus protects usefulness (an action that should apply, a probe that returns).
 This subsection describes the apparatus and states what each part shows.
-The numbers are those that the named gates printed when we ran them for this report (\code{measure\_gates.py}), at commit \mCommit{} on the machine of \cref{sec:measure}; all \gatesAll{} gates were then run once more, as a whole (\cref{app:gates}), and the logs of both runs are in the supplementary material.
+The numbers are those that the named gates printed when we ran them for this report (\code{measure\_gates.py}), at commit \mCommit{} on the machine of \cref{sec:measure}; all \gatesAll{} gates were also run as a whole (\cref{app:gates}), and the logs of both runs are in the supplementary material.
 
 \paragraph{Gates.}
 A \emph{gate} is a self-contained script that exits 0 and prints no failure if and only if the property it protects holds.
@@ -160,7 +160,7 @@ boundary (S19) &
 
 \paragraph{Lockstep against a frozen reference.}
 The previous generation of the kernel (absolute universe levels, variables as levels) is kept byte-for-byte, with its checksums pinned by a gate, and the same random inputs are given to it and to the hybrid kernel.
-Where the hybrid kernel is deliberately stricter, or fixes a defect of the reference, the gate says so explicitly (for instance F19; \cref{tab:findings} counts the findings by layer).
+Where the hybrid kernel is deliberately stricter, or fixes a defect of the reference, the gate says so explicitly (for instance F19, a motive that is not well formed, and F92, a family with itself in an index, of which the corpus of admissions holds \lockDepartures{} cases that the reference accepts and the hybrid kernel refuses; \cref{tab:findings} counts the findings by layer).
 The lockstep comparison tests that a rewrite of the representation preserved the behaviour; it says nothing about a defect that both kernels share.
 
 \paragraph{A second checker.}
@@ -224,8 +224,8 @@ tests and tooling & --- & \findTooling & the mutation driver was vacuous after a
 \bottomrule
 \end{tabular}
 \caption{The \findRows{} rows of the log of findings by the layer in which the defect lived.
-  Three rows record trusted code that accepted what it must refuse (\findAcceptsIds): the first is in the frozen reference kernel (the hybrid kernel is stricter), the second was found by the independent checker, and the third, a soundness defect found while designing the quotient gate, was in the kernel and in the checker.
-  All three are fixed and covered by tests that fail without the fix.}
+  \findAccepts{} rows record trusted code that accepted what it must refuse (\findAcceptsIds): the first is in the frozen reference kernel (the hybrid kernel is stricter), the second was found by the independent checker, the third, a soundness defect found while designing the quotient gate, was in the kernel and in the checker, and the last two, found by reading the code against the rules written down for this report, were in the kernel (the positivity condition on the indices of a family, and the check of the motive of a case analysis) and in the checker (which did not re-check the admission of families).
+  All \findAccepts{} are fixed and covered by tests that fail without the fix.}
 \label{tab:findings}
 \end{table}
 

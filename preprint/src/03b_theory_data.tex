@@ -20,14 +20,14 @@ A family is admitted by the checked entry point \texttt{finish\_inductive} only 
   $s_j \le l$;
   $x_j$ occurs as a bare variable among $\vs q_c$ (the field is \emph{parameter-like}: this is how the kernel encodes a parameter, and a parameter is not a constructor argument in Lean or Rocq);
   or, in the Prop configuration, $l=0$.
-\item[A5] (\emph{Strict positivity.}) Every field type $T$ satisfies $\sy{pos}_I(T)$, defined by
+\item[A5] (\emph{Strict positivity.}) The family does not occur in a result index, $I\notin\vs q_c$, and every field type $T$ satisfies $\sy{pos}_I(T)$, defined by
   $\sy{pos}_I(\Pit{z}{Z}{T'}) = (I\notin Z)\wedge\sy{pos}_I(T')$, and, for $T$ not a product,
-  $\sy{pos}_I(T) = (I\notin T)\vee(\text{the head of the application } T \text{ is } I)$.
+  $\sy{pos}_I(T) = (I\notin T)\vee(T = I\,\vs t \text{ with } I\notin\vs t)$.
 \item[A6] The declaration is of a single family: mutual families are not available.
 \end{description}
 \textbf{A4} is the condition that keeps the impredicative bottom universe consistent in the Set-like configuration: a constructor field of a larger universe in a family of $\Type_0$ lets $\Type_0$ be embedded in one of its own members (Girard's paradox \citep{coquand86girard,hurkens95}); in the Prop configuration the same large fields are permitted, and the price is paid at elimination (below).
 \textbf{A5} accepts ordinary recursive fields ($\ctor{Succ}:\Fam{Nat}\to\Fam{Nat}$) and infinitely branching ones ($\Nat\to\Fam{Tree}$), and rejects $(\Fam{Bad}\to\sy{False})\to\Fam{Bad}$; it rejects, too, an occurrence of $I$ nested inside another family's argument (such as \texttt{List Bad}), because that would require the variance of the other family.
-We state the condition exactly as it is implemented because it is weaker than the textbook one in one respect: occurrences of $I$ \emph{inside the arguments of the head $I$}, that is, in the indices of a recursive field, and occurrences in the result indices $\vs q_c$, are not examined (\cref{app:deviations}, D2).
+It rejects, as well, an occurrence of $I$ \emph{inside the arguments of the head $I$} of a recursive field (a field of type $\Fam{Q}\,(\Fam{Q}\,A\to\sy{False})$ has $\Fam{Q}$ to the left of an arrow inside an index) and an occurrence in a result index $\vs q_c$; the usual conditions on indexed families exclude the family from both \citep{dybjer94,paulin93}.
 
 \paragraph{Parameters.}
 With the option \code{parameters}, the kernel computes a prefix of the arguments of $I$ that are \emph{parameters}: slot $i$ is a parameter if, in every constructor, the $i$-th result index is a bare field variable different from the variables of earlier parameter slots, and every occurrence of $I$ in any field type is fully applied and passes that same variable at slot $i$.
@@ -96,8 +96,9 @@ When a $\sy{match}$ is \emph{checked} against an expected type $T$ and its motiv
 M \;:=\; \lambda(\vs y{:}\vs\Xi)(z{:}I\,\vs y).\;T[\vs a\!:=\!\vs y,\;s\!:=\!z],
 \]
 and checks that $M$ is well typed; if it is not, the user must give the motive.
-When the motive is given, the kernel checks that its type has the shape $\Pi(\vs y{:}\vs Y)(z{:}Z).\,S$ with $|\vs y|=|\vs a|$, and unifies $M\,\vs a\,s$ with the expected type.
-The motive's type is checked for its \emph{shape} only; \cref{app:deviations} (D1) states what is, and is not, compared.
+When the motive is given, the kernel checks that its type has the shape $\Pi(\vs y{:}\vs Y)(z{:}Z).\,S$ with $|\vs y|=|\vs a|$ and $S$ a sort, that the application $M\,\vs a\,s$ is well typed, which is to say that $\vs a$ and $s$ have the types of the binders, and that so is the application of $M$ to the indices and the value of each constructor, under the fields of that constructor (the type $\sy{Br}(I,c,\vs a,M)$ of a branch is a type); then it unifies $M\,\vs a\,s$ with the expected type.
+The binder types of $M$ are not compared with the types $\vs\Xi$ and $I\,\vs y$ that the elimination principle prescribes: those that \code{cases} and \code{induct} build are specialised to the parameters of the scrutinee, and a motive written by hand may have more general ones.
+What the rule needs is that the types written with $M$ are types, and a motive over another family, applied to the scrutinee, is refused at the application.
 
 \subsection{Structural recursion}\label{sec:guard}
 

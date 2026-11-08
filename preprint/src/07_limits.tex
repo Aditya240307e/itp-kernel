@@ -35,18 +35,13 @@ The libraries (\libGlobals{} declarations, \cref{tab:libs}) cover the naturals, 
 
 \paragraph{Metatheory.}
 Subject reduction, strong normalisation and consistency are not proved for the calculus as implemented, and no part of its metatheory is mechanised (\cref{sec:meta}).
-The two deviations of \cref{app:deviations} are places where the implementation is weaker than the specification it was written against.
-The second can be exploited: in a world with excluded middle and propositional extensionality as axioms, a family that the kernel admits yields a proof of $\sy{False}$, which the kernel and the independent checker both accept (\cref{lst:dev-exploit}).
-We know of no exploit of the first, and we have not proved that there is none.
-Neither deviation is repaired in the version of the repository that holds this report.
-Neither is reachable from the environment, whose actions can neither declare a family nor say a \code{match}; both are reachable from the Python interface of the kernel, which is what a library author uses, and the exploit also needs an axiom that no shipped library assumes.
 
 \subsection{Trust and testing}
 
 \paragraph{Soundness is tested, not proved.}
 The trusted base is the kernel (\locKernelHeader{} lines of header and \locBindings{} of bindings) and the entry points that guard it, the C++ compiler and the Python interpreter that call it.
 The evidence that it is sound is the apparatus of \cref{sec:testing}, which finds defects and cannot show their absence.
-Its second checker (\locchecker{} lines) is a re-implementation from the same specification by the same author, so it does not catch a flaw in the specification or a misreading that both share, and it does not re-check the admission of inductive families (D2 of \cref{app:deviations}), which is why it accepts the proof of $\sy{False}$ of \cref{lst:dev-exploit}.
+Its second checker (\locchecker{} lines) is a re-implementation from the same specification by the same author, so it does not catch a flaw in the specification or a misreading that both share.
 The mutants are written by the author of the code and measure the tests against the faults that the author can imagine, and the \mutEquiv{} equivalent mutants are the author's judgement.
 
 \paragraph{The independent checker is slow.}
@@ -56,7 +51,6 @@ It is a witness for a finished proof, not a component of a loop.
 
 \paragraph{What was and was not run for this report.}
 The gates, the sanitizer run, the library and environment measurements, and the listings were run at the commit of the report on one machine: Linux, x86-64, two virtual cores, \mCompiler.
-The three listings of \cref{app:d2} that prove $\sy{False}$ and check the proof in Lean were added afterwards and run on a kernel with the same digest; the two in Lean were run with Lean 4.15.0.
 The campaign of falsification by fuzzing (\code{make soundness}), a single pass of the whole mutation catalogue against the final commit, the gates run with the sharing tables of the kernel bypassed (\code{ITP\_VERIFY\_MEMO=1}), the long gates of the bank under the sanitizers, the leak detector of the sanitizer, and other platforms and compilers were not run; the repository contains the commands for each.
 The measurements of cost are of this machine.
 The counts and digests are properties of the code, and the times are not.

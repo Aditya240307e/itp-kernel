@@ -164,8 +164,8 @@ metavariables, $\sy{let}$ & supported & reported as unsupported\\
 \end{tabular}
 \end{center}
 It shares with the kernel only the \emph{input format}: the kernel's text export of an environment.
-It re-implements the universe rule for products, the structural guard, the parameter analysis, the \textsc{Match} rule with the forcing of \cref{alg:force}, the elimination restriction, definitional proof irrelevance with its depth bound, and the validation of the quotient constants; for those it does not trust the labels the kernel puts on them.
-It checks every definition and theorem of an environment (the value against the type), every recursive function against the guard, and every type; it does \emph{not} re-check the admission of inductive families (the positivity and universe conditions \textbf{A4} and \textbf{A5}), nor the unifier, which it does not need: an admitted term contains no metavariable.
+It re-implements the universe rule for products, the structural guard, the parameter analysis, the \textsc{Match} rule with the forcing of \cref{alg:force} and the conditions on the motive, the elimination restriction, definitional proof irrelevance with its depth bound, the admission of inductive families, and the validation of the quotient constants; for those it does not trust the labels the kernel puts on them.
+It checks every definition and theorem of an environment (the value against the type), every recursive function against the guard, every type, and the positivity and universe conditions \textbf{A4} and \textbf{A5} of every inductive family, which it derives from the types of the constructors alone; it does not check the unifier, which it does not need: an admitted term contains no metavariable.
 Used on the libraries, it re-checks all \indGlobals{} globals in about \indCheckA\,s (after a load of \indLoadA\,s) and accepts every one; on the reference proofs of the problem bank it re-checks a sample (\cref{sec:why}).
 It is slow and memory-hungry by design: it is a witness and not a tool of the inner loop, and a proof it cannot finish within its limits is reported as such and counted, and not as accepted.
 

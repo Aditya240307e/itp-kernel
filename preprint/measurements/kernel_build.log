@@ -7,7 +7,7 @@ python headers:  /usr/include/python3.13
 nanobind domain: lnl
 output:          <out>/itp_env_lnl.cpython-313-x86_64-linux-gnu.so
 
-Build succeeded in 24s -> <out>/itp_env_lnl.cpython-313-x86_64-linux-gnu.so
+Build succeeded in 25s -> <out>/itp_env_lnl.cpython-313-x86_64-linux-gnu.so
 kernel:          reference  (<repo>/src/c++/reference)
 compiler:        c++
 C++ standard:    -std=c++23
@@ -17,8 +17,8 @@ python headers:  /usr/include/python3.13
 nanobind domain: ref
 output:          <out>/itp_env_ref.cpython-313-x86_64-linux-gnu.so
 
-Build succeeded in 25s -> <out>/itp_env_ref.cpython-313-x86_64-linux-gnu.so
+Build succeeded in 24s -> <out>/itp_env_ref.cpython-313-x86_64-linux-gnu.so
 
-real	0m49.989s
-user	0m47.189s
-sys	0m1.522s
+real	0m48.963s
+user	0m47.168s
+sys	0m1.406s

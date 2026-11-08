@@ -3687,18 +3687,18 @@
   "USE": 46
  },
  "machine": {
-  "commit": "f840710dd0b2a28482638ea351d528235f3e8411",
+  "commit": "2c71442408ae2faba0e8a8701e78c2d332e69831",
   "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
   "cores": 2,
   "cores_usable": 2,
   "cpu": "Intel(R) Xeon(R) Processor @ 2.30GHz",
   "loadavg_start": [
-   0.42,
-   0.23,
-   0.09
+   1.0,
+   1.0,
+   1.08
   ],
   "memory_gb": 7.83,
-  "os": "Linux-6.18.44-fc-v300-x86_64-with-glibc2.39",
+  "os": "Linux-6.18.44-fc-v310-x86_64-with-glibc2.39",
   "python": "3.13.16",
   "tree_clean_outside_preprint": true
  },
@@ -3707,28 +3707,28 @@
    "actions": 6033,
    "errors": 0,
    "missing": 424,
-   "ms_per_action": 1.1436080242000648,
+   "ms_per_action": 1.2949713694760543,
    "proofs": 187,
    "said": 5609,
-   "seconds": 6.899
+   "seconds": 7.813
   },
   "bank / strict": {
    "actions": 538,
    "errors": 0,
    "missing": 8,
-   "ms_per_action": 1.4624494219331738,
+   "ms_per_action": 1.5896755260259903,
    "proofs": 8,
    "said": 530,
-   "seconds": 0.787
+   "seconds": 0.855
   },
   "library": {
    "actions": 2677,
    "errors": 0,
    "missing": 27,
-   "ms_per_action": 0.8661016227120318,
+   "ms_per_action": 0.9595284475210328,
    "proofs": 453,
    "said": 2650,
-   "seconds": 2.319
+   "seconds": 2.569
   }
  },
  "total": {
@@ -3737,7 +3737,7 @@
   "missing": 459,
   "proofs": 648,
   "said": 8789,
-  "seconds": 10.005
+  "seconds": 11.237
  },
- "world_seconds": 59.62
+ "world_seconds": 70.3
 }

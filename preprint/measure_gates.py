@@ -53,8 +53,9 @@ def parse(name, text):
         b_block = text.split('B. admission corpus')[1].split('C. structural-recursion')[0]
         c_block = text.split('C. structural-recursion')[1].split('D. Match typing')[0]
         pat = r'expect (accept|reject) ref (accept|reject) new (accept|reject) OK'
-        r['admission_cases'] = len(re.findall(pat, b_block)); r['guard_cases'] = len(re.findall(pat, c_block))
-        assert r['admission_cases'] and r['guard_cases']
+        rows_ = re.findall(pat, b_block)              # the rows where the reference and the hybrid kernel agree, and those where the hybrid kernel is stricter on purpose (the reference accepts; F92)
+        r['admission_cases'] = sum(1 for e_, a_, b_ in rows_ if a_ == b_); r['admission_departures'] = sum(1 for e_, a_, b_ in rows_ if a_ != b_); r['guard_cases'] = len(re.findall(pat, c_block))
+        assert r['admission_cases'] and r['guard_cases'] and all((a_, b_) == ('accept', 'reject') for e_, a_, b_ in rows_ if a_ != b_)
         r['library_globals_redeclared'] = ints(grab(text, r'global types equal after conversion: yes \((\d+) vs (\d+) globals\)', 'the re-declared globals'))[0]
     elif name == 'harness':
         rows = grab(text, r'^\s+(norm|norm_open|conv|typing|typing_open|reject)\s+checked\s+(\d+) \| disagreements (\d+)', 'the comparison lines', re.M, many=True)
@@ -132,6 +133,16 @@ def main(argv):
     if dirty and not a.parse_only: raise SystemExit('measure_gates: the code is modified:\n' + dirty)
     res['code_clean'] = not dirty
     res['date'] = datetime.date.today().isoformat()
+    # the gates that were run again alone after the run of all of them (measurements/gates_rerun.jsonl): the commit of that run (the last commit before its first record), the commit that
+    # corrected the gate, and the files below src/, tests/ and mutants/ that changed between the run and this commit.  The report states them; they are read here, where the history exists.
+    ga_, rr_ = os.path.join(HERE, 'measurements', 'gates_all.jsonl'), os.path.join(HERE, 'measurements', 'gates_rerun.jsonl')
+    if os.path.exists(ga_) and os.path.exists(rr_):
+        again_ = [json.loads(l) for l in open(rr_) if l.strip()]
+        first_ = git('log', '-1', '--before=' + min(json.loads(l)['time'] for l in open(ga_) if l.strip()), '--format=%H')
+        scripts_ = sorted('tests/%s/%s' % (r_['group'], r_['gate']) for r_ in again_)
+        res['rerun'] = {'gates': sorted(r_['gate'] for r_ in again_), 'first_commit': first_, 'fix_commit': git('log', '-1', '--format=%H', '--', *scripts_),
+                        'changed': sorted(git('diff', '--name-only', first_, res['commit'], '--', 'src', 'tests', 'mutants').split()), 'scripts': scripts_}
+    else: res.pop('rerun', None)
     todo = dict(QUICK); todo.update(ENV if a.with_env else {})
     if a.sanitizers:
         text = scrub(open(a.sanitizers).read())
