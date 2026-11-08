@@ -1,4 +1,0 @@
-B0, field (B0 -> False) -> B0: refused (itp: constructor 'mk0' fails strict positivity -- the inductive being defined appears to the left of an arrow in an argument type)
-Q A, field Q (Q A -> False): accepted
-R A, result index R A -> False: accepted
-independent checker: 134 globals re-checked, problems: []

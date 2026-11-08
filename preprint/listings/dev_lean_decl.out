@@ -1,3 +1,0 @@
-dev_lean_decl.lean:2:0: error: (kernel) arg #1 of 'B0.mk0' has a non positive occurrence of the datatypes being declared
-dev_lean_decl.lean:5:0: error: (kernel) arg #2 of 'Q.mkq' contains a non valid occurrence of the datatypes being declared
-dev_lean_decl.lean:8:0: error: (kernel) invalid return type for 'R.mkr'
