@@ -116,3 +116,5 @@ F88	pipeline	process	the tests of the soundness folder, the number checker and t
 F89	data	wrong	a caution of the statement audit that fired on 29% of the bank and warned of nothing (thin_box)
 F90	tactic,engine	resource	a tactic that computes in Python before the kernel's budget applies (ring, linarith, nlinarith) ran a worker out of memory on a sampled action; found by the first evaluation of a trained policy
 F91	kernel,pipeline	missing	the kernel did not compile with libc++ (macOS: a glibc-only stack call, a variant over an incomplete type) and the runner assumed /proc; found before the first run on a Mac
+F92	kernel,checker	accepts	a family with itself in an index (of a recursive field or of a result) was admitted, and with excluded middle and propext it proves False; both checkers accepted it; found by reading the code for the rules of the report
+F93	kernel,checker	accepts	the motive of an explicit match was checked for its shape only (the number of products), not for its fit to the scrutinee and the constructors; no proof of False known; found with F92

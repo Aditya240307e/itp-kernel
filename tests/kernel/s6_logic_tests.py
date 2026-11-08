@@ -131,6 +131,20 @@ def mutate(tree, rng, consts):
     else: return None
     return put(tree, path, new) if new != node else None
 
+def f93_minimal(kref, knew, g):
+    """F93: a motive whose binder is a TYPE, but not the scrutinee's, is accepted by the reference and refused by the hybrid kernel: match h with the motive  lam (_ : True). P  on an h : False"""
+    C = lambda n: ('const', g[n]); FALSE, TRUE = C('False'), C('True')
+    ty = chain([T0, FALSE], V(0))
+    mk = lambda dom: ('lam', T0, ('lam', FALSE, ('match', V(1), ('lam', dom, V(0)), [])))
+    res = []
+    for dom in (TRUE, FALSE):
+        t_r, t_n = build_ref(kref, mk(dom)), build_new(knew, l2h(mk(dom), 0))
+        try: kref.whole_term_check(t_r, build_ref(kref, ty)); vr = True
+        except Exception: vr = False
+        vn = knew.check_open(t_n, build_new(knew, l2h(ty, 0)), [])[0]
+        res.append((vr, vn))
+    return res[0][0], res[0][1], res[1][0], res[1][1]
+
 def f19_minimal(kref, knew, g):
     C = lambda n: ('const', g[n]); FALSE, OR = C('False'), C('Or')
     ty = chain([T0, FALSE], V(0))
@@ -155,7 +169,7 @@ def scoped(t, d):
 
 def mutant_differential(kref, knew, g, rows, per_proof=80, seed=1):
     rng = random.Random(seed); stmts, _, _ = kit(g); consts = [v for k, v in g.items()]
-    agree = acc_both = rej_both = 0; dis = []; f19 = []
+    agree = acc_both = rej_both = 0; dis = []; f19 = []; f93 = []
     for (name, done_n, ver_n, done_r, ver_r, first_div, L) in rows:
         if not (done_n and ver_n and done_r and ver_r and first_div is None): continue
         proof = parse_raw(kref.dump_raw(L.psr.extract()), False)
@@ -168,8 +182,9 @@ def mutant_differential(kref, knew, g, rows, per_proof=80, seed=1):
             except Exception as e: vn, vmsg = False, str(e)
             if vr == vn: agree += 1; acc_both += vr; rej_both += (not vr)
             elif vr and not vn and vmsg == 'explicit motive_id is not well-typed': f19.append((name, vmsg))      # F19: the reference does not validate a motive's binder domains
+            elif vr and not vn and vmsg.startswith('explicit motive_id does not suit'): f93.append((name, vmsg))      # F93: nor that they are the types of the scrutinee's indices and of the scrutinee (the hybrid kernel applies the motive where the types of the match mention it)
             else: dis.append((name, vr, vn, vmsg))
-    return agree, acc_both, rej_both, dis, f19
+    return agree, acc_both, rej_both, dis, f19, f93
 
 def ill_scoped_robustness(n=400, seed=5):
     """the HYBRID kernel must reject a term with unbound variables, never abort (run in a subprocess by the gate)"""
@@ -209,12 +224,15 @@ if __name__ == '__main__':
         print("   wrong proof %-44s accepted by hybrid: %s, by reference: %s" % (name, ok_n, ok_r))
         if ok_n: FAIL.append('hybrid ACCEPTED a wrong proof: ' + name)
         if ok_r: FAIL.append('reference accepted a wrong proof: ' + name)
-    agree, acc, rej, dis, f19 = mutant_differential(kref, knew, g, rows)
-    print("   mutated valid proofs: %d verdicts compared, agree %d (both accept %d, both reject %d), F19 (reference accepts an ill-formed motive, hybrid rejects) %d, UNEXPLAINED disagreements %d %s" % (agree + len(dis) + len(f19), agree, acc, rej, len(f19), len(dis), dis[:3]))
+    agree, acc, rej, dis, f19, f93 = mutant_differential(kref, knew, g, rows)
+    print("   mutated valid proofs: %d verdicts compared, agree %d (both accept %d, both reject %d), F19 (reference accepts an ill-formed motive, hybrid rejects) %d, F93 (reference accepts a motive over the wrong type, hybrid rejects) %d, UNEXPLAINED disagreements %d %s" % (agree + len(dis) + len(f19) + len(f93), agree, acc, rej, len(f19), len(f93), len(dis), dis[:3]))
     if dis: FAIL.append('unexplained accept/reject disagreement between the kernels')
     f19t = f19_minimal(kref, knew, g)
     print("   F19 minimal case (Match on False with motive lam (_ : Or). P): reference accepts %s, hybrid accepts %s | well-formed motive: reference %s, hybrid %s" % f19t)
     if f19t[1] or not (f19t[2] and f19t[3]): FAIL.append('F19 minimal case')
+    f93t = f93_minimal(kref, knew, g)
+    print("   F93 minimal case (Match on False with motive lam (_ : True). P): reference accepts %s, hybrid accepts %s | well-formed motive: reference %s, hybrid %s" % f93t)
+    if f93t[1] or not (f93t[0] and f93t[2] and f93t[3]): FAIL.append('F93 minimal case')
     import subprocess
     r = subprocess.run([sys.executable, __file__, '--ill-scoped'], capture_output=True, text=True, timeout=200)
     print("   robustness (subprocess): " + (r.stdout.strip().split('\n')[-1] if r.stdout.strip() else "no output") + (" | EXIT %d: %s" % (r.returncode, (r.stdout + r.stderr)[-160:].replace('\n', ' ')) if r.returncode else ""))

@@ -20,6 +20,10 @@ Nothing here is trusted (the independent checker re-checks every accepted term a
      and as the head of an application, is accepted; the same with the arguments of the motive swapped, and with a hypothesis of the wrong type, is refused; a motive that is not a lambda (a global) works;
   F. DEFINITIONS AT THE HEAD OF AN INDEXED FAMILY under `cases` with something to revert (`EqN a b := a = b`, `Le'`): the proofs are accepted;
   G. every accepted term is accepted by the independent checker, every refused one is refused by it.
+  H. THE MOTIVE FITS THE SCRUTINEE (finding F93): the motive is applied, in the types of the match, to the scrutinee's indices and the scrutinee, and to the indices and the value of each constructor, and
+     every one of those applications has to be well typed and a type. A motive over a second data type, a motive that ends in a term and not in a sort, a motive without a binder, and one whose last binder has
+     the scrutinee's own type (it fits the scrutinee, not the constructors) are refused; the motives that the elimination rule gives, and the ones with binder types specialised to the scrutinee's
+     parameters (what `cases` builds), are accepted.  (Before the finding the kernel only counted the products of the motive's type.)
 """
 import os as _os, sys as _sys; _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', '..', 'src', 'python')); import itp_paths  # noqa: E402,F401
 import os, sys, time
@@ -72,6 +76,8 @@ def build(log2):
     # definitions at the head of indexed families
     w.define('EqN', w.forall_([Nat, Nat], lambda a, b: PROP), w.fun([Nat, Nat], lambda a, b: Eq(a, b)))
     w.define('Le2', w.forall_([Nat, Nat], lambda a, b: PROP), w.fun([Nat, Nat], lambda a, b: w['Le'](a, b)))
+    # a second data type, unrelated to Nat (part H)
+    w.inductive('B2', TYPE, [('b2f', []), ('b2t', [])])
     # an axiom that is a proposition, and a motive that is a global
     w.axiom('ax', PROP)
     w.define('natmot', w.arrow(Nat, TYPE), w.lam(Nat, lambda n: w.arrow(Nat, Nat)))
@@ -313,6 +319,47 @@ def part_E(w, jobs):
     jobs.append(('E global motive wrong argument', val, stmt, False))
 
 
+def part_H(w, jobs):
+    """the motive of a match has to suit the scrutinee: the applications of the motive that the types of the match mention are well typed (F93)"""
+    Nat, TRUE, FALSE, B2, Z0, S, tt, Le = w['Nat'], w['True'], w['False'], w['B2'], w['Zero'], w['Succ'], w['tt'], w['Le']
+    k = w.k
+    def verdict(label, val, ty, want, why=None):
+        ok, steps, msg = kernel(w, val, ty)
+        expect(ok == want, 'H %s: accepted=%s (%s)' % (label, ok, msg))
+        if why is not None and not ok: expect(why in msg, 'H %s: refused, but not for the reason expected (%r): %s' % (label, why, msg))
+        jobs.append(('H ' + label, val, ty, want))
+    NN = w.forall_([Nat], lambda n: Nat)
+    # (a) the motive abstracts over a second data type (its body does not use the binder: the types of the branches are all Nat, and they used to be accepted)
+    for dom, name, want in ((B2, 'B2', False), (Nat, 'Nat', True)):
+        verdict('motive over %s, on a Nat' % name, w.fun([Nat], lambda n: w.match(n, w.lam(dom, lambda z: Nat), [Z0, lambda m: Z0])), NN, want, 'does not suit the scrutinee')
+    # the same for a motive that is used: a function Nat -> Type of the scrutinee
+    verdict('motive over B2 whose body mentions its binder', w.fun([Nat], lambda n: w.match(n, w.lam(B2, lambda z: w.arrow(B2, Nat)), [w.lam(B2, lambda b: Z0), lambda m: w.lam(B2, lambda b: Z0)])),
+            w.forall_([Nat], lambda n: w.arrow(B2, Nat)), False, 'does not suit the scrutinee')
+    # (b) the motive's type ends in a term (Zero : Nat), not in a sort
+    for body, want in ((lambda z: Z0, False), (lambda z: Nat, True)):
+        verdict('motive into %s' % ('Zero' if not want else 'Nat'), w.fun([FALSE], lambda e: w.match(e, w.lam(FALSE, body), [])), w.forall_([FALSE], lambda e: Nat), want, 'ending in a sort')
+    # (c) a motive without a binder
+    verdict('motive without a binder', w.fun([Nat], lambda n: w.match(n, Nat, [Z0, lambda m: Z0])), NN, False, 'not shaped like a valid motive')
+    # (d) an indexed family with a parameter and an index: Le a b.  The first binder may be written for the parameter of the scrutinee (`cases` and `induct` do that), the last binder's type may not be fixed to
+    # the scrutinee's own:  fun n m (s : Le a b) => True  fits the scrutinee and no other value of the family
+    tel = [Nat, Nat, lambda a, b: Le(a, b)]; stmt = w.forall_(tel, lambda a, b, h: TRUE)
+    for label, binders, want, why in (
+            ('the binders of the elimination rule', lambda a, b: [Nat, Nat, lambda n, m: Le(n, m)], True, None),
+            ('the first binder specialised to the parameter of the scrutinee', lambda a, b: [Nat, Nat, lambda n, m: Le(a, m)], True, None),
+            ('the last binder fixed to the type of the scrutinee', lambda a, b: [Nat, Nat, lambda n, m: Le(a, b)], False, 'does not suit the constructor'),
+            ('the last binder is a natural number', lambda a, b: [Nat, Nat, lambda n, m: Nat], False, 'does not suit the scrutinee'),
+            ('the last binder is Le of the swapped indices', lambda a, b: [Nat, Nat, lambda n, m: Le(m, n)], False, 'does not suit')):
+        val = w.fun(tel, lambda a, b, h: w.match(h, w.fun(binders(a, b), lambda n, m, s: TRUE), [lambda: tt, lambda m, h2: tt]))
+        verdict('Le a b, ' + label, val, stmt, want, why)
+        # ... and the match as the head of an application (it is inferred, not checked against a type): (match h with motive fun n m s => True -> True ...) tt
+        val = w.fun(tel, lambda a, b, h: w.app(w.match(h, w.fun(binders(a, b), lambda n, m, s: w.arrow(TRUE, TRUE)), [lambda: w.lam(TRUE, lambda t: t), lambda m, h2: w.lam(TRUE, lambda t: t)]), tt))
+        verdict('Le a b in the head position of an application, ' + label, val, stmt, want, why)
+    for dom, name, want in ((B2, 'B2', False), (Nat, 'Nat', True)):
+        mot = w.lam(dom, lambda z: w.arrow(Nat, Nat))
+        val = w.fun([Nat], lambda n: w.app(w.match(n, mot, [w.lam(Nat, lambda x: x), lambda m: w.lam(Nat, lambda x: x)]), Z0))
+        verdict('motive over %s, on a Nat, in the head position of an application' % name, val, NN, want, 'does not suit the scrutinee')
+
+
 def part_G(w, jobs):
     """every accepted term is accepted by the independent checker, every refused one is refused by it"""
     k = w.k
@@ -338,12 +385,12 @@ def main():
     w = build(14)
     jobs = []
     COSTS[0] = True
-    part_A(w, jobs); part_B(w, jobs); part_C(w, jobs); part_D(w, jobs); part_E(w, jobs)
+    part_A(w, jobs); part_B(w, jobs); part_C(w, jobs); part_D(w, jobs); part_E(w, jobs); part_H(w, jobs)
     n_big = CHECKS[0]
     # the same terms in a world where `big` computes to 16 successors, for the independent checker (a plain tree rewriter: the 16384 successors of the first world take it hours)
     w2 = build(4); jobs2 = []
     COSTS[0] = False
-    part_A(w2, jobs2); part_B(w2, jobs2); part_C(w2, jobs2); part_D(w2, jobs2); part_E(w2, jobs2)
+    part_A(w2, jobs2); part_B(w2, jobs2); part_C(w2, jobs2); part_D(w2, jobs2); part_E(w2, jobs2); part_H(w2, jobs2)
     t1 = time.time(); agree = part_G(w2, jobs2)
     if TRACE: print('G independent checker: %s in %.1f s' % (agree, time.time() - t1))
     print('S35: %d checks (%d in the big world), %d terms cross-checked, %.1f s' % (CHECKS[0], n_big, len(jobs2), time.time() - t0))

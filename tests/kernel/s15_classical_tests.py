@@ -1,5 +1,8 @@
 """S15 gate: classical logic in the Prop/Type world. The four axioms (em, propext, funext, choice) are the ONLY additions to the trusted base; the derived principles are proved by tactics; every global is re-checked by
-the independent checker; and a canary tries, with the axioms available, to prove false statements (a verified proof of one would be a soundness bug)."""
+the independent checker; and a canary tries, with the axioms available, to prove false statements (a verified proof of one would be a soundness bug).
+
+Part C (finding F92) is the one known way to get a proof of False from two of those axioms: a family that has itself in a result index (tests/support/negative_index.py). The kernel's checked entry must refuse the
+family; through the unchecked entry the kernel proves False (so the part is not vacuous), and the independent checker must refuse that world for the admission of the family, and for no other reason."""
 import os as _os, sys as _sys; _sys.path.insert(0, _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', '..', 'src', 'python')); import itp_paths  # noqa: E402,F401
 import sys, random, functools, time
 sys.setrecursionlimit(30000)
@@ -12,6 +15,10 @@ import s8_indep_tests as t8
 import s11_eqgen_tests as t11
 import indep_checker as ic
 import canary_lib as canlib
+import negative_index as neg
+import author
+import recheck
+import audit
 
 def canary(N, seed, which='false'):
     k, g = pw.build_prop_world(classical=True)
@@ -68,4 +75,15 @@ if __name__ == '__main__':
     print("   canary POWER (the same generator on 4 TRUE classical statements): %d attempts, %d completed, %d verified" % (tr2, co2, ver2))
     if ver2 < 5: FAIL.append('canary has no power: only %d true statements proved' % ver2)
     if co2 != ver2: FAIL.append('%d completed proof states did not verify (completed %d, verified %d)' % (co2 - ver2, co2, ver2))
+    # C. finding F92: a family with itself in a result index, excluded middle and propositional extensionality give a proof of False
+    try: neg.build(True); refused = None
+    except author.AuthorError as e: refused = str(e)
+    print("   C. the family R (R : Prop -> Type, mkr : forall A, R (R A -> False)) through the CHECKED entry: %s" % ('ADMITTED' if refused is None else 'refused (' + refused.split(': ')[-1][:90] + ')'))
+    if refused is None or 'result index' not in refused: FAIL.append('F92: the checked entry did not refuse the family R for its result index: %s' % refused)
+    wx = neg.build(False)
+    axioms_boom, _ = audit.dependencies_of_global(wx.k, wx.gid['boom'])
+    nx, badx = recheck.recheck_world(wx)
+    print("      through the UNCHECKED entry the kernel proves False from %s; the independent checker re-checks %d globals and rejects %d: %s" % (sorted(axioms_boom), nx, len(badx), [b[1:] for b in badx][:2]))
+    if wx.show(wx.global_type('boom')) != 'False' or sorted(axioms_boom) != ['LEM', 'propext']: FAIL.append('F92: the exploit does not prove False from excluded middle and propext (the part is vacuous)')
+    if len(badx) != 1 or badx[0][1] != 'mkr' or 'result index' not in badx[0][2]: FAIL.append('F92: the independent checker does not reject exactly the admission of R: %s' % badx[:3])
     print("elapsed %.0fs" % (time.time() - t0)); print("S15 CLASSICAL GATE:", "PASS" if not FAIL else "FAIL -- " + "; ".join(FAIL)); sys.exit(1 if FAIL else 0)

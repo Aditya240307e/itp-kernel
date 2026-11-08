@@ -6,7 +6,7 @@ of the tree, and the gates must **fail**. A mutant that no gate catches is a gap
 ```
 python3 mutants/mutate.py --check              every mutant must replace text that occurs EXACTLY ONCE in its file, must change it, and no name may be used twice (seconds)
 python3 mutants/mutate.py --selftest           the machinery works: an unmutated copy of the tree passes a gate and the same copy without legacy/ fails it (seconds; S45 runs it)
-python3 mutants/mutate.py M83 W1 GR            run the mutants whose names start with one of these prefixes (no prefix: all 1707 -- many hours)
+python3 mutants/mutate.py M83 W1 GR            run the mutants whose names start with one of these prefixes (no prefix: all 1726 -- many hours)
 MUT_ONLY=s2_tests.py,s16_quot_tests.py python3 mutants/mutate.py M83      run only these gates against the mutants (by file name)
 MUT_FULL=1     run EVERY gate on a mutant instead of stopping at the first that fails      MUT_VERBOSE=1   say which gate caught it      MUT_KEEP=1   keep the mutated copy for inspection
 ```
@@ -26,7 +26,7 @@ and authoring layers, `K`, `C`, `I` for the independent checker, `GA`-`GX` for t
 
 ## Status
 
-**1707 mutants**, and `--check` is clean: every mutant still replaces text that occurs exactly once in the code it refers to. The catalogue covers the kernel and its evaluator, the authoring and library layers, the independent checker, the environment (`gym_*`), the action language, the typed term builder, the search and the recorder. The kernel, tactic and environment series were run to completion while they were written; the most recent additions pin
+**1726 mutants**, and `--check` is clean: every mutant still replaces text that occurs exactly once in the code it refers to. The catalogue covers the kernel and its evaluator, the authoring and library layers, the independent checker, the environment (`gym_*`), the action language, the typed term builder, the search and the recorder. The kernel, tactic and environment series were run to completion while they were written; the most recent additions pin
 
 * the work budget of the Python code behind `ring`, `linear_combination`, `linarith` and `nlinarith` (series `RW`, `LM` and `GE133`; finding F90). They were run, together with the 55 older mutants of the series `LA` and `LS`, against the gates that pin them (S25, S30, S31, S36, S40): 111 of these 112 are caught and `LA14` is a documented equivalent;
 * the menu-time work budget of the environment (`GA36`-`GA41`, `GE108`-`GE132`; finding F87), each run against the gate that pins it and caught. Three older mutants (`GA16`, `GQ126`, `GQ141`) turned out to survive S40 on the committed tree too, a test gap older than F87 that section E8 of S40 now closes;

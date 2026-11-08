@@ -38,7 +38,8 @@ def kernel_verdict(k, tree_h, stmt_h):
     except Exception: return False
 
 def run_definitions(k, params=False):
-    chk = ic.Checker(build_env(k), params=params, fuel=2_000_000)
+    """every global of the kernel `k` re-checked, in the configuration that `k` is in: the universe rule for the fields of a family (A4) is not the same with and without prop_elim"""
+    chk = ic.Checker(build_env(k), params=params, fuel=2_000_000, prop_elim=bool(k.get_option('prop_elim')))
     return chk, chk.check_definitions()
 
 # ---------------------------------------------------------------- scope-aware mutation of NAMED terms
@@ -127,6 +128,30 @@ def differential(label, knew, proofs, params, per_proof, seed):
 
 def canon_eq(a, b): return ic.canon(a) == ic.canon(b)
 
+def admission_corpus():
+    """F92: the independent checker re-checks the ADMISSION of every inductive family (strict positivity, with the indices and the result indices, and the universe rule), not only the types of the constants.
+    The corpus is S2's: each family is declared through the kernel's UNCHECKED entry (what a front end that skipped the checks would do) and the checker must refuse the environment exactly when the kernel's
+    checked entry refuses the family.  (label, the kernel's checked entry accepts, the checker accepts, the checker's first message)"""
+    import s2_tests as t2
+    kref0, _ = t2.build_library(); g0 = {name: gid for gid, name, _, _ in kref0.list_globals()}
+    rows = []
+    for i in range(len(t2.admission_cases(g0))):
+        kref, refs = t2.build_library(); knew = hn.H.Kernel() if hasattr(hn, 'H') else t2.H.Kernel(); t2.load_library(kref, knew)
+        g = {name: gid for gid, name, _, _ in kref.list_globals()}
+        name, sort, ctors, expect, needle, *_ = t2.admission_cases(g)[i]
+        try:
+            tid = knew.reserve_inductive_type('Ty', build_new(knew, t2.l2h(t2.subst_self(sort, 10**6), 0, lenient=True)))
+            specs = []
+            for cn, ats, ris in ctors:
+                ats = [t2.subst_self(a, tid) for a in ats]; ris = [t2.subst_self(r, tid) for r in ris]
+                specs.append(t2.H.CtorSpec(cn, [build_new(knew, t2.l2h(a, j, lenient=True)) for j, a in enumerate(ats)], [build_new(knew, t2.l2h(r, len(ats), lenient=True)) for r in ris]))
+            knew.finish_inductive_unchecked(tid, specs)
+        except Exception as e:
+            rows.append((name, expect, None, 'not representable even unchecked: ' + str(e)[:60])); continue           # (a term with an unbound variable never reaches the kernel's tables)
+        bad = ic.Checker(build_env(knew), fuel=2_000_000).check_definitions()
+        rows.append((name, expect, not bad, bad[0][2][:90] if bad else ''))
+    return rows
+
 def guard_corpus(g):
     """Fix terms valid or invalid ONLY because of the structural-recursion guard (each is well typed otherwise). (label, expected, type, term), level trees.
     Levels: the Fix's self is 0 (its body sits one deeper), then each binder takes the next level."""
@@ -171,6 +196,12 @@ if __name__ == '__main__':
         vk = kernel_verdict(ng, l2h(term, 0), l2h(ty, 0)); vi, msg = chk_g.check_closed(l2h(term, 0), l2h(ty, 0)); REPORT['guard_cases'] += 1; REPORT['guard_cases_agree'] += bool(vk == vi == expected)
         print("   guard corpus: %-62s expected %-5s kernel %-5s independent %-5s" % (label, expected, vk, vi))
         if not (vk == vi == expected): FAIL.append('guard corpus: ' + label)
+    adm = admission_corpus(); REPORT['admission_cases'] = len(adm); REPORT['admission_cases_agree'] = 0
+    for label, kernel_accepts, checker_accepts, msg in adm:
+        good = checker_accepts is None or checker_accepts == kernel_accepts; REPORT['admission_cases_agree'] += bool(good and checker_accepts is not None)
+        print("   admission corpus: %-52s kernel %-6s independent %-6s %s" % (label[:52], 'accept' if kernel_accepts else 'reject', 'n/a' if checker_accepts is None else 'accept' if checker_accepts else 'reject', msg))
+        if not good: FAIL.append('admission corpus: ' + label)
+    if sum(1 for r in adm if r[2] is not None) < 12: FAIL.append('admission corpus: too few families could be declared unchecked (%d)' % sum(1 for r in adm if r[2] is not None))
     for label, params in (("legacy mode", False), ("parameter mode", True)):
         kref2, knew2, g2 = t6.build_logic()
         if params: knew2.set_option('parameters', True)

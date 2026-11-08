@@ -44,7 +44,7 @@ def test_library_checked():
 # ------------------------------------------------------------------ B. inductive admission corpus (both kernels must agree)
 def admission_cases(g):
     nat, zero, succ, T0 = ('const', g['Nat']), ('const', g['Zero']), ('const', g['Succ']), ('type', 0)
-    S = ('self',)
+    S = ('self',); neg = lambda x: ('pi', ('app', S, x), nat)         # neg x  :=  (self x -> Nat): a proposition (the codomain is in Type0), and the family to the left of an arrow
     return [
       ('U_paradox: mk : Type0 -> U', T0, [('mk', [T0], [])], False, "universe"),
       ('field Nat -> Type0 in a Type0 inductive', T0, [('mk', [('pi', nat, T0)], [])], False, "universe"),
@@ -59,13 +59,20 @@ def admission_cases(g):
       ('large parameter-like field', ('pi', T0, T0), [('mk', [T0], [('var', 0)])], True, ""),
       ('Vec-style indexed family', ('pi', T0, ('pi', nat, T0)),
          [('vnil', [T0], [('var', 0), zero]), ('vcons', [T0, nat, ('var', 0), ('app', ('app', S, ('var', 0)), ('var', 1))], [('var', 0), ('app', succ, ('var', 1))])], True, ""),
+      # F92: the family in an INDEX. The frozen reference kernel looks at the head of a recursive field only (a sixth element says what it does); the hybrid kernel refuses all three.
+      ('F92: the family in an index of a recursive field', ('pi', T0, ('type', 1)), [('mkq', [T0, ('app', S, neg(('var', 0)))], [('var', 0)])], False, "positivity", True),
+      ('F92: ... under a product', ('pi', T0, ('type', 1)), [('mkq', [T0, ('pi', nat, ('app', S, neg(('var', 0))))], [('var', 0)])], False, "positivity", True),
+      ('F92: the family in a result index', ('pi', T0, ('type', 1)), [('mkr', [T0], [neg(('var', 0))])], False, "result index", True),
+      ('infinitely branching with an index (control)', ('pi', T0, T0), [('sup', [T0, ('pi', nat, ('app', S, ('var', 0)))], [('var', 0)])], True, ""),
     ]
 def test_admission():
     rows = []
-    for nm_idx in range(12):
+    kref0, _ = build_library()
+    for nm_idx in range(len(admission_cases({name: gid for gid, name, _, _ in kref0.list_globals()}))):
         kref, refs = build_library(); knew = H.Kernel(); load_library(kref, knew)
         g = {name: gid for gid, name, _, _ in kref.list_globals()}
-        name, sort, ctors, expect, needle = admission_cases(g)[nm_idx]
+        name, sort, ctors, expect, needle, *ref_says = admission_cases(g)[nm_idx]
+        ref_expect = ref_says[0] if ref_says else expect                    # what the frozen reference does: the same, except for the cases of finding F92
         res = {}
         for which, k, bld, conv, CS in (('ref', kref, build_ref, lambda t, n: t, R.CtorSpec), ('new', knew, build_new, lambda t, n: l2h(t, n, lenient=True), H.CtorSpec)):
             try:
@@ -76,7 +83,7 @@ def test_admission():
                     specs.append(CS(cn, [bld(k, conv(a, j)) for j, a in enumerate(ats)], [bld(k, conv(r, len(ats))) for r in ris]))
                 k.finish_inductive(tid, specs); res[which] = (True, '')
             except Exception as ex: res[which] = (False, str(ex))
-        agree = res['ref'][0] == res['new'][0] == expect
+        agree = res['ref'][0] == ref_expect and res['new'][0] == expect
         reason_ok = expect or (needle in res['new'][1]) or (needle == 'positivity' and 'positivity' in res['new'][1])
         rows.append((name, expect, res['ref'][0], res['new'][0], agree and reason_ok, res['new'][1][:70]))
     return rows
@@ -231,7 +238,7 @@ if __name__ == '__main__':
     for kind, name, st in lib: print("     %-18s %-10s %s" % (kind, name, st))
     if any(st != 'OK' for _, _, st in lib) or bad or n1 != n2: FAIL.append('A library')
     print("   global types equal after conversion: %s (%d vs %d globals)" % ("yes" if bad == 0 and n1 == n2 else "NO (%d mismatches)" % bad, n1, n2))
-    print("B. admission corpus (ref accepts/rejects == new == expected, rejection reason matches):")
+    print("B. admission corpus (ref accepts/rejects == new == expected, rejection reason matches; the F92 rows: the reference accepts, the hybrid kernel rejects):")
     for r in test_admission():
         if not r[4]: FAIL.append('B ' + r[0])
         print("     %-46s expect %-6s ref %-6s new %-6s %s  %s" % (r[0], "accept" if r[1] else "reject", "accept" if r[2] else "reject", "accept" if r[3] else "reject", "OK " if r[4] else "BAD", r[5]))

@@ -68,7 +68,7 @@ one abstract per field. The legacy structural-recursion analyses are reused thro
 | check | volume | result |
 |---|---|---|
 | library re-declared through the CHECKED path (Nat, Bool, Eq, Le, add, cong, lt, transport, le_trans) | 9 events | all accepted, 16/16 global types equal |
-| inductive admission corpus (paradox, large fields, bad indices, positivity, impredicative/param-like/Vec accepted) | 12 | ref == new == expected, reasons match |
+| inductive admission corpus (paradox, large fields, bad indices, positivity, impredicative/param-like/Vec accepted; F92: the family in an index, in a result index, and a control) | 16 | ref == new == expected, reasons match (the three F92 rows: the reference accepts, the hybrid kernel refuses) |
 | structural-recursion guard corpus | 6 + 4 hand-built Fix | ref == new == expected |
 | Match typing, random typed terms / ill-typed matches (too few, too many, wrong type, non-inductive scrutinee, wrong lambda domain) | 40,000 / 20,000 | 0 disagreements |
 | dependent typing: `refl a : Eq a b` needing delta/iota/beta in the type | 40,003 | 0 disagreements |
@@ -267,6 +267,15 @@ Test-discipline fix: the S5 candidate test used to END a script silently on any 
 * **F19** the reference accepts a `Match` whose motive has a binder domain that is not a type: `match h as (lam (_ : Or). P) {}` on `h : False` is accepted by the reference and rejected by the hybrid
   ("Lambda domain must be a type", mutant M45); a well-formed motive is accepted by both. I did not try to exploit this in the reference.
 * F16 again: `ex_elim` needs `apply (f' x p)` on a reverted Pi-typed hypothesis, which the reference cannot do.
+* **F92, F93 (both kernels; found 2026-11-08 by reading the rules back out of the code, fixed in the hybrid kernel only):**
+  - F92. Strict positivity looked at the HEAD of a recursive field and nothing inside its arguments, and not at the result indices of a constructor. `R : Prop -> Type`, `mkr : forall A, R (R A -> False)` was admitted and,
+    with excluded middle and propositional extensionality, proves `False` (`tests/support/negative_index.py`; Lean's kernel refuses `R`). Now `is_strictly_positive` requires the family to occur in none of the arguments of
+    that head, `finish_inductive` refuses it in a result index, and the independent checker re-checks admission (the universe rule and the positivity condition) of every family it is given.
+  - F93. The motive of an explicit `match` was checked for its shape: `|indices| + 1` products, with no check that the chain ends in a sort, and no check that the motive can be applied to what the types of the match apply it to.
+    Now the chain must end in a sort, and the applications of the motive that the types mention -- to the scrutinee's indices and the scrutinee (the type of the match), and, for an explicit motive, to the indices and the
+    value of each constructor under its fields (the type of a branch) -- must be well typed and be types. This is a rule about those applications and not a comparison of the motive's binder types with the elimination rule's:
+    the binders `cases` and `induct` build are specialised to the parameters of the scrutinee, the legacy library writes them in the general form, and both are applications that typecheck; a comparison by evaluation
+    also made `Q big` compute (S35 A is the cost gate). The independent checker applies the same rule.
 
 ## Still open (and why)
 * **F5 is NOT verified.** `Ex Nat (lam n. n = 0) -> Ex Nat (lam n. 0 = n)` cannot even reach the elimination: `cases` treats `Ex`'s parameters `A` and `P` as indices, generalises EVERY occurrence of `Nat` in the goal
@@ -321,6 +330,8 @@ family/index, a family's constructors) and shares only the term-tree format with
 * guard corpus: 7 Fix terms valid or invalid only because of the structural-recursion guard agree with my labels in the kernel AND the checker.
 * re-declaring the library through the kernel's checked path in parameter mode: the kernel and the checker reject exactly {cong, le_trans, transport} (see F20 below).
 * the checker alone catches kernel mutants M1 (guard off; needs the guard corpus), M2, M3, M5, M8, M60.
+* (2026-11-08, F92/F93) the checker also re-checks the ADMISSION of every family (`admission_problems`: positivity with indices and result indices, and the universe rule) and applies the motive to the scrutinee's indices
+  and to each constructor's indices and value; the gate declares the families of S2's admission corpus through the kernel's unchecked entry and demands that the checker refuse exactly the ones the checked entry refuses.
 
 ## Findings it produced
 * **F21 (fixed):** `check_lambda` only unified a binder annotation with the expected domain and never checked that the annotation is a type, so an ill-typed annotation convertible to a well-typed one was accepted
@@ -402,7 +413,7 @@ whose names start with a prefix (each is built in isolation and must make some g
 | `s30_zlib_tests.py` | the integers: 117 statements of the Z library (ring laws, order, strict order, integral domain, casts; each declared by tactics and re-checked by the kernel and the independent checker), `ring` over Z, `const_exp` |
 | `s31_linarith_tests.py` | `linarith` / `nlinarith` over Z: the polynomial reader against an oracle, the exact simplex against Fourier-Motzkin and SciPy, certificates (non-negative integers, gcd normalised, exact sum), planted contradictions and consequences, refusals leave the state unchanged, a wrong certificate is caught, 36 corrupted proofs judged identically by the kernel and the independent checker |
 | `s34_nt_tests.py` | the number-theory library over Z (46 theorems: divisibility, division with remainder, Bezout, gcd, coprimality, primes, Euclid, prime divisors) and the three olympiad problems: statements audited (definitions, the single axiom `em` and exactly which theorems use it), numerals against Python integers, a randomised oracle for `linear_combination` over Nat, N and Z (45 statements per type, accepted exactly when the independent polynomial oracle says so), `ring` / `linarith` after the display normal form, `interval_cases`, `by_contra`, negative controls (nearby statements refuted), the independent checker re-checks 57 globals and agrees on corrupted proofs |
-| `s35_matchcheck_tests.py` | how a `match` is checked: the family of the scrutinee's type read on syntax (cost in kernel steps, the 32-unfolding bound by raw matches, the fallback by evaluation), the motive applied by beta on syntax (dependent hypotheses, the order of indices and scrutinee, a global motive), refusals (a scrutinee whose type is not an inductive family: function types, definitions that unfold to one, an axiom, a stuck recursive type, with one branch and with none), and the independent checker's verdict on all 62 terms |
+| `s35_matchcheck_tests.py` | how a `match` is checked: the family of the scrutinee's type read on syntax (cost in kernel steps, the 32-unfolding bound by raw matches, the fallback by evaluation), the motive applied by beta on syntax (dependent hypotheses, the order of indices and scrutinee, a global motive), refusals (a scrutinee whose type is not an inductive family: function types, definitions that unfold to one, an axiom, a stuck recursive type, with one branch and with none), the motive's fit to the scrutinee and the constructors (F93: a motive over a second type, ending in a term, without a binder, one whose last binder is fixed to the scrutinee's own type; each also in the head position of an application), and the independent checker's verdict on all 80 terms |
 | `s26_memo_tests.py` | node facts, shared-term traversals, typing memo, linear proof extraction |
 | `s32_synconv_tests.py` | the quick conversion check on syntax (`SynConv`): it only ever answers YES, so every yes is cross-checked against the evaluator (3,088 checks on generated pairs: unfold order, argument counts, lambdas and Pis, budget and depth limits, metavariables and the tactic scopes switch it off); counts of looks and settled pairs |
 | `s33_convmemo_tests.py` | the three sharing tables (`ConvMemo` for values, `UnifyMemo` for the unifier, `QuoteMemo` for refused comparisons): exponentially shared terms are decided in polynomial work, both answers, with metavariables and rewinds (a table entry never outlives an undo), 258 checks; also run with `ITP_VERIFY_MEMO=1` |

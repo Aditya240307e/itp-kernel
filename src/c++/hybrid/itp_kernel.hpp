@@ -4538,7 +4538,7 @@ inline CtorIndexForcing unify_ctor_pattern_indices(const detail::InstantiatedCto
 /// before Phase B, by construction, not by coincidence.
 inline ElabResult check_match_branches(uint32_t type_global_id, NodeId motive, const std::vector<NodeId>& branches,
                                         const std::vector<NodeId>& concrete_indices,
-                                        ElabCtx& ec, ElabState& es);
+                                        ElabCtx& ec, ElabState& es, bool explicit_motive = false);
 /// Verifies that `motive_id` is well-typed AND function-shaped enough to
 /// apply to `arity + 1` arguments (the index count, plus the scrutinee
 /// itself) before either infer(Match) or check(Match, ...) trusts a
@@ -4551,7 +4551,14 @@ inline ElabResult check_match_branches(uint32_t type_global_id, NodeId motive, c
 /// uncaught exception rather than failing gracefully. Confirmed
 /// empirically, not a hypothetical: this is exactly what happened before
 /// this check existed.
+///
+/// The Pi chain must end in a sort (F93: it used to be enough to have the
+/// right number of products). That the binders of the motive suit the
+/// scrutinee's family is checked by check_motive_applies, which needs the
+/// family and so is called after this: the motive is applied, as the types
+/// in the match are written, and each application must be well typed.
 inline ElabResult verify_motive_shape(NodeId motive_id, uint32_t arity, ElabCtx& ec, ElabState& es, uint32_t* sort_level = nullptr);
+inline ElabResult check_motive_applies(NodeId motive, const std::vector<NodeId>& indices, NodeId value, ElabCtx& ec, ElabState& es, const char* where);
 
 // ---- forward declarations for the S2 typing core (defined at the end of this file)
 inline TypeResult infer(NodeId t, ElabCtx& ec, ElabState& es);
@@ -4860,7 +4867,8 @@ struct DiagnosticTable {
 // a domain position; see is_strictly_positive below), and indexed families
 // such as Eq a b, where a constructor's `result_indices` targets a specific
 // instantiation of the family's indices rather than the family applied to
-// nothing.
+// nothing. The family may not occur in those result indices, nor in the
+// arguments (the indices) of a recursive occurrence in a field.
 //
 // Not supported:
 //   - Mutual inductive blocks, where several types reference each other's
@@ -4959,6 +4967,13 @@ inline bool occurs(uint32_t ind_type_global_id, NodeId term) {
 /// restricted checker does not do; failing closed here rather than
 /// treating "not a Pi" as automatically safe was a real, previously
 /// unnoticed gap in an earlier version of this check.
+///
+/// The arguments of that head are examined too (finding F92): a field of
+/// type `Q (Q A -> False)` has the family `Q` to the left of an arrow
+/// INSIDE an index, which is as negative as `Q -> False` in the field
+/// itself, and an earlier version of this check, which looked at the head
+/// only, admitted it. The result indices of a constructor are the other
+/// place the family may not occur; finish_inductive checks them.
 inline bool is_strictly_positive(uint32_t ind_type_global_id, NodeId arg_type) {
     ITP_STACK_CHECK();
     return inspect(arg_type,
@@ -4970,18 +4985,20 @@ inline bool is_strictly_positive(uint32_t ind_type_global_id, NodeId arg_type) {
             if (!occurs(ind_type_global_id, arg_type)) return true; // doesn't mention it at all: safe
             // It occurs somewhere. Accept only if arg_type IS, at its
             // application head, a direct reference to the inductive
-            // (covering the index-applied case, e.g. `Eq A x x`); reject
+            // (covering the index-applied case, e.g. `Eq A x x`), and the
+            // family occurs in none of the arguments of that head; reject
             // every other way it could occur. Written without try_match,
             // which is declared later in this header.
             NodeId head = arg_type;
+            bool args_clean = true;
             bool progressed = true;
             while (progressed) {
                 progressed = inspect(head,
-                    [&](App a) { head = a.fn_id; return true; },
+                    [&](App a) { if (occurs(ind_type_global_id, a.arg_id)) args_clean = false; head = a.fn_id; return true; },
                     [&](auto) { return false; }
                 );
             }
-            return inspect(head,
+            return args_clean && inspect(head,
                 [&](Const c) { return c.global_id == ind_type_global_id; },
                 [&](auto) { return false; }
             );
@@ -5916,8 +5933,23 @@ inline ElabResult verify_motive_shape(NodeId motive_id, uint32_t arity, ElabCtx&
         Value next = eval(mpi->cod_id, mpi->env.extend(fresh_neutral(ec.size())));
         motive_ty_val = std::move(next);
     }
-    if (sort_level) if (auto* vt = std::get_if<VType>(&motive_ty_val)) *sort_level = vt->universe_level;     // the sort the motive's result type lives in: the ELIMINATION sort
+    auto* vt = std::get_if<VType>(&motive_ty_val);
+    if (!vt) return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, motive_id, std::nullopt,
+        "explicit motive_id is not shaped like a valid motive -- expected a Pi chain of (index count + 1) arguments, ending in a sort"});    // F93: a term, not a sort, after the last product
+    if (sort_level) *sort_level = vt->universe_level;     // the sort the motive's result type lives in: the ELIMINATION sort
     return {};
+}
+
+/// F93. The motive is applied to indices and a value in the types of a match: to the scrutinee's own indices and the scrutinee in the type of the match itself, and to the indices and the value of
+/// each constructor in the type of each branch. Each application has to be well typed and to be a type; `where` says which one it is, for the message. This is the typing rule of a match
+/// without a comparison of the binders of the motive with the types the elimination rule gives them: those need not be written in any one way (the binders that `cases` and `induct` build are
+/// specialised to the parameters of the scrutinee, hand-built motives are not), but a motive over a second data type, applied to the scrutinee of the first, is refused here, and so is a motive
+/// whose applications are not types.
+inline ElabResult check_motive_applies(NodeId motive, const std::vector<NodeId>& indices, NodeId value, ElabCtx& ec, ElabState& es, const char* where) {
+    auto s = sort_level_of(mk_app(apply_all(motive, indices), value), ec, es, "its application is not a type");
+    if (s) return {};
+    return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, motive, std::nullopt,
+        std::string("explicit motive_id does not suit the scrutinee: its application to ") + where + " is ill-typed (" + s.error().message + ")"});
 }
 
 /// Forced field values replace the field variables SIMULTANEOUSLY (a forced value may itself carry binders).
@@ -6056,7 +6088,7 @@ inline NodeId motive_result(NodeId motive, const std::vector<NodeId>& indices, N
 }
 
 inline ElabResult check_match_branches(uint32_t type_global_id, NodeId motive, const std::vector<NodeId>& branches,
-                                        const std::vector<NodeId>& concrete_indices, ElabCtx& ec, ElabState& es) {
+                                        const std::vector<NodeId>& concrete_indices, ElabCtx& ec, ElabState& es, bool explicit_motive) {
     ITP_STACK_CHECK();
     std::vector<uint32_t> ctor_gids = detail::ctor_gids_for_type(type_global_id);
     if (ctx().prop_mode && ctx().prop_elim_only.count(type_global_id)) {      // a proposition that is not a syntactic subsingleton: eliminable only into Type0
@@ -6077,6 +6109,12 @@ inline ElabResult check_match_branches(uint32_t type_global_id, NodeId motive, c
         std::vector<NodeId> arg_types = apply_ctor_index_forcing(inst.arg_types, forcing);
         NodeId ctor_app = forced_ctor_app(ctor_gids[ci], ec.size(), arity, inst, forcing);
         std::vector<NodeId> forced_result_indices = apply_ctor_index_forcing_to_result_indices(inst.result_indices, forcing);
+        if (explicit_motive) {              // F93: the type of the branch, as the motive is applied to the constructor's indices and value, has to be a type (the fields are the binders of a Pi)
+            const NodeId applied = mk_app(apply_all(motive, forced_result_indices), ctor_app);
+            auto s = sort_level_of(close_pi_telescope(arg_types, applied, ec.size()), ec, es, "its application is not a type");
+            if (!s) return std::unexpected(TypeError{TypeErrorKind::MotiveInferenceFailure, motive, std::nullopt,
+                "explicit motive_id does not suit the constructor '" + ctx().globals.defs[ctor_gids[ci]].name + "': its application to the indices and the value of the constructor is ill-typed (" + s.error().message + ")"});
+        }
         NodeId branch_expected = motive_result(motive, forced_result_indices, ctor_app);          // beta on syntax: a branch that takes the reverted hypotheses as more binders is checked against a Pi as written
         branch_expected = close_pi_telescope(arg_types, branch_expected, ec.size());
         if (ElabResult r = check(branches[ci], branch_expected, ec, es); !r) return r;
@@ -6210,7 +6248,8 @@ inline TypeResult infer_uncached(NodeId t, ElabCtx& ec, ElabState& es) {
             const uint32_t type_global_id = fam->type_gid;
             std::vector<NodeId> concrete_indices = std::move(fam->args);
             if (ElabResult r = verify_motive_shape(m.motive_id, static_cast<uint32_t>(concrete_indices.size()), ec, es); !r) return std::unexpected(r.error());
-            if (ElabResult r = check_match_branches(type_global_id, m.motive_id, *m.branches, concrete_indices, ec, es); !r) return std::unexpected(r.error());
+            if (ElabResult r = check_motive_applies(m.motive_id, concrete_indices, m.scrutinee_id, ec, es, "the indices and the value of the scrutinee"); !r) return std::unexpected(r.error());
+            if (ElabResult r = check_match_branches(type_global_id, m.motive_id, *m.branches, concrete_indices, ec, es, true); !r) return std::unexpected(r.error());
             if (auto syn = motive_result_syntactic(m.motive_id, concrete_indices, m.scrutinee_id)) return *syn;
             return quote(eval(motive_result(m.motive_id, concrete_indices, m.scrutinee_id), ec.values), ec.size());       // a motive that is not a lambda: the application, evaluated
         }
@@ -6314,6 +6353,7 @@ inline ElabResult check_match(NodeId t, NodeId expected_ty, ElabCtx& ec, ElabSta
     const uint32_t type_global_id = fam->type_gid;
     std::vector<NodeId> concrete_indices = std::move(fam->args);
     NodeId motive = m.motive_id;
+    bool explicit_motive = false;                  // F93: a motive that was written, and not built here from the expected type, is checked against the constructors too
     if (m.motive_id.tag == NodeType::META && !ctx().meta_ctx.is_solved(ctx().metas[m.motive_id.index].meta_id)) {
         // The motive is a hole: build it by abstracting the indices and the scrutinee out of the expected type.
         const uint32_t hole_meta_id = ctx().metas[m.motive_id.index].meta_id, n = ec.size(), arity = static_cast<uint32_t>(concrete_indices.size());
@@ -6332,10 +6372,12 @@ inline ElabResult check_match(NodeId t, NodeId expected_ty, ElabCtx& ec, ElabSta
         motive = built;
     } else {
         if (ElabResult r = verify_motive_shape(m.motive_id, static_cast<uint32_t>(concrete_indices.size()), ec, es); !r) return r;
+        if (ElabResult r = check_motive_applies(m.motive_id, concrete_indices, m.scrutinee_id, ec, es, "the indices and the value of the scrutinee"); !r) return r;
         NodeId applied = motive_result(motive, concrete_indices, m.scrutinee_id);
         if (ElabResult r = unify(applied, expected_ty, ec, es); !r) return r;
+        explicit_motive = true;
     }
-    return check_match_branches(type_global_id, motive, *m.branches, concrete_indices, ec, es);
+    return check_match_branches(type_global_id, motive, *m.branches, concrete_indices, ec, es, explicit_motive);
 }
 
 inline ElabResult check(NodeId t, NodeId expected_ty, ElabCtx& ec, ElabState& es) {
@@ -6351,10 +6393,14 @@ inline ElabResult check(NodeId t, NodeId expected_ty, ElabCtx& ec, ElabState& es
 inline InductiveHandle finish_inductive(uint32_t type_global_id, std::vector<CtorSpec> ctors, bool allow_unsafe_skip_positivity) {
     detail::require_reserved_inductive(type_global_id);        // before the admission checks look anything up by this id
     if (!allow_unsafe_skip_positivity) {
-        for (const auto& ctor : ctors)
+        for (const auto& ctor : ctors) {
             for (NodeId arg_ty : ctor.arg_types)
                 if (!is_strictly_positive(type_global_id, arg_ty))
-                    throw std::logic_error("itp: constructor '" + ctor.name + "' fails strict positivity -- the inductive being defined appears to the left of an arrow in an argument type");
+                    throw std::logic_error("itp: constructor '" + ctor.name + "' fails strict positivity -- the inductive being defined appears to the left of an arrow in an argument type, or inside an argument of one of its own occurrences");
+            for (NodeId result_index : ctor.result_indices)     // F92: the family may not occur in the indices of its own constructors' results either
+                if (occurs(type_global_id, result_index))
+                    throw std::logic_error("itp: constructor '" + ctor.name + "' fails strict positivity -- the inductive being defined appears in a result index of the constructor");
+        }
         check_inductive_admission(type_global_id, ctors);
     }
     return finish_inductive_unchecked(type_global_id, std::move(ctors));

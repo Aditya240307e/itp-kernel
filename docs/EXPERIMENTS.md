@@ -354,7 +354,7 @@ forked before CUDA is touched and use CPU copies of the weights. The code path f
   slope of a log-log line over the range that was measured (a few points per seed, fitted per seed, the interval over seeds); it assumes no asymptote and says nothing outside that range.
 * A learner from random weights is compared with the model-free baselines and with the same learner continued from behaviour cloning; it is not a claim about reinforcement learning in general, only about this environment, these goals and this budget.
 * RL variants share hyper-parameters; none was tuned per method. PPO and expert iteration are compared at equal iterations and by cumulative probes (logs), not at equal wall-clock.
-* The mutation catalogue (1 707 mutants) is the evidence that the gates bite; the full mutation run takes many hours and is not part of this pipeline: `scripts/08_soundness.sh` runs it with the gates, the fuzzers and the checker comparison and states what it shows (7.3); `python3 mutants/mutate.py PREFIX` runs a part.
+* The mutation catalogue (1 726 mutants) is the evidence that the gates bite; the full mutation run takes many hours and is not part of this pipeline: `scripts/08_soundness.sh` runs it with the gates, the fuzzers and the checker comparison and states what it shows (7.3); `python3 mutants/mutate.py PREFIX` runs a part.
 
 ## 10. Compute
 

@@ -4,7 +4,7 @@ A type checker for the kernel's fragment, **written separately in Python from th
 
 | module | what |
 |---|---|
-| `indep_checker.py` | the independent checker (673 lines): terms, substitution, conversion, the typing rules, the inductive and quotient analyses, the structural-recursion guard |
+| `indep_checker.py` | the independent checker (735 lines): terms, substitution, conversion, the typing rules, the inductive and quotient analyses, the structural-recursion guard |
 | `recheck.py` | the glue: read the kernel's exported terms, build an environment, run the checker over it (`recheck_world`, `SecondOpinion`) |
 | `audit.py` | `dependencies_of_global`: the axioms and quotient primitives a theorem reaches, like Lean's `#print axioms` |
 
@@ -49,9 +49,10 @@ audit.dependencies_of_global(w.k, w.gid['add_comm'])    # (set(), set()): no axi
 1. the quotient constants are exactly the specified five (above);
 2. the environment is **well founded**: no global mentions an unknown one or one that is declared but unfinished, the graph of mentions has no cycle, and the only self-reference is the call of a structurally recursive function to itself;
 3. every global the kernel recorded as structurally recursive **passes the checker's own guard**;
-4. the type of every global is a type, and every definition's value has its type.
+4. the type of every global is a type, and every definition's value has its type;
+5. every inductive family is **admitted** under the checker's own reading of the stated conditions, from the types of its constructors alone: the family occurs strictly positively in each field (not at all, or in a field that is a product whose domain does not mention it, or as the family applied to arguments that do not mention it) and not at all in a result index (F92), and a field that is not parameter-like lives in a universe no larger than the family's, unless `Type 0` is `Prop`.
 
-The typing rules it implements are the kernel's: `Type k : Type (k+1)` without cumulativity; `Pi` impredicative into `Type 0`; delta, iota, the unfolding of `fix` on a constructor, function eta; proof irrelevance in the `Prop`/`Type` world (decided by inference, never by the shape of a term); the elimination restriction for a `Prop` family that is not a subsingleton; parameters as a prefix of a family's arguments; and `match` typing with index unification. The header of `indep_checker.py` states each rule in a line.
+The typing rules it implements are the kernel's: `Type k : Type (k+1)` without cumulativity; `Pi` impredicative into `Type 0`; delta, iota, the unfolding of `fix` on a constructor, function eta; proof irrelevance in the `Prop`/`Type` world (decided by inference, never by the shape of a term); the elimination restriction for a `Prop` family that is not a subsingleton; parameters as a prefix of a family's arguments; and `match` typing with index unification, including the rule for the motive of a `match`: it is well typed, its chain of products ends in a sort, and it is applicable, that is, its applications to the indices and the value of the scrutinee, and to the indices and the value of each constructor under the constructor's fields, are well typed (F93). The header of `indep_checker.py` states each rule in a line.
 
 ## What it does not do
 

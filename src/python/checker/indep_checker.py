@@ -20,7 +20,14 @@ Specification summary (the points where kernels can differ):
               two applications of the same constructor match argument by argument; two DIFFERENT constructors of one family refute the branch (the scan stops);
               anything else is ignored.  Field types are specialised by ALL forced entries; the result indices and the constructor application are specialised only by
               the fields that occur at most once as a bare result index, or that a PARAMETER slot determined (parameter mode).  The branch must have the type
-              Pi (x_j : A_j sigma). motive r'_0 .. r'_{k-1} (c x'_0 ..).  The motive must be well typed and have k+1 Pi layers ending in a sort.
+              Pi (x_j : A_j sigma). motive r'_0 .. r'_{k-1} (c x'_0 ..).  The motive must be well typed and have k+1 Pi layers ending in a sort, and it must be APPLICABLE: applied to the
+              scrutinee's indices and the scrutinee, and (in the context of the fields) to r'_0 .. r'_{k-1} and c x'_0 .., each argument has the type of its binder (F93).  Binders written
+              in more than one way are accepted (the general ones, or specialised to the scrutinee's parameters); a motive over another type, or whose last binder is fixed to the
+              scrutinee's own type, is not applicable.
+  admission:  every inductive family is re-checked from its constructors' types alone.  A constructor has the form  Pi (fields). F r_0 .. r_{k-1}.  (A5) The family occurs strictly
+              positively in each field type -- not at all, or the field is a product whose domain does not mention it and whose codomain is positive, or it is the family applied to
+              arguments that do not mention it -- and it does not occur in any result index r_i (F92).  (A4) A field that is not parameter-like (not a bare variable among the result
+              indices) lives in a universe no larger than the family's, unless Type 0 is Prop (prop_elim): a large field in a small family is the paradox of Girard.
   quotients:  the five roles type / mk / lift / ind / sound are ordinary constants (no value). The checker does NOT trust the kernel's labels: it derives j and the
               equality family E from the declared type of `sound`, then demands that every labelled constant has EXACTLY the type below (alpha-equivalence), that E is
               E : (A : Type j) -> A -> A -> Type 0 with the single constructor refl : (A : Type j) -> (a : A) -> E A a a, and that j >= 1. Only then does the one extra
@@ -514,11 +521,12 @@ class Checker:
         if h[0] != 'c' or not self.is_family(h[1]): raise CheckError('match scrutinee is not an inductive family application')
         fam = h[1]; k = self.arity(fam); ctors = self.g[fam].ctors
         if len(idx) != k: raise CheckError('family not fully applied')
-        cur = self.whnf(self.infer(ctx, motive))                                   # the motive must be well typed ...
+        mty = cur = self.whnf(self.infer(ctx, motive))                             # the motive must be well typed ...
         for _ in range(k + 1):                                                     # ... have k+1 Pi layers ...
             if cur[0] != 'pi': raise CheckError('motive has the wrong shape')
             cur = self.whnf(subst(cur[3], cur[1], ('v', fresh())))
-        if cur[0] != 's': raise CheckError('motive does not return a sort')       # ... and end in a sort
+        if cur[0] != 's': raise CheckError('motive does not return a sort')       # ... and end in a sort ...
+        self.motive_applies(ctx, mty, list(idx) + [s])                             # ... and be applicable to the scrutinee's indices and the scrutinee (F93)
         if self.prop_elim and cur[1] != 0 and self.elim_restricted(fam): raise CheckError('large elimination from a proposition')
         if len(brs) != len(ctors): raise CheckError('wrong number of branches')
         conc = [self.index_nf(a) for a in idx]
@@ -542,8 +550,23 @@ class Checker:
             body_ty = apply_args(motive, res2 + [capp])
             expected = body_ty
             for x, A in reversed(fields): expected = ('pi', x, sub_many(A, sigma), expected)
+            cctx = dict(ctx)                                                       # F93: the motive is applicable to this constructor's indices and value, under its fields
+            for x, A in fields: cctx[x] = sub_many(A, sigma)
+            self.motive_applies(cctx, mty, res2 + [capp])
             self.check(ctx, brs[ci], expected)
         return apply_args(motive, list(idx) + [s])
+
+    def motive_applies(self, ctx, mty, args):
+        """F93: the motive, whose (weak-head normal) type is `mty`, applied to `args` is well typed and is a type. This is the rule for the types in a match -- the match's own type
+        (the scrutinee's indices and the scrutinee) and the type of each branch (the constructor's indices and the constructor applied to its fields) -- and it replaces a comparison of the
+        motive's binder types with the types the elimination rule gives them: the binders may be written in more than one way (those that `cases` and `induct` build are specialised to the
+        scrutinee's parameters), but a motive over a second data type, applied to a term of the first, is not well typed."""
+        cur = mty
+        for a in args:
+            if cur[0] != 'pi': raise CheckError('motive has the wrong shape')
+            self.check(ctx, a, cur[2])
+            cur = self.whnf(subst(cur[3], cur[1], a))
+        if cur[0] != 's': raise CheckError('motive does not return a sort')
 
     # ------------------------------------------------------------ the structural-recursion guard
     def guard_ok(self, d, fty, sx, body):
@@ -659,14 +682,53 @@ class Checker:
             if not self.guard_ok(d, gl.type, sx, replace_const(gl.value, gid, ('v', sx))): bad.append((gid, gl.name, 'structural recursion guard failed'))
         return bad
 
+    def positive(self, fam, A):
+        """condition A5 for one field type `A` of a constructor of `fam`: the family does not occur in it, or A is a product whose domain does not mention the family and whose codomain satisfies
+        the condition, or A is the family itself applied to arguments that do not mention it (an occurrence in an INDEX of a recursive field is as negative as one in the field: finding F92)"""
+        while A[0] == 'pi':
+            if fam in consts_in(A[2]): return False
+            A = A[3]
+        if fam not in consts_in(A): return True
+        h, args = spine(A)
+        return h == ('c', fam) and not any(fam in consts_in(a) for a in args)
+
+    def admission_problems(self):
+        """(gid, name, message) for every constructor whose family was not admissible by the stated conditions, which this checker re-derives from the constructors' types alone:
+        the constructor has the form  Pi (fields). F r_0 .. r_{k-1}  (the types of fields and indices are well typed because every global's type is checked to be a type);
+        (A4) a field that is not parameter-like -- not a bare variable among the result indices -- lives in a universe no larger than the family's (unless Type 0 is Prop: then any);
+        (A5) the family occurs strictly positively in every field type and does not occur in any result index (finding F92)."""
+        bad = []
+        for fam, gl in self.g.items():
+            if not self.is_family(fam) or not gl.ctors: continue
+            lvl = gl.type
+            while lvl[0] == 'pi': lvl = lvl[3]
+            for cg in gl.ctors:
+                cname = self.g[cg].name
+
+                def one(cg=cg, cname=cname, fam=fam, lvl=lvl[1]):
+                    fields, res = self.open_ctor(cg)
+                    for r in res:
+                        if fam in consts_in(r): raise CheckError("admission: the family '%s' occurs in a result index of constructor '%s'" % (self.g[fam].name, cname))
+                    ctx = {}
+                    for j, (x, A) in enumerate(fields):
+                        if not self.positive(fam, A): raise CheckError("admission: the family '%s' does not occur strictly positively in field %d of constructor '%s'" % (self.g[fam].name, j, cname))
+                        level = self.sort_of(ctx, A); ctx[x] = A
+                        if ('v', x) not in res and level > lvl and not (self.prop_elim and lvl == 0):
+                            raise CheckError("admission: field %d of constructor '%s' lives in universe %d, larger than the family's %d" % (j, cname, level, lvl))
+                ok, msg = self.run(one)
+                if not ok: bad.append((cg, cname, msg))
+        return bad
+
     def check_definitions(self):
-        """re-check every definition of the environment (value : type) and that every family/constructor/axiom type is a type; the environment must be well founded and its recursive globals guarded"""
+        """re-check every definition of the environment (value : type) and that every family/constructor/axiom type is a type; the environment must be well founded, its recursive globals guarded
+        and its inductive families admissible"""
         bad = []
         if self.quot_problem is not None:
             gid0 = min(gid for gid, gl in self.g.items() if gl.quot_role is not None)
             bad.append((gid0, self.g[gid0].name, 'quotients: ' + self.quot_problem))
         bad += self.well_founded_problems()
         bad += self.recursion_problems()
+        bad += self.admission_problems()
         for gid, gl in self.g.items():
             ok, msg = self.run(lambda: (self.sort_of({}, gl.type), None if gl.value is None else self.check({}, gl.value, gl.type)))
             if not ok: bad.append((gid, gl.name, msg))

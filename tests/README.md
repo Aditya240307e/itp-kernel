@@ -28,7 +28,7 @@ A gate can also be run by hand, from anywhere: `python3 tests/library/s23_ring_t
 | `learner/` | features, policy network, search, Gymnasium environment, RL bookkeeping |
 | `synth/` | the synthetic theorem generator (`src/python/synth`) and the datasets it writes: determinism, records replayed from their data, tamper tests, merge and splits, the command line |
 | `repo/` | the repository itself: layout, registry, imports, documents, examples |
-| `support/` | modules shared by gates (the differential harness, the self-consistency oracle, the soundness canaries, a Prop-world builder); `harness.py` is also a gate |
+| `support/` | modules shared by gates (the differential harness, the self-consistency oracle, the soundness canaries, a Prop-world builder, the family of the F92 exploit); `harness.py` is also a gate |
 | `fuzz/`, `bench/` | the environment fuzzer and the kernel micro-benchmarks (not gates) |
 | `golden/` | pinned data of S40, S41, S43, S48 (statements, action sequences, generated digests; `S40_UPDATE_GOLDEN=1` etc. rewrite them when a change is intended) |
 
@@ -42,7 +42,7 @@ Times are seconds on the 2-core box with two gates at a time (the last full run,
 
 | gate | time | what it protects |
 |---|---|---|
-| `s2_tests.py 1500` | 1 s | The full typing core of the hybrid kernel against the reference kernel. |
+| `s2_tests.py 1500` | 1 s | The full typing core of the hybrid kernel against the reference kernel. The admission of inductive families is part of it: a family that occurs in an index of one of its own recursive fields, or in a result index of a constructor, is refused (F92), where the legacy reference accepts it. |
 | `s26_memo_tests.py` | 4 s | The facts every term node carries, the shared-term (DAG) traversals, the typing memo, and the fast proof extraction. |
 | `s16_quot_tests.py` | 1 s | Quotients. |
 | `s17_irrelevance_tests.py` | 5 s | Definitional proof irrelevance. |
@@ -52,7 +52,7 @@ Times are seconds on the 2-core box with two gates at a time (the last full run,
 | `s21_view_tests.py` | 1 s | Reading terms back (`Kernel.view`) and the validity of term handles. |
 | `s32_synconv_tests.py` | 2 s | The quick conversion check (SynConv) in front of the evaluator. |
 | `s33_convmemo_tests.py` | 4 s | Conversion and unification over SHARED structure (the tables ConvMemo and UnifyMemo). |
-| `s35_matchcheck_tests.py` | 1 s | The kernel checks a `match` against the type of its scrutinee AS WRITTEN, and the result type of the match is read off syntax too. |
+| `s35_matchcheck_tests.py` | 1 s | The kernel checks a `match` against the type of its scrutinee AS WRITTEN, and the result type of the match is read off syntax too. An explicit motive must suit the scrutinee and every constructor: its applications are well typed and are types, and its chain of products ends in a sort (F93). |
 | `s39_failfast_tests.py` | 1 s | A comparison that FAILS is decided by what it found, not by normalising both sides. |
 | `s27_fuel_tests.py` | 32 s | The work budget. |
 | `s28_headunfold_tests.py` | 0 s | A definition at the head of a hypothesis or a goal is unfolded ON SYNTAX, so that its arguments stay as the author wrote them. |
@@ -64,14 +64,14 @@ Times are seconds on the 2-core box with two gates at a time (the last full run,
 | `s6_logic_tests.py` | 1 s | The logical vocabulary (F7) with a shape probe per connective, and the F5 shape (elimination over a lambda predicate). |
 | `s6_f6_tests.py` | 0 s | Induction with a Pi-headed goal, and with an explicit `generalizing` list. The classic case: add (S n) acc = add n (S acc) needs the IH for ALL acc. |
 | `s7_param_tests.py 150 600` | 2 s | The parameter / index distinction (kernel option 'parameters'). Default mode is untouched (the lockstep gates cover it); here the option is ON. |
-| `s8_indep_tests.py 100` | 2 s | The independently written checker against the kernels. |
+| `s8_indep_tests.py 100` | 2 s | The independently written checker against the kernels. It also re-checks the admission of every inductive family (F92) and the applicability of the motive of every `match` (F93), on a corpus of declarations and terms that the kernel accepts and refuses. |
 | `s9_strong_tests.py` | 0 s | F6 probe: strong induction by a BOUNDED PREDICATE (Below P n := True / And (Below P k) (P k)), so the induction hypothesis is a plain proposition, not a forall. |
 | `s10_noconf_tests.py` | 0 s | Injectivity: generated lemmas are accepted by the kernel's CHECKED path and by the independent checker, and they close the goals discrimination cannot. |
 | `s11_eqgen_tests.py` | 1 s | Index generalisation with equations (induct on a hypothesis whose index is a concrete term). |
 | `s12_probe_eq_tests.py 150` | 6 s | Probing protocol x index generalisation (hybrid only; the equation path does not exist in the reference). |
 | `s13_prop_tests.py` | 0 s | `prop_elim`: level 0 is Prop, and an inductive family in Type0 that is not a syntactic subsingleton eliminates only into Prop. |
 | `s14_prop_world_tests.py 600` | 3 s | The Prop/Type world (`prop_elim` + parameters, data in Type1): the library built by tactics in this mode, every global re-checked by the independent checker. |
-| `s15_classical_tests.py 300` | 0 s | Classical logic in the Prop/Type world: the four axioms are the only additions to the trusted base; the derived principles are proved by tactics and re-checked. |
+| `s15_classical_tests.py 300` | 0 s | Classical logic in the Prop/Type world: the four axioms are the only additions to the trusted base; the derived principles are proved by tactics and re-checked. Part C is the exploit of F92: a family with itself in a result index yields a proof of `False` from excluded middle and propositional extensionality when the unchecked entry admits it, and the checked entry refuses the family. |
 | `oracle_gate.py` | 22 s | The self-consistency oracle: random tactic scripts run in lockstep on both kernels and re-checked; the strict fragment must be perfectly clean, and the other distributions may only fail where a documented finding (F12) explains it. |
 
 ### Libraries and decision procedures (`tests/library`)

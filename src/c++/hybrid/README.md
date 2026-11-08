@@ -4,7 +4,7 @@ The trusted core of ITP: a dependently typed kernel in C++23 that admits declara
 
 | file | lines | what |
 |---|---|---|
-| `itp_kernel.hpp` | 7,500 | the kernel: terms, evaluation, conversion, type checker, admission of inductives, recursion and quotients, the tactic engine |
+| `itp_kernel.hpp` | 7,546 | the kernel: terms, evaluation, conversion, type checker, admission of inductives, recursion and quotients, the tactic engine |
 | `itp_bindings.cpp` | 788 | the [nanobind](https://github.com/wjakob/nanobind) module `itp_env_lnl`: the Python class `Kernel` and its helpers |
 
 Build: `make kernel` (or `python3 src/python/build_kernel.py hybrid`) from the root of the repository. It needs a compiler that accepts `-std=c++23` with `std::expected` (g++ 13 or newer; Xcode 16 or newer on macOS) and needs nothing but `nanobind` and the Python headers. About 40 s on two cores. The output is `build/itp_env_lnl*.so`.

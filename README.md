@@ -2,7 +2,7 @@
 
 **An interactive theorem prover with a small trusted kernel.**
 
-ITP is a dependently typed proof assistant in which a 7,500-line C++23 kernel decides what counts as a proof. Everything above it -- tactics, decision procedures, libraries, a bank of olympiad problems -- is untrusted Python that can only *propose* terms. A second type checker, written separately from the typing rules, re-checks whole libraries and single proofs. The code base is tested adversarially: 54 gates (test programs), a catalogue of 1707 mutants (deliberate one-rule breakages of the source that the gates must catch) and a tracker of every defect found so far.
+ITP is a dependently typed proof assistant in which a 7,546-line C++23 kernel decides what counts as a proof. Everything above it -- tactics, decision procedures, libraries, a bank of olympiad problems -- is untrusted Python that can only *propose* terms. A second type checker, written separately from the typing rules, re-checks whole libraries and single proofs. The code base is tested adversarially: 54 gates (test programs), a catalogue of 1726 mutants (deliberate one-rule breakages of the source that the gates must catch) and a tracker of every defect found so far.
 
 ```python
 # from examples/01_prove_with_tactics.py -- `ring` assembles a proof term; the kernel checks it
@@ -121,12 +121,12 @@ audit.dependencies_of_global(w.k, w.gid['twice_eq_add_self'])    # what the theo
                                       |
                                       |  terms, through the nanobind module itp_env_lnl
                                       v
-  trusted       C++23 kernel -- src/c++/hybrid/itp_kernel.hpp (7,500 lines) + itp_bindings.cpp (788 lines)
+  trusted       C++23 kernel -- src/c++/hybrid/itp_kernel.hpp (7,546 lines) + itp_bindings.cpp (788 lines)
                 type checker . admission of inductives, recursion, quotients . conversion by NbE . work budget
                                       |
                                       |  exported terms and declarations (Kernel.dump_raw, Kernel.global_info)
                                       v
-  cross-check   independent checker -- src/python/checker/indep_checker.py (673 lines)
+  cross-check   independent checker -- src/python/checker/indep_checker.py (735 lines)
                 named terms . weak-head normalisation . its own universe, guard and match rules
 ```
 
@@ -145,7 +145,7 @@ ITP does not claim to be proved correct; it claims to be hard to fool, and ships
 * **A small trusted base.** What must be believed for "this proof is correct": the C++ kernel (about 8,300 lines with its bindings), the compiler and the machine. Tactics, decision procedures, libraries, the problem bank and the environment sit outside the boundary by construction; their mistakes cost time, not soundness.
 * **Differential testing.** The previous generation of the kernel is kept byte-identical (`src/c++/reference`, checksums in `SHA256SUMS`). The gates run the same random scripts through both kernels in lockstep and demand the same verdicts, except where a documented finding says the new kernel is deliberately stricter.
 * **Oracles and canaries.** A self-consistency oracle runs random tactic scripts and re-checks every state and every finished proof; its strict fragment must be perfectly clean. Canaries make random attempts at false statements (`False`, `0 = 1`, `forall P, P`, ...) and demand that none is verified.
-* **Mutation testing.** `mutants/` holds 1707 mutants -- each re-breaks one rule of the kernel, a tactic, the checker or the environment in an isolated copy of the tree -- and the gates must fail on each. A mutant that no gate catches is a gap in the tests unless it is listed as an equivalent mutant (22 are); [`mutants/README.md`](mutants/README.md) says what has been run and what survives.
+* **Mutation testing.** `mutants/` holds 1726 mutants -- each re-breaks one rule of the kernel, a tactic, the checker or the environment in an isolated copy of the tree -- and the gates must fail on each. A mutant that no gate catches is a gap in the tests unless it is listed as an equivalent mutant (22 are); [`mutants/README.md`](mutants/README.md) says what has been run and what survives.
 * **Second checker, sanitizers, fuzzing.** Several gates re-check whole libraries with the independent checker; `make sanitize` runs the kernel and bank gates under AddressSanitizer and UBSan; a fuzzer drives the proof environment with random and malformed actions.
 * **A findings log.** [`docs/FINDINGS.md`](docs/FINDINGS.md) records F1-F91, each with its status and the test that fails without the fix.
 * **Fail-closed behaviour.** A spent work budget, an exhausted stack, a nesting bound and an unknown option are all errors, and a spent budget is never read as "no".
