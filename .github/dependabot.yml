@@ -1,0 +1,10 @@
+# The workflows pin each action to a commit (with its version in a comment), so that a moved tag cannot change what runs.
+# Dependabot opens a pull request when a new version of an action comes out; the quick checks of ci.yml run on it.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: ci

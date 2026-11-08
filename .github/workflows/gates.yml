@@ -1,0 +1,324 @@
+# gates.yml -- every gate of tests/gate_registry.py, run in full, and the slow checks that go with them.
+#
+# When: on every push to main that changes more than documents, every Monday, and on demand (Actions -> All gates -> Run workflow).
+#
+#   gates         the registry's gates in six parallel jobs (kernel+libraries, environment, bank, contest proofs, learner, repository+generator)
+#   dataset       make dataset-verify: every recorded proof of data/dataset_v2 is replayed in a fresh engine and checked by the kernel
+#   sanitizers    the kernel gates that can run under AddressSanitizer + UBSan (tools/sanitize.py)
+#   all gates     passes only if every gate in the registry ran, once, and passed, and the other jobs passed
+#
+# The shards are chosen from the registry by the name of the directory below tests/ (kernel, library, ...) or by the name of a gate, so a gate that is
+# added to an existing directory runs without a change here; a gate in a new directory is not in any shard, and "all gates" says so.
+# About half an hour in all, the dataset replay being the longest job; a gate takes about as long as it does on two cores (tests/README.md).  "Re-run failed jobs" runs only the jobs that failed.
+name: All gates
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'paper/**'
+      - 'preprint/**'
+      - 'LICENSE'
+  schedule:
+    - cron: '41 3 * * 1'   # Mondays, 03:41 UTC: also catches a new release of numpy, scipy, nanobind or the compiler that breaks the build
+  workflow_dispatch:
+    inputs:
+      sanitize_all:
+        description: 'Also run make sanitize, the whole default set of tools/sanitize.py under the sanitizers (very long: the slow gates of the bank run several times slower)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gates-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: '1'
+  PYTHONUNBUFFERED: '1'
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  gates:
+    name: gates / ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: ${{ matrix.minutes }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: kernel and libraries
+            slug: kernel-libraries
+            select: kernel library support
+            skip: ''
+            ml: false
+            minutes: 45
+          - name: environment
+            slug: environment
+            select: environment
+            skip: ''
+            ml: false
+            minutes: 45
+          - name: bank
+            slug: bank
+            select: problems
+            skip: s50_proofs_tests.py
+            ml: false
+            minutes: 60
+          - name: contest proofs
+            slug: contest-proofs
+            select: s50_proofs_tests.py
+            skip: ''
+            ml: false
+            minutes: 60
+          - name: learner
+            slug: learner
+            select: learner
+            skip: ''
+            ml: true
+            minutes: 60
+          - name: repository and generator
+            slug: repository-generator
+            select: repo synth
+            skip: ''
+            ml: true
+            minutes: 45
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install numpy, scipy and nanobind (requirements.txt without the optional packages)
+        if: ${{ !matrix.ml }}
+        run: |
+          grep -Ev '^(torch|gymnasium|matplotlib)' requirements.txt > "$RUNNER_TEMP/requirements-core.txt"
+          pip install -r "$RUNNER_TEMP/requirements-core.txt"
+
+      # torch from the CPU index (the default wheel on PyPI carries gigabytes of CUDA libraries that nothing here uses); that wheel if the index fails
+      - name: Install requirements.txt, with the CPU build of torch
+        if: ${{ matrix.ml }}
+        run: |
+          if ! pip install --index-url https://download.pytorch.org/whl/cpu "torch>=2.14"; then
+            echo "::warning::the CPU build of torch could not be installed; using the default wheel of PyPI"
+            pip install "torch>=2.14"
+          fi
+          pip install -r requirements.txt
+
+      - name: Show the toolchain
+        run: |
+          python3 --version
+          g++ --version | sed -n 1p
+          pip list 2>/dev/null | grep -Ei '^(numpy|scipy|nanobind|torch|gymnasium|matplotlib) '
+          nproc
+          free -g | sed -n 1,2p
+
+      - name: Build the hybrid kernel and the frozen reference kernel
+        run: make kernel
+
+      - name: Run the gates of this job
+        env:
+          SELECT: ${{ matrix.select }}
+          SKIP: ${{ matrix.skip }}
+          SLUG: ${{ matrix.slug }}
+        run: |
+          names=$(python3 - <<'PY'
+          import os, sys
+          sys.path.insert(0, 'tests')
+          import gate_registry as R
+          want, skip = os.environ['SELECT'].split(), os.environ['SKIP'].split()
+          cmds = list(R.GATE_CMDS) + list(R.BANK_GATE_CMDS) + list(R.ML_GATE_CMDS) + list(R.REPO_GATE_CMDS) + list(R.SYNTH_GATE_CMDS)
+          names = [os.path.basename(c[0]) for c in cmds
+                   if (c[0].split('/')[0] in want or os.path.basename(c[0]) in want) and os.path.basename(c[0]) not in skip]
+          if not names: sys.exit('no gate selected by: ' + os.environ['SELECT'])
+          print(' '.join(names))
+          PY
+          )
+          echo "gates of this job: $names"
+          # shellcheck disable=SC2086  # the names are separate arguments
+          python3 tests/run_gates.py -j 2 --json "gate-records-$SLUG.jsonl" $names
+
+      - name: Keep the record of each gate (verdict, seconds, tail of the output of a failed gate)
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gate-records-${{ matrix.slug }}
+          path: gate-records-${{ matrix.slug }}.jsonl
+          if-no-files-found: ignore
+          retention-days: 30
+          overwrite: true
+
+  dataset:
+    name: dataset replay
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install numpy, scipy and nanobind (requirements.txt without the optional packages)
+        run: |
+          grep -Ev '^(torch|gymnasium|matplotlib)' requirements.txt > "$RUNNER_TEMP/requirements-core.txt"
+          pip install -r "$RUNNER_TEMP/requirements-core.txt"
+
+      - name: Replay every recorded proof and sub-theorem of data/dataset_v2 in a fresh engine (make dataset-verify)
+        run: make dataset-verify
+
+  sanitizers:
+    name: sanitizers (ASan + UBSan)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install numpy, scipy and nanobind (requirements.txt without the optional packages)
+        run: |
+          grep -Ev '^(torch|gymnasium|matplotlib)' requirements.txt > "$RUNNER_TEMP/requirements-core.txt"
+          pip install -r "$RUNNER_TEMP/requirements-core.txt"
+
+      # the runner's kernel randomises the addresses of mappings with 32 bits, which the address sanitizer of GCC 13 cannot start under
+      - name: Lower the address-space randomisation so that the sanitizer runtime can start
+        run: sudo sysctl -w vm.mmap_rnd_bits=28 || echo "::warning::vm.mmap_rnd_bits could not be set"
+
+      - name: Build the ordinary kernels (tools/sanitize.py copies the reference kernel from build/)
+        run: make kernel
+
+      - name: Run the kernel gates that can run under the sanitizers
+        run: |
+          names=$(python3 - <<'PY'
+          import os, sys
+          sys.path.insert(0, 'tools'); sys.path.insert(0, 'tests')
+          import sanitize
+          import gate_registry as R
+          group = {os.path.basename(c[0]): c[0].split('/')[0] for c in list(R.GATE_CMDS) + list(R.BANK_GATE_CMDS)}
+          run, left_out = sanitize.default_gates()
+          print(' '.join(n for n in run if group[n] in ('kernel', 'support')))
+          PY
+          )
+          echo "gates under the sanitizers: $names"
+          # shellcheck disable=SC2086  # the names are separate arguments
+          python3 tools/sanitize.py $names
+
+  sanitizers-full:
+    name: sanitizers, the whole default set (make sanitize)
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.sanitize_all }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install numpy, scipy and nanobind (requirements.txt without the optional packages)
+        run: |
+          grep -Ev '^(torch|gymnasium|matplotlib)' requirements.txt > "$RUNNER_TEMP/requirements-core.txt"
+          pip install -r "$RUNNER_TEMP/requirements-core.txt"
+
+      - name: Lower the address-space randomisation so that the sanitizer runtime can start
+        run: sudo sysctl -w vm.mmap_rnd_bits=28 || echo "::warning::vm.mmap_rnd_bits could not be set"
+
+      - name: Build the kernels and run the default set under the sanitizers (make sanitize)
+        run: make sanitize
+
+  summary:
+    name: all gates
+    needs: [gates, dataset, sanitizers]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out the repository (for the registry)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download the records of the gates
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: gate-records-*
+          merge-multiple: true
+          path: records
+
+      - name: Every gate of the registry ran once, and the jobs passed
+        env:
+          RESULT_GATES: ${{ needs.gates.result }}
+          RESULT_DATASET: ${{ needs.dataset.result }}
+          RESULT_SANITIZERS: ${{ needs.sanitizers.result }}
+        run: |
+          python3 - <<'PY'
+          import glob, json, os, sys
+          sys.path.insert(0, 'tests')
+          import gate_registry as R
+          cmds = list(R.GATE_CMDS) + list(R.BANK_GATE_CMDS) + list(R.ML_GATE_CMDS) + list(R.REPO_GATE_CMDS) + list(R.SYNTH_GATE_CMDS)
+          expected = sorted(os.path.basename(c[0]) for c in cmds)
+          records = []
+          for f in sorted(glob.glob('records/*.jsonl')):
+              with open(f) as fh:
+                  records += [json.loads(line) for line in fh if line.strip()]
+          seen = [r['gate'] for r in records]
+          problems = []
+          missing = sorted(set(expected) - set(seen))
+          if missing: problems.append('registered gates that did not run: ' + ', '.join(missing))
+          unknown = sorted(set(seen) - set(expected))
+          if unknown: problems.append('gates that ran and are not in the registry: ' + ', '.join(unknown))
+          twice = sorted({g for g in seen if seen.count(g) > 1})
+          if twice: problems.append('gates that ran in more than one job: ' + ', '.join(twice))
+          for r in records:
+              if not r['ok']: problems.append('FAILED %s: %s' % (r['gate'], r['verdict']))
+          jobs = [('gates', os.environ['RESULT_GATES']), ('dataset replay', os.environ['RESULT_DATASET']), ('sanitizers', os.environ['RESULT_SANITIZERS'])]
+          for name, result in jobs:
+              if result != 'success': problems.append('job "%s": %s' % (name, result))
+          out = ['## All gates', '',
+                 '%d of %d registered gates ran and %d passed.  Jobs: %s.' % (len(set(seen) & set(expected)), len(expected), sum(1 for r in records if r['ok']), ', '.join('%s %s' % j for j in jobs)), '']
+          if problems: out += ['**Problems**', ''] + ['* ' + p for p in problems] + ['']
+          out += ['| gate | directory | result | seconds |', '|---|---|---|---:|']
+          for r in sorted(records, key=lambda r: (r['group'], r['gate'])):
+              out.append('| `%s` | %s | %s | %.0f |' % (r['gate'], r['group'], 'pass' if r['ok'] else '**FAIL**', r['seconds']))
+          text = '\n'.join(out) + '\n'
+          print(text)
+          if os.environ.get('GITHUB_STEP_SUMMARY'):
+              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as fh: fh.write(text)
+          for p in problems: print('::error::' + p)
+          sys.exit(1 if problems else 0)
+          PY

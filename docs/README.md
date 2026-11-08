@@ -10,7 +10,7 @@ Start with the [main README](../README.md); these documents go deeper. The first
 | [`ACTIONS.md`](ACTIONS.md) | the proof environment's action language: goals as data, the 21 kinds of action, the typed term builder, the portable form, the recorder |
 | [`BANK.md`](BANK.md) | the problem bank: what a problem is, the regimes, how a formal statement is checked against the problem's words (`semantic.py`), reference proofs, how to add a problem |
 | [`GENERATOR.md`](GENERATOR.md) | the synthetic theorem generator: what it makes, how, how the data are checked |
-| [`FINDINGS.md`](FINDINGS.md) | the tracker of findings F1 to F91 -- bugs, weaknesses and design questions found by testing -- each with its status and the test that covers it ([`findings_tags.tsv`](findings_tags.tsv) is the machine-readable index) |
+| [`FINDINGS.md`](FINDINGS.md) | the tracker of findings F1 to F93 -- bugs, weaknesses and design questions found by testing -- each with its status and the test that covers it ([`findings_tags.tsv`](findings_tags.tsv) is the machine-readable index) |
 | [`ROADMAP.md`](ROADMAP.md) | what is missing between this system and olympiad-level and undergraduate mathematics, in the order the problems need it; a judgment, not a measurement |
 
 Other places to look: [`tests/README.md`](../tests/README.md) lists every gate and how to run it, [`mutants/README.md`](../mutants/README.md) describes the mutation testing, [`src/c++/hybrid/README.md`](../src/c++/hybrid/README.md) the kernel's implementation, and [`examples/repros`](../examples/repros/README.md) reproduces three of the findings.

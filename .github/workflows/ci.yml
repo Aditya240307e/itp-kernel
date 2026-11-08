@@ -1,0 +1,102 @@
+# ci.yml -- what runs on every push to main and on every pull request.
+#
+#   build both kernels  ->  smoke test  ->  the layout gate (S45)  ->  the mutant catalogues still apply
+#   ->  the gates of the kernel, the libraries and the support harness: the lockstep runs against the frozen
+#       reference kernel, the independent checker, the tactics, the libraries.
+#
+# About ten minutes.  The slow gates (environment, bank, contest proofs, learner, examples, generator), the replay of
+# the dataset and the run under the sanitizers are in gates.yml.  Every command below is one you can run yourself:
+# see "Continuous integration" in README.md.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: '1'
+  PYTHONUNBUFFERED: '1'
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  checks:
+    name: build, layout, catalogues, kernel and library gates
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      # the prover, the libraries and these gates need numpy, scipy and nanobind only; torch, gymnasium and matplotlib are for the learner (gates.yml)
+      - name: Install numpy, scipy and nanobind (requirements.txt without the optional packages)
+        run: |
+          grep -Ev '^(torch|gymnasium|matplotlib)' requirements.txt > "$RUNNER_TEMP/requirements-core.txt"
+          pip install -r "$RUNNER_TEMP/requirements-core.txt"
+
+      - name: Show the toolchain
+        run: |
+          python3 --version
+          g++ --version | sed -n 1p
+          pip list 2>/dev/null | grep -Ei '^(numpy|scipy|nanobind) '
+
+      - name: Build the hybrid kernel and the frozen reference kernel
+        run: make kernel
+
+      - name: Smoke test (six kernel gates and example 01)
+        run: make gates-quick
+
+      - name: Layout gate (S45)
+        run: python3 tests/run_gates.py -j 1 s45_layout_tests.py
+
+      - name: Every mutant of the catalogues still applies to the code
+        run: make mutants-check
+
+      - name: Gates of the kernel, the libraries and the support harness
+        env:
+          SELECT: kernel library support
+        run: |
+          names=$(python3 - <<'PY'
+          import os, sys
+          sys.path.insert(0, 'tests')
+          import gate_registry as R
+          want = os.environ['SELECT'].split()
+          cmds = list(R.GATE_CMDS) + list(R.BANK_GATE_CMDS) + list(R.ML_GATE_CMDS) + list(R.REPO_GATE_CMDS) + list(R.SYNTH_GATE_CMDS)
+          names = [os.path.basename(c[0]) for c in cmds if c[0].split('/')[0] in want or os.path.basename(c[0]) in want]
+          if not names: sys.exit('no gate selected by: ' + os.environ['SELECT'])
+          print(' '.join(names))
+          PY
+          )
+          echo "gates: $names"
+          # shellcheck disable=SC2086  # the names are separate arguments
+          python3 tests/run_gates.py -j 2 --json gate-records-ci.jsonl $names
+
+      - name: Keep the record of each gate (verdict, seconds, tail of the output of a failed gate)
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gate-records-ci
+          path: gate-records-ci.jsonl
+          if-no-files-found: ignore
+          retention-days: 14
+          overwrite: true

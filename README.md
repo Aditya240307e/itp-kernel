@@ -1,5 +1,7 @@
 # ITP
 
+[![CI](https://github.com/Aditya240307e/itp-kernel/actions/workflows/ci.yml/badge.svg)](https://github.com/Aditya240307e/itp-kernel/actions/workflows/ci.yml) [![All gates](https://github.com/Aditya240307e/itp-kernel/actions/workflows/gates.yml/badge.svg)](https://github.com/Aditya240307e/itp-kernel/actions/workflows/gates.yml)
+
 **An interactive theorem prover with a small trusted kernel.**
 
 ITP is a dependently typed proof assistant in which a 7,546-line C++23 kernel decides what counts as a proof. Everything above it -- tactics, decision procedures, libraries, a bank of olympiad problems -- is untrusted Python that can only *propose* terms. A second type checker, written separately from the typing rules, re-checks whole libraries and single proofs. The code base is tested adversarially: 54 gates (test programs), a catalogue of 1726 mutants (deliberate one-rule breakages of the source that the gates must catch) and a tracker of every defect found so far.
@@ -147,7 +149,7 @@ ITP does not claim to be proved correct; it claims to be hard to fool, and ships
 * **Oracles and canaries.** A self-consistency oracle runs random tactic scripts and re-checks every state and every finished proof; its strict fragment must be perfectly clean. Canaries make random attempts at false statements (`False`, `0 = 1`, `forall P, P`, ...) and demand that none is verified.
 * **Mutation testing.** `mutants/` holds 1726 mutants -- each re-breaks one rule of the kernel, a tactic, the checker or the environment in an isolated copy of the tree -- and the gates must fail on each. A mutant that no gate catches is a gap in the tests unless it is listed as an equivalent mutant (22 are); [`mutants/README.md`](mutants/README.md) says what has been run and what survives.
 * **Second checker, sanitizers, fuzzing.** Several gates re-check whole libraries with the independent checker; `make sanitize` runs the kernel and bank gates under AddressSanitizer and UBSan; a fuzzer drives the proof environment with random and malformed actions.
-* **A findings log.** [`docs/FINDINGS.md`](docs/FINDINGS.md) records F1-F91, each with its status and the test that fails without the fix.
+* **A findings log.** [`docs/FINDINGS.md`](docs/FINDINGS.md) records F1-F93, each with its status and the test that fails without the fix.
 * **Fail-closed behaviour.** A spent work budget, an exhausted stack, a nesting bound and an unknown option are all errors, and a spent budget is never read as "no".
 
 What this is not: a verification of the kernel. Soundness is *tested*, not proved, and the documents say "tested" wherever they mean it. The two checkers implement the same rules, so a flaw in the rules themselves would not show up by comparing them. The statement audit (`make audit`) compares formal statements with their intended meaning on a box of small values -- evidence of faithfulness, not a proof of it.
@@ -165,6 +167,23 @@ make sanitize          # kernel and bank gates under ASan + UBSan (long)
 ```
 
 [`tests/README.md`](tests/README.md) lists every gate with its measured time and what it protects.
+
+## Continuous integration
+
+GitHub Actions runs the gates, so a change that breaks one is seen the same hour. The workflows are in [`.github/workflows/`](.github/workflows/); the commands in them are the ones above, written out in the workflow and not hidden in a script.
+
+| workflow | when | what it runs |
+|---|---|---|
+| [`ci.yml`](.github/workflows/ci.yml) | every push to `main`, every pull request | builds both kernels; `make gates-quick`; the layout gate S45; `make mutants-check`; the gates of the kernel, the libraries and the support harness (the lockstep against the reference kernel, the independent checker, the tactics, the libraries). About ten minutes |
+| [`gates.yml`](.github/workflows/gates.yml) | every push to `main` that changes more than documents, every Monday, and on demand | every gate of `tests/gate_registry.py`, in six parallel jobs; the replay of the dataset (`make dataset-verify`); the kernel gates under AddressSanitizer and UBSan; and a last job that passes only if each gate of the registry ran once and passed. About half an hour |
+| [`mutants.yml`](.github/workflows/mutants.yml) | on demand | the mutants whose names start with the prefixes you give (`mutants/mutate.py`), and optionally the faults injected into the tools that make the evidence (`mutants/check_tools.py`). Minutes to hours; it fails if a mutant survives that is not documented as equivalent |
+
+* The jobs run on `ubuntu-24.04` with Python 3.13 and g++ 13, the setup the gates were developed on. The jobs of the learner and of the examples install the CPU build of `torch`; the others need only `numpy`, `scipy` and `nanobind`, as `requirements.txt` says.
+* The summary page of an "All gates" run lists every gate with its verdict and its seconds. Each job also keeps the record of its gates as an artifact (`gate-records-*`: one JSON line per gate, with the tail of the output of a gate that failed).
+* The shards are chosen from the registry by the directory of a gate below `tests/`, so a new gate in an existing directory runs without a change to the workflow; the last job names any registered gate that no job ran.
+* The Monday run also notices a build that a new release of `numpy`, `scipy`, `nanobind` or the compiler has broken.
+* To make a pass obligatory for a pull request, protect `main` and require the checks `build, layout, catalogues, kernel and library gates` (CI) and `all gates` (All gates).
+* The actions are pinned to commits, with their versions in comments; Dependabot proposes the updates.
 
 ## The Python environment
 

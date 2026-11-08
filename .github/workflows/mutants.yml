@@ -1,0 +1,138 @@
+# mutants.yml -- the mutation runs, on demand (Actions -> Mutants -> Run workflow).  Nothing here runs by itself: the catalogue of mutants is run by
+# mutants/mutate.py, which re-breaks one rule of the system at a time in a copy of the tree and checks that the gates fail; a run of the whole catalogue takes many hours.
+#
+#   mutants       the mutants whose names start with one of the prefixes (M83, W1, GR, ...); no prefix at all runs the whole catalogue, and a single job of GitHub stops after six hours.
+#                 It fails if a mutant survives that is not documented as equivalent.  The defaults are the example of mutants/README.md: the mutant M83 against two gates, a few minutes;
+#                 with no gate named, every gate of the driver runs against each mutant, after one run of all of them on an unmutated copy.
+#   tool faults   (optional) faults injected into the tools that make the evidence (the soundness folder, the statement audit, the number checker, the identity of the code):
+#                 the gate of each tool must fail for every one (mutants/check_tools.py, about 50 minutes).
+#
+# The record of each finished mutant (name, status, the gates that caught it, the digest of the tree) is kept as an artifact: mutants.jsonl.
+name: Mutants
+
+on:
+  workflow_dispatch:
+    inputs:
+      prefixes:
+        description: 'Prefixes of the mutant names to run, separated by spaces (M83 W1 GR ...); empty: the whole catalogue (many hours)'
+        type: string
+        default: 'M83'
+      only_gates:
+        description: 'Run only these gates against each mutant, by file name, separated by commas; empty: every gate of the mutation driver, which first runs once on an unmutated copy (about an hour)'
+        type: string
+        default: 's2_tests.py,s16_quot_tests.py'
+      parallel:
+        description: 'Mutants at once (each C++ mutant is rebuilt in its own copy of the tree, at most two builds at a time)'
+        type: string
+        default: '2'
+      tool_faults:
+        description: 'Also inject faults into the tools that make the evidence (mutants/check_tools.py)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: '1'
+  PYTHONUNBUFFERED: '1'
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  mutants:
+    name: mutants
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install numpy, scipy and nanobind (requirements.txt without the optional packages)
+        run: |
+          grep -Ev '^(torch|gymnasium|matplotlib)' requirements.txt > "$RUNNER_TEMP/requirements-core.txt"
+          pip install -r "$RUNNER_TEMP/requirements-core.txt"
+
+      - name: Every mutant of the catalogues applies to the code
+        run: make mutants-check
+
+      - name: Build the hybrid kernel and the frozen reference kernel
+        run: make kernel
+
+      - name: Run the mutants
+        env:
+          PREFIXES: ${{ inputs.prefixes }}
+          ONLY_GATES: ${{ inputs.only_gates }}
+          PARALLEL: ${{ inputs.parallel }}
+          MUT_VERBOSE: '1'
+        run: |
+          if [ -n "$ONLY_GATES" ]; then export MUT_ONLY="$ONLY_GATES"; fi
+          echo "prefixes: '${PREFIXES:-(all)}', gates: '${MUT_ONLY:-(all)}', $PARALLEL at once"
+          # shellcheck disable=SC2086  # the prefixes are separate arguments
+          python3 mutants/mutate.py --jobs "$PARALLEL" --json mutants.jsonl $PREFIXES
+
+      - name: Keep the record of each mutant
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mutants-record
+          path: mutants.jsonl
+          if-no-files-found: ignore
+          retention-days: 90
+          overwrite: true
+
+  tool-faults:
+    name: faults in the tools that make the evidence
+    if: ${{ inputs.tool_faults }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      # the gate of the statement audit needs a small dataset that S51 builds, so this job installs the learner's packages too (CPU build of torch)
+      - name: Install requirements.txt, with the CPU build of torch
+        run: |
+          if ! pip install --index-url https://download.pytorch.org/whl/cpu "torch>=2.14"; then
+            echo "::warning::the CPU build of torch could not be installed; using the default wheel of PyPI"
+            pip install "torch>=2.14"
+          fi
+          pip install -r requirements.txt
+
+      - name: Build the hybrid kernel and the frozen reference kernel
+        run: make kernel
+
+      - name: Inject the faults, one at a time, and run the gate of each tool
+        env:
+          PARALLEL: ${{ inputs.parallel }}
+        run: python3 mutants/check_tools.py --jobs "$PARALLEL" --json tool-faults.jsonl
+
+      - name: Keep the record of each fault
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tool-faults-record
+          path: tool-faults.jsonl
+          if-no-files-found: ignore
+          retention-days: 90
+          overwrite: true
