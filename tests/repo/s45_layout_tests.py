@@ -217,7 +217,7 @@ def sec_G():
 
 
 # ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ H. layout
-REQUIRED_FILES = ['README.md', 'Makefile', 'requirements.txt', '.gitignore',
+REQUIRED_FILES = ['README.md', 'LICENSE', 'Makefile', 'requirements.txt', '.gitignore',
                   'src/c++/hybrid/itp_kernel.hpp', 'src/c++/hybrid/itp_bindings.cpp', 'src/c++/reference/itp_kernel.hpp', 'src/c++/reference/itp_bindings.cpp', 'src/c++/reference/README.md',
                   'src/python/itp_paths.py', 'src/python/build_kernel.py',
                   'tests/README.md', 'tests/run_gates.py', 'tests/gate_registry.py', 'mutants/README.md', 'mutants/mutate.py', 'mutants/catalogue.py', 'legacy/README.md', 'tools/sanitize.py', 'tools/make_dist.py', 'tools/check_env.py', 'tools/check_numbers.py',
@@ -228,7 +228,7 @@ REQUIRED_FILES = ['README.md', 'Makefile', 'requirements.txt', '.gitignore',
                   'data/dataset_v2/bank.json', 'data/dataset_v2/splits.json', 'data/dataset_v2/library.json', 'data/dataset_v2/manifest.json', 'data/dataset_v2/DATASET_CARD.md']
 REQUIRED_DIRS = ['src/python/authoring', 'src/python/checker', 'src/python/library', 'src/python/environment', 'src/python/problems', 'src/python/learner', 'src/python/synth', 'src/python/experiments', 'scripts', 'paper',
                  'tests/kernel', 'tests/library', 'tests/environment', 'tests/problems', 'tests/learner', 'tests/synth', 'tests/repo', 'tests/support', 'tests/golden', 'examples', 'data/results']
-TOP_LEVEL = {'README.md', 'Makefile', 'requirements.txt', '.gitignore', '.git', 'build', 'dist', 'artifacts', 'runs', 'results', 'src', 'tests', 'mutants', 'examples', 'docs', 'data', 'legacy', 'tools', 'scripts', 'paper', 'preprint', '.venv',
+TOP_LEVEL = {'README.md', 'LICENSE', 'Makefile', 'requirements.txt', '.gitignore', '.git', 'build', 'dist', 'artifacts', 'runs', 'results', 'src', 'tests', 'mutants', 'examples', 'docs', 'data', 'legacy', 'tools', 'scripts', 'paper', 'preprint', '.venv',
              'MANIFEST.sha256', 'RELEASE.txt'}                      # (runs: where the experiments write, untracked; the last two: what tools/make_dist.py adds to a release archive, hence present in an extracted one)
 
 

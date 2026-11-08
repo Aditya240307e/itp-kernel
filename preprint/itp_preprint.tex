@@ -33,9 +33,8 @@
 % ---------------------------------------------------------------------------------------------------- who
 \newcommand{\authorname}{Aditya Ekbote}
 \newcommand{\authoraffil}{MIT World Peace University}
-\newcommand{\reporturl}{[repository URL]}
-\newcommand{\reportdoi}{[DOI]}
-\newcommand{\artifactlicense}{[licence]}
+\newcommand{\reporturl}{\url{https://github.com/Aditya240307e/itp-kernel}}
+\newcommand{\reportdoi}{DOI~\href{https://doi.org/10.5281/zenodo.24047732}{10.5281/zenodo.24047732}}
 % the report carries no date: none on the title page, none in the metadata of the PDF (and no time-based file id, so the same sources give the same bytes)
 \pdfinfoomitdate=1 \pdftrailerid{}
 
@@ -2031,7 +2030,7 @@ And the environment should be used: to train and to compare learners on the bank
 
 \subsection*{Availability and reproducibility}\label{sec:availability}
 
-The code, the dataset of the problem bank, the sources of this report and the scripts that produced its numbers are in one repository at commit \mCommit{} (\reporturl); a snapshot is archived with the report (\reportdoi), under the licence \artifactlicense.
+The code, the dataset of the problem bank, the sources of this report and the scripts that produced its numbers are in one repository at commit \mCommit{} (\reporturl); a snapshot is archived with the report (\reportdoi).
 The directory \code{preprint/} of the repository holds the sources of the report (\code{src/}), the bibliography, the measurement scripts, the listings and their outputs, and the raw measurements as JSON and logs; \code{python3 -I preprint/build.py} regenerates every macro that holds a number, and then the PDF, from them.
 The scripts and their costs on the machine of \cref{sec:measure} are: \code{measure.py}, the library chain, its re-check by the kernel and by the independent checker, and the micro-benchmarks (about three minutes); \code{measure\_check.py}, the cost of trusting a sample of reference proofs (about ten minutes, 2\,GB); \code{src/python/experiments/exp\_bench.py}, the latency and the throughput of the environment (a few minutes after the world is built); \code{measure\_assembler.py}, the round trip of the policy interface; \code{measure\_gates.py}, the gates named in \cref{tab:testing} and the sanitizer run; and \code{run\_listings.py}, the listings of \cref{sec:usage} and \cref{app:deviations} (those in Lean need a Lean~4).
 The code, the dataset and the world are identified by digests so that a rerun can be compared with ours: the digest of the directory of the kernel's sources (\code{src/c++/hybrid}) is \code{\kernelDigest}, that of the names and types of the \libGlobals{} globals of the library world is \code{\worldDigestShort\ldots}, and that of the outcomes of the benchmark tasks is \code{\detDigest}.

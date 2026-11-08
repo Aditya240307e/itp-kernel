@@ -24,5 +24,5 @@ Working documents for the machine-learning side of the repository (the learner, 
 | [`ARCHITECTURE_RL.md`](ARCHITECTURE_RL.md) | a design note: how a learner for this environment could be structured (imitation, search, expert iteration, hindsight, a manager/worker split) |
 | [`TRAINING.md`](TRAINING.md) | the training pipeline and measurement protocol |
 | [`EXPERIMENTS.md`](EXPERIMENTS.md) | the experiment matrix, the scripts that run it and the outputs |
-| [`PAPER_PLAN.md`](PAPER_PLAN.md), [`AUTHOR_GUIDE.md`](AUTHOR_GUIDE.md), [`PRIOR_WORK.md`](PRIOR_WORK.md) | notes towards writing about the project |
+| [`PAPER_PLAN.md`](PAPER_PLAN.md), [`PRIOR_WORK.md`](PRIOR_WORK.md) | notes towards writing about the project |
 | [`SECOND_READER.md`](SECOND_READER.md) and [`statement_reviews.tsv`](statement_reviews.tsv) | the handout for a person who reads formal statements against their problems, and the ledger such readings are recorded in (empty so far) |

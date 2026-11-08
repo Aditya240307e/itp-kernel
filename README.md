@@ -217,3 +217,7 @@ Not needed to use the prover, and listed so that nothing in the tree is a surpri
 ## Documentation
 
 [`docs/README.md`](docs/README.md) is the index. Start with [`docs/ACTIONS.md`](docs/ACTIONS.md) (the action language), [`docs/BANK.md`](docs/BANK.md) (what makes a formal statement *the* problem, where each text comes from, how duplicates and splits are handled), [`docs/KERNEL_DESIGN.md`](docs/KERNEL_DESIGN.md) (the kernel's design log) and [`docs/FINDINGS.md`](docs/FINDINGS.md).
+
+## Licence
+
+The code, the data and the documentation are released under the [Apache License 2.0](LICENSE). The technical report in [`preprint/`](preprint/README.md) is also archived on Zenodo ([10.5281/zenodo.24047732](https://doi.org/10.5281/zenodo.24047732)) under CC BY 4.0.
